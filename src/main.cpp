@@ -51,6 +51,7 @@ const char wifiInitialApPassword[] = "hammelhammel";
 #define STATUS_PIN LED_BUILTIN
 
 int m_i = 0;
+int m_i_max = 0;
 
 #define TELEGRAM_LENGTH 700
 
@@ -193,6 +194,28 @@ bool prefix_suffix_correct(){
   && TELEGRAM[prefix+3] == 0x1B) return true;
   else return false;
 }
+bool prefix_suffix_correct2(){
+  int prefix = atoi(telegram_prefix);
+  int suffix = atoi(telegram_suffix);
+  
+
+  if(suffix == 0)
+  {
+    Serial.println("Suffix Must not be 0");
+    return false;
+  }
+
+  if(TELEGRAM[0] == 0x1B
+  && TELEGRAM[1] == 0x1B
+  && TELEGRAM[2] == 0x1B
+  && TELEGRAM[3] == 0x1B
+  && TELEGRAM[m_i_max-7] == 0x1B
+  && TELEGRAM[m_i_max-6] == 0x1B
+  && TELEGRAM[m_i_max-5] == 0x1B
+  && TELEGRAM[m_i_max-4] == 0x1B
+  && TELEGRAM[m_i_max-3] == 0x1A) return true;
+  else return false;
+}
 
 int32_t get_meter_value_from_telegram()
 {
@@ -294,6 +317,8 @@ void receive_telegram(){
     //Serial.println(millis());
     m_i++;
   
+    m_i_max = max(m_i_max, m_i);
+
     if(m_i >= TELEGRAM_LENGTH) {
       m_i = 0;
       Serial.println("ERROR Buffer Size exceeded");
@@ -311,20 +336,32 @@ void reset_telegram()
   //Serial.println(m_i);
   //Serial.println(get_meter_value_from_telegram(atoi(telegram_offset),atoi(telegram_length)));
   //Serial.println(" reset buffer");
+  bool transfer = false;
+  if(BUFFER[0] != 0x00 && BUFFER[1] != 0x00 && BUFFER[2] != 0x00) {
+    Serial.print(millis());
+    Serial.println(" Transfering Buffer");
+    
+     transfer = true; 
+     }
   
     for(int q = 0; q < TELEGRAM_LENGTH; q++)
     {
       //Serial.println(q + " " + BUFFER[q]);
-      TELEGRAM[q] = BUFFER[q];// cpoy received message, so that only a complete telegram is processed
+      if(transfer) TELEGRAM[q] = BUFFER[q];// cpoy received message, so that only a complete telegram is processed
       BUFFER[q] = 0;
     }
-    m_i = 0;
-    timestamp_telegram = last_serial;
-    last_serial = millis();
+    if(transfer) Serial.println(get_meter_value_from_telegram());
+
+  
+  m_i = 0;
+  m_i_max = 0;
+  timestamp_telegram = last_serial;
+  last_serial = millis();
+  // Serial.println("meter " + get_meter_value_from_telegram());
 }
 void handle_telegram(){
   receive_telegram();
-  if(millis() - last_serial > 3700) reset_telegram();
+  if(millis() - last_serial > 500) reset_telegram();
 }
 int last_call = 0;
 void call_backend(){
