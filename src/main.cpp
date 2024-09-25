@@ -127,6 +127,7 @@ void setup()
   group2.addItem(&backend_intervall_object);
 
   iotWebConf.setStatusPin(STATUS_PIN);
+  iotWebConf.disableBlink();
   iotWebConf.setConfigPin(CONFIG_PIN);
   iotWebConf.addSystemParameter(&API_endpoint);
   iotWebConf.addParameterGroup(&group1);
