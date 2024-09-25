@@ -85,6 +85,7 @@ char telegram_suffix[NUMBER_LEN];
 
 
 char backend_endpoint[STRING_LEN];
+char led_blink[STRING_LEN];
 char backend_token[STRING_LEN];
 char backend_intervall[NUMBER_LEN];
 char backend_ID[ID_LEN];
@@ -102,6 +103,7 @@ IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Pr
 IotWebConfNumberParameter telegram_suffix_object = IotWebConfNumberParameter("Suffix Begin", "telegram_suffix", telegram_suffix, NUMBER_LEN, "100", "1..TELEGRAM_LENGTH", "min='100' max='TELEGRAM_LENGTH' step='1'");
 
 IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
+IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
 IotWebConfNumberParameter backend_intervall_object = IotWebConfNumberParameter("backend intervall", "backend_intervall", backend_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
@@ -125,9 +127,11 @@ void setup()
   group2.addItem(&backend_ID_object);
   group2.addItem(&backend_token_object);
   group2.addItem(&backend_intervall_object);
+  group2.addItem(&led_blink_object);
 
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
+  
   iotWebConf.addSystemParameter(&API_endpoint);
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
@@ -384,13 +388,13 @@ void call_backend(){
 Serial.println("json " + json);
   if (doc["meter_value"] != -2) 
   { 
-    Serial.println("Connected to Server sunzilla.de");
+    Serial.println("Connected to Backend @ " + String(backend_endpoint));
     // "/hz/n3.php?meter_value=" + String(meter_value) + "&timestamp_client=" + String(timeClient.getEpochTime());
     //client3.println("GET /hz/n3.php?meter_value=" + String(meter_value) + "&wifi=" + String(wifi_reconnect) + "&uptime=" + String(last_serial/*uptime*/) + "&last_sent=" + String((millis() - last_sent)/1000) + "&timestamp_client=" + String(timeClient.getEpochTime()) +"&temp="+String(Temp_sensors.getTempCByIndex(0))+" HTTP/1.1\r\nHost: sunzilla.de\r\n\r\n");
     ///Serial << "status: " <<client.status();
     // Send request
     HTTPClient http;
-    http.begin(clientSecure, "https://sunzilla.de/hz/v1/");
+    http.begin(clientSecure, backend_endpoint);
     http.POST(json);
 
     // Read response
@@ -409,6 +413,8 @@ void loop()
 
   handle_telegram();
   
+  if(led_blink_object.isChecked()) iotWebConf.enableBlink();
+  else iotWebConf.disableBlink();
 
    if(millis() - last_call > 1000*max(5, atoi(backend_intervall)))
     {
@@ -446,6 +452,8 @@ void handleRoot()
 
   s += "<li>Backend Endpoint: ";
   s += backend_endpoint;
+  s += "<li>LED blink: ";
+  s += led_blink;
   s += "<li>Backend ID: ";
   s += backend_ID;
   s += "<li>Backend Token: ";
