@@ -39,7 +39,7 @@ const char wifiInitialApPassword[] = "hammelhammel";
 #define NUMBER_LEN 32
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "ar"
+#define CONFIG_VERSION "1003"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
@@ -66,10 +66,20 @@ int m_i_max = 0;
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 
+
+// First we include the libraries
+#include <OneWire.h> 
+#include <DallasTemperature.h>
+#define ONE_WIRE_BUS 4 
+OneWire oneWire(ONE_WIRE_BUS); 
+DallasTemperature Temp_sensors(&oneWire);
+
 SoftwareSerial mySerial(D5, D6); // RX, TX
 
 // -- Method declarations.
 void handleRoot();
+void showTelegram();
+void showTemperature();
 // -- Callback methods.
 void configSaved();
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
@@ -77,7 +87,8 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper);
 DNSServer dnsServer;
 WebServer server(80);
 
-char API_endpointValue[STRING_LEN];
+float temperature;
+
 char telegram_offset[NUMBER_LEN];
 char telegram_length[NUMBER_LEN];
 char telegram_prefix[NUMBER_LEN];
@@ -86,6 +97,9 @@ char telegram_suffix[NUMBER_LEN];
 
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
+char mystrom_PV[STRING_LEN];
+char mystrom_PV_IP[STRING_LEN];
+char temperature_checkbock[STRING_LEN];
 char backend_token[STRING_LEN];
 char backend_intervall[NUMBER_LEN];
 char backend_ID[ID_LEN];
@@ -94,7 +108,7 @@ char backend_ID[ID_LEN];
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
-IotWebConfTextParameter API_endpoint = IotWebConfTextParameter("Nachwelt", "API_endpoint", API_endpointValue, STRING_LEN);
+
 IotWebConfParameterGroup group1 = IotWebConfParameterGroup("group1", "Telegram Param");
 IotWebConfParameterGroup group2 = IotWebConfParameterGroup("group2", "Backend Config");
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
@@ -107,6 +121,10 @@ IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED 
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
 IotWebConfNumberParameter backend_intervall_object = IotWebConfNumberParameter("backend intervall", "backend_intervall", backend_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+
+IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
+IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
+IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 
 WiFiClient client;
 WiFiClientSecure clientSecure;
@@ -128,11 +146,13 @@ void setup()
   group2.addItem(&backend_token_object);
   group2.addItem(&backend_intervall_object);
   group2.addItem(&led_blink_object);
+  group2.addItem(&mystrom_PV_object);
+  group2.addItem(&mystrom_PV_IP_object);
+  group2.addItem(&temperature_object);
 
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
   
-  iotWebConf.addSystemParameter(&API_endpoint);
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
 
@@ -142,9 +162,13 @@ void setup()
 
   // -- Initializing the configuration.
   iotWebConf.init();
+  if(led_blink_object.isChecked()) iotWebConf.enableBlink();
+  else iotWebConf.disableBlink();
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
+  server.on("/showTelegram", showTelegram);
+  server.on("/showTemperature", showTemperature);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.on("/restart", []{ ESP.restart(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
@@ -248,13 +272,17 @@ int32_t get_meter_value_from_telegram()
 int last_serial;
 
 int32_t get_meter_value_PV() {
-  return 0;
+  if(!mystrom_PV_object.isChecked())
+  {
+    return 0;
+  }
+  
   Serial.println(F("Connecting..."));
 
   // Connect to HTTP server
 
-  client.setTimeout(10000);
-  if (!client.connect("192.168.188.111", 80)) {
+  client.setTimeout(1000);
+  if (!client.connect(mystrom_PV_IP, 80)) {
     Serial.println(F("Connection failed"));
     return -1;
   }
@@ -265,7 +293,8 @@ int32_t get_meter_value_PV() {
 
   // Send HTTP request
   client.println(F("GET /report HTTP/1.0"));
-  client.println(F("Host: 192.168.188.111"));
+  client.print(F("Host: "));
+  client.println(mystrom_PV_IP);
   client.println(F("Connection: close"));
   if (client.println() == 0) {
     Serial.println(F("Failed to send request"));
@@ -371,6 +400,12 @@ int last_call = 0;
 void call_backend(){
   
   Serial.println("call backend");
+
+  if(temperature_object.isChecked()) 
+    {
+    Temp_sensors.requestTemperatures();
+    temperature = Temp_sensors.getTempCByIndex(0);
+    } 
   Serial.println("delay " + millis() - timestamp_telegram);
   Serial.println("meter " + get_meter_value_from_telegram());
   
@@ -383,16 +418,14 @@ void call_backend(){
   doc["meter_value_PV"] = get_meter_value_PV();
   doc["ID"] = backend_ID;
   doc["token"] = backend_token;
+  doc["temperature"] = temperature;
   String json;
   serializeJson(doc, json);
 Serial.println("json " + json);
   if (doc["meter_value"] != -2) 
   { 
     Serial.println("Connected to Backend @ " + String(backend_endpoint));
-    // "/hz/n3.php?meter_value=" + String(meter_value) + "&timestamp_client=" + String(timeClient.getEpochTime());
-    //client3.println("GET /hz/n3.php?meter_value=" + String(meter_value) + "&wifi=" + String(wifi_reconnect) + "&uptime=" + String(last_serial/*uptime*/) + "&last_sent=" + String((millis() - last_sent)/1000) + "&timestamp_client=" + String(timeClient.getEpochTime()) +"&temp="+String(Temp_sensors.getTempCByIndex(0))+" HTTP/1.1\r\nHost: sunzilla.de\r\n\r\n");
-    ///Serial << "status: " <<client.status();
-    // Send request
+    
     HTTPClient http;
     http.begin(clientSecure, backend_endpoint);
     http.POST(json);
@@ -410,18 +443,18 @@ void loop()
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
   ArduinoOTA.handle();
+  
 
   handle_telegram();
   
-  if(led_blink_object.isChecked()) iotWebConf.enableBlink();
-  else iotWebConf.disableBlink();
+
 
    if(millis() - last_call > 1000*max(5, atoi(backend_intervall)))
     {
       call_backend();
       last_call = millis();
     }
-
+    
 }
 
 
@@ -439,9 +472,7 @@ void handleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>IotWebConf 03 Custom Parameters</title></head><body>Hello world!";
   s += "<ul>";
-  s += "<li>Nachwelt: ";
-  s += API_endpointValue;
-  s += "<li>Meter Value Offset: ";
+   s += "<li>Meter Value Offset: ";
   s += atoi(telegram_offset);
   s += "<li>Meter Value length: ";
   s += atoi(telegram_length);
@@ -458,14 +489,42 @@ void handleRoot()
   s += backend_ID;
   s += "<li>Backend Token: ";
   s += backend_token;
-s += "<li>Backend Intervall: ";
+  s += "<li>Backend Intervall: ";
   s += atoi(backend_intervall);
-
+  s += "<li>MyStrom PV : ";
+  s += mystrom_PV;
+  s += "<li>MyStrom PV IP: ";
+  s += mystrom_PV_IP;
+  s += "<li>temperatur: ";
+  s += String(temperature);
   s += "</ul>";
   s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "<br><a href='showTelegram'>Show Telegram</a>";
   s += "<br><b>Detected Meter Value</b>: "+String(get_meter_value_from_telegram());
+  s += "<br><b>Detected Meter Value PV</b>: "+String(get_meter_value_PV());
+
+
+
+  s += "</body></html>\n";
+
+  server.send(200, "text/html", s);
+}
+void showTemperature(){
+  Temp_sensors.requestTemperatures();
+  server.send(200, "text/html", String(Temp_sensors.getTempCByIndex(0)));
+}
+void showTelegram()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  
   s += "<br>Received Telegram from mMe via SML<br><table border=1>";
-  receive_telegram(); // Wait for complete Telegram
+  //receive_telegram(); // Wait for complete Telegram
   if(!prefix_suffix_correct()) s += "<br><font color=red>incomplete telegram</font>";
 
  String color;
@@ -503,6 +562,8 @@ s += "<li>Backend Intervall: ";
 void configSaved()
 {
   Serial.println("Configuration was updated.");
+  if(led_blink_object.isChecked()) iotWebConf.enableBlink();
+  else iotWebConf.disableBlink();
 }
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper)
