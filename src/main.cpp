@@ -65,7 +65,10 @@ int m_i_max = 0;
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
+#include "NTPClient.h"
 
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
 
 // First we include the libraries
 #include <OneWire.h> 
@@ -129,6 +132,9 @@ IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Te
 WiFiClient client;
 WiFiClientSecure clientSecure;
 
+
+
+
 void setup() 
 {
   Serial.begin(115200);
@@ -172,6 +178,8 @@ void setup()
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.on("/restart", []{ ESP.restart(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
+
+  timeClient.begin();
 
   Serial.println("Ready.");
 
@@ -438,12 +446,26 @@ Serial.println("json " + json);
   } 
  // else { Serial.println("connection to sunzilla.de failed"); }
 }
+
+const int meter_values_buffer_length = 10;
+unsigned long meter_values[meter_values_buffer_length][2] = {0};
+int meter_values_i = 0;
+void store_meter_value() 
+{
+
+  if(meter_values_i >= meter_values_buffer_length) meter_values_i = 0;
+  meter_values[meter_values_i][0] = timeClient.getEpochTime();
+  meter_values[meter_values_i][1] = get_meter_value_from_telegram();
+  meter_values_i++;
+}
+int last_store_meter_value = 0;
+
 void loop()
 {
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
   ArduinoOTA.handle();
-  
+  timeClient.update();
 
   handle_telegram();
   
@@ -453,6 +475,11 @@ void loop()
     {
       call_backend();
       last_call = millis();
+    }
+    if(timeClient.getMinutes() % 15 == 0 && millis() - last_store_meter_value > 60000)
+    {
+      store_meter_value();
+      last_store_meter_value = millis();
     }
     
 }
@@ -497,15 +524,24 @@ void handleRoot()
   s += mystrom_PV_IP;
   s += "<li>temperatur: ";
   s += String(temperature);
+    s += "<li>Systemzeit: ";
+  s += String(timeClient.getFormattedTime());
+  s += " / ";
+  s += String(timeClient.getEpochTime());
   s += "</ul>";
+
+  
   s += "Go to <a href='config'>configure page</a> to change values.";
   s += "<br><a href='showTelegram'>Show Telegram</a>";
   s += "<br><b>Detected Meter Value</b>: "+String(get_meter_value_from_telegram());
   s += "<br><b>Detected Meter Value PV</b>: "+String(get_meter_value_PV());
 
+for (int i = 0; i<meter_values_buffer_length; i++)
+{
+  s += "<br>"+String(meter_values[i][0]) + " "+String(meter_values[i][1]);
+}
 
-
-  s += "</body></html>\n";
+  s += "<br>"+String(meter_values_i)+"</body></html>\n";
 
   server.send(200, "text/html", s);
 }
@@ -556,6 +592,7 @@ void showTelegram()
 
   server.send(200, "text/html", s);
 }
+
 
 
 
