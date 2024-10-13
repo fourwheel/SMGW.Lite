@@ -79,6 +79,7 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 // -- Method declarations.
 void handleRoot();
 void showTelegram();
+void showMeterValue();
 void showTemperature();
 // -- Callback methods.
 void configSaved();
@@ -168,6 +169,7 @@ void setup()
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/showTelegram", showTelegram);
+  server.on("/showMeterValue", showMeterValue);
   server.on("/showTemperature", showTemperature);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.on("/restart", []{ ESP.restart(); });
@@ -557,6 +559,21 @@ void showTelegram()
   server.send(200, "text/html", s);
 }
 
+void showMeterValue()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += String(get_meter_value_from_telegram());
+
+  s += "</body></html>\n";
+
+  server.send(200, "text/html", s);
+}
 
 
 void configSaved()
