@@ -28,6 +28,7 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
 
+
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMLReader";
 
@@ -69,6 +70,7 @@ int m_i_max = 0;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
+NTPClient timeClient2(ntpUDP, "pool.ntp.org", 0, 99999999999);
 
 // First we include the libraries
 #include <OneWire.h> 
@@ -133,7 +135,9 @@ WiFiClient client;
 WiFiClientSecure clientSecure;
 
 
-
+//DynamicJsonDocument docArray(2048);
+JsonDocument docArray;
+JsonArray dataArray = docArray.to<JsonArray>();
 
 void setup() 
 {
@@ -180,6 +184,7 @@ void setup()
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
 
   timeClient.begin();
+  timeClient2.begin();
 
   Serial.println("Ready.");
 
@@ -206,6 +211,7 @@ void setup()
 
   clientSecure = WiFiClientSecure();
   clientSecure.setInsecure();
+
 }
 uint8_t TELEGRAM[TELEGRAM_LENGTH] = {0}; //0x1B, 0x1B, 0x1B, 0x1B, 0x1, 0x1, 0x1, 0x1, 0x76, 0x2, 0x1, 0x62, 0x0, 0x62, 0x0, 0x72, 0x65, 0x0, 0x0, 0x1, 0x1, 0x76, 0x1, 0x1, 0x5, 0x4D, 0x58, 0x8, 0x0, 0xB, 0xA, 0x1, 0x5A, 0x50, 0x41, 0x0, 0x1, 0x32, 0xF1, 0x32, 0x72, 0x62, 0x1, 0x65, 0x0, 0x8, 0x58, 0x4E, 0x1, 0x63, 0xB3, 0x5F, 0x0, 0x76, 0x2, 0x2, 0x62, 0x0, 0x62, 0x0, 0x72, 0x65, 0x0, 0x0, 0x7, 0x1, 0x77, 0x1, 0xB, 0xA, 0x1, 0x5A, 0x50, 0x41, 0x0, 0x1, 0x32, 0xF1, 0x32, 0x7, 0x1, 0x0, 0x62, 0xA, 0xFF, 0xFF, 0x72, 0x62, 0x1, 0x65, 0x0, 0x8, 0x58, 0x4D, 0x7E, 0x77, 0x7, 0x1, 0x0, 0x60, 0x32, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x4, 0x5A, 0x50, 0x41, 0x1, 0x77, 0x7, 0x1, 0x0, 0x60, 0x1, 0x0, 0xFF, 0x1, 0x1, 0x1, 0x1, 0xB, 0xA, 0x1, 0x5A, 0x50, 0x41, 0x0, 0x1, 0x32, 0xF1, 0x32, 0x1, 0x77, 0x7, 0x1, 0x0, 0x1, 0x8, 0x0, 0xFF, 0x65, 0x0, 0x8, 0x1, 0x4, 0x1, 0x62, 0x1E, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x9A, 0x8B, 0x1, 0x77, 0x7, 0x1, 0x0, 0x2, 0x8, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x1E, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x37, 0x9, 0x1, 0x77, 0x7, 0x1, 0x0, 0x10, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x1B, 0x52, 0x0, 0x55, 0x0, 0x0, 0x0, 0x3E, 0x1, 0x77, 0x7, 0x1, 0x0, 0x20, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x23, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x1, 0x77, 0x7, 0x1, 0x0, 0x34, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x23, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x9, 0x26, 0x1, 0x77, 0x7, 0x1, 0x0, 0x48, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x23, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x1, 0x77, 0x7, 0x1, 0x0, 0x1F, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x21, 0x52, 0xFE, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x77, 0x7, 0x1, 0x0, 0x33, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x21, 0x52, 0xFE, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x34, 0x1, 0x77, 0x7, 0x1, 0x0, 0x47, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x21, 0x52, 0xFE, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x77, 0x7, 0x1, 0x0, 0xE, 0x7, 0x0, 0xFF, 0x1, 0x1, 0x62, 0x2C, 0x52, 0xFF, 0x69, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0xF3, 0x1, 0x77, 0x7, 0x1, 0x0, 0x0, 0x2, 0x0, 0x0, 0x1, 0x1, 0x1, 0x1, 0x3, 0x30, 0x34, 0x1, 0x77, 0x7, 0x1, 0x0, 0x60, 0x5A, 0x2, 0x1}; //, 0x1, 0x1, 0x1, 0x1, 0x5, 0x71, 0x7B, 0x4C, 0x78, 0x1, 0x1, 0x1, 0x63, 0x9, 0x11, 0x0, 0x76, 0x2, 0x3, 0x62, 0x0, 0x62, 0x0, 0x72, 0x65, 0x0, 0x0, 0x2, 0x1, 0x71, 0x1, 0x63, 0x28, 0x94, 0x0, 0x0, 0x1B, 0x1B, 0x1B, 0x1B, 0x1A, 0x1, 0xA2, 0x46};
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -230,28 +236,28 @@ bool prefix_suffix_correct(){
   && TELEGRAM[prefix+3] == 0x1B) return true;
   else return false;
 }
-bool prefix_suffix_correct2(){
-  int prefix = atoi(telegram_prefix);
-  int suffix = atoi(telegram_suffix);
+// bool prefix_suffix_correct2(){
+//   int prefix = atoi(telegram_prefix);
+//   int suffix = atoi(telegram_suffix);
   
 
-  if(suffix == 0)
-  {
-    Serial.println("Suffix Must not be 0");
-    return false;
-  }
+//   if(suffix == 0)
+//   {
+//     Serial.println("Suffix Must not be 0");
+//     return false;
+//   }
 
-  if(TELEGRAM[0] == 0x1B
-  && TELEGRAM[1] == 0x1B
-  && TELEGRAM[2] == 0x1B
-  && TELEGRAM[3] == 0x1B
-  && TELEGRAM[m_i_max-7] == 0x1B
-  && TELEGRAM[m_i_max-6] == 0x1B
-  && TELEGRAM[m_i_max-5] == 0x1B
-  && TELEGRAM[m_i_max-4] == 0x1B
-  && TELEGRAM[m_i_max-3] == 0x1A) return true;
-  else return false;
-}
+//   if(TELEGRAM[0] == 0x1B
+//   && TELEGRAM[1] == 0x1B
+//   && TELEGRAM[2] == 0x1B
+//   && TELEGRAM[3] == 0x1B
+//   && TELEGRAM[m_i_max-7] == 0x1B
+//   && TELEGRAM[m_i_max-6] == 0x1B
+//   && TELEGRAM[m_i_max-5] == 0x1B
+//   && TELEGRAM[m_i_max-4] == 0x1B
+//   && TELEGRAM[m_i_max-3] == 0x1A) return true;
+//   else return false;
+// }
 
 int32_t get_meter_value_from_telegram()
 {
@@ -331,6 +337,7 @@ int32_t get_meter_value_PV() {
 
   // Allocate the JSON document
   JsonDocument doc;
+  
 
   // Parse JSON object
   DeserializationError error = deserializeJson(doc, client);
@@ -406,8 +413,8 @@ void handle_telegram(){
 }
 int last_call = 0;
 void call_backend(){
-  
-  Serial.println("call backend");
+  return;
+  Serial.println("call backend V1");
 
   if(temperature_object.isChecked()) 
     {
@@ -439,6 +446,7 @@ Serial.println("json " + json);
     http.POST(json);
 
     // Read response
+    Serial.println("reading Response:");
     Serial.print(http.getString());
 
     // Disconnect
@@ -446,19 +454,94 @@ Serial.println("json " + json);
   } 
  // else { Serial.println("connection to sunzilla.de failed"); }
 }
+bool call_backend_V2_successfull;
+void call_backend_V2(){
+  
+  
 
+Serial.println("call backend V2");
+
+
+
+  if (docArray.size() > 0) 
+  { 
+    call_backend_V2_successfull = false;
+    Serial.println("Connected to Backend @ " + String(backend_endpoint));
+    
+JsonDocument doc;
+
+// create an object
+JsonObject object = doc.to<JsonObject>();
+object["ID"] = "Z17";
+object["values"] = docArray;
+
+
+    // JsonObject newEntry = docArray.add<JsonObject>(); //docArray.createNestedObject();
+    // newEntry["ID"] = "Z17";
+
+    String json;
+    serializeJson(doc, json);
+    Serial.println("json " + json);
+
+    HTTPClient http;
+    call_backend_V2_successfull = http.begin(clientSecure, backend_endpoint);
+    if(http.POST(json) == 200)
+    {
+      call_backend_V2_successfull = true;
+    }
+
+    // Read response
+    Serial.print(http.getString());
+
+    // Disconnect
+    http.end();
+  } 
+  if(call_backend_V2_successfull == true)
+  {
+    docArray.clear();
+  }
+  // Call Successfull: Delete Array, Set flag
+  // Not: try Next time to call Backend)
+
+}
+
+String ueberfluss = "noch im Rahmen";
 const int meter_values_buffer_length = 10;
 unsigned long meter_values[meter_values_buffer_length][2] = {0};
-int meter_values_i = 0;
+
 void store_meter_value() 
 {
 
-  if(meter_values_i >= meter_values_buffer_length) meter_values_i = 0;
-  meter_values[meter_values_i][0] = timeClient.getEpochTime();
-  meter_values[meter_values_i][1] = get_meter_value_from_telegram();
-  meter_values_i++;
+  if(ESP.getFreeHeap() < 5000)
+  {
+    Serial.println("Not enough free heap to store another value");
+    return;
+  }
+
+  
+  
+  JsonObject newEntry = docArray.add<JsonObject>(); //docArray.createNestedObject();
+  newEntry["timestamp"] = timeClient.getEpochTime();;
+  newEntry["meter_value"] = get_meter_value_from_telegram();
+  if(temperature_object.isChecked()) 
+  {
+  Temp_sensors.requestTemperatures();
+  newEntry["temperature"] = Temp_sensors.getTempCByIndex(0);
+  } 
+
+  Serial.print("Size: "),
+  Serial.println(docArray.size());
+  String jsonString;
+  serializeJson(docArray, jsonString);
+  Serial.println(jsonString);
+  if(docArray.size() == 20)
+  {
+    docArray.clear();
+    docArray.shrinkToFit();
+  }
+  
 }
-int last_store_meter_value = 0;
+int last_call_backend_v2 = 0;
 
 void loop()
 {
@@ -466,23 +549,26 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   timeClient.update();
-
+  timeClient2.update();
   handle_telegram();
   
-
 
    if(millis() - last_call > 1000*max(5, atoi(backend_intervall)))
     {
       call_backend();
       last_call = millis();
-    }
-    if(timeClient.getMinutes() % 15 == 0 && millis() - last_store_meter_value > 60000)
-    {
       store_meter_value();
-      last_store_meter_value = millis();
+    }
+
+    if(timeClient.getMinutes() %  1 == 0 && millis() - last_call_backend_v2 > 60000)
+    {
+      
+      call_backend_V2();
+      last_call_backend_v2 = millis();
     }
     
 }
+
 
 
 /**
@@ -524,24 +610,39 @@ void handleRoot()
   s += mystrom_PV_IP;
   s += "<li>temperatur: ";
   s += String(temperature);
-    s += "<li>Systemzeit: ";
+  s += "<li>Systemzeit: ";
   s += String(timeClient.getFormattedTime());
   s += " / ";
   s += String(timeClient.getEpochTime());
   s += "</ul>";
+  s += "<li>Systemzeit 2: ";
+  s += String(timeClient2.getFormattedTime());
+  s += " / ";
+  s += String(timeClient2.getEpochTime());
+  s += "</ul><br>diff ";
+  s += String(timeClient.getEpochTime()-timeClient2.getEpochTime()) + "<br>";
+  s += "Free Heap ";
+  s += String(ESP.getFreeHeap());
 
   
-  s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "<br>Go to <a href='config'>configure page</a> to change values.";
   s += "<br><a href='showTelegram'>Show Telegram</a>";
   s += "<br><b>Detected Meter Value</b>: "+String(get_meter_value_from_telegram());
   s += "<br><b>Detected Meter Value PV</b>: "+String(get_meter_value_PV());
 
+  String jsonString;
+  serializeJson(docArray, jsonString);
+  s += "<br><br>";
+  s += jsonString;
+s += "<br><br>";
+s += ueberfluss;
+s += "<br><br>";
 for (int i = 0; i<meter_values_buffer_length; i++)
 {
   s += "<br>"+String(meter_values[i][0]) + " "+String(meter_values[i][1]);
 }
 
-  s += "<br>"+String(meter_values_i)+"</body></html>\n";
+  s += "<br></body></html>\n";
 
   server.send(200, "text/html", s);
 }
