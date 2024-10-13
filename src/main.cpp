@@ -567,12 +567,8 @@ void showMeterValue()
     // -- Captive portal request were already served.
     return;
   }
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += String(get_meter_value_from_telegram());
-
-  s += "</body></html>\n";
-
-  server.send(200, "text/html", s);
+  
+  server.send(200, "text/html", String(get_meter_value_from_telegram()));
 }
 
 
