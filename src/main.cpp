@@ -40,7 +40,7 @@ const char wifiInitialApPassword[] = "hammelhammel";
 #define NUMBER_LEN 32
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "1003"
+#define CONFIG_VERSION "1015"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
@@ -70,7 +70,7 @@ int m_i_max = 0;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
-NTPClient timeClient2(ntpUDP, "pool.ntp.org", 0, 99999999999);
+
 
 // First we include the libraries
 #include <OneWire.h> 
@@ -106,7 +106,8 @@ char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
 char backend_token[STRING_LEN];
-char backend_intervall[NUMBER_LEN];
+char read_meter_intervall[NUMBER_LEN];
+char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 
 
@@ -125,7 +126,8 @@ IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backe
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
-IotWebConfNumberParameter backend_intervall_object = IotWebConfNumberParameter("backend intervall", "backend_intervall", backend_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+IotWebConfNumberParameter read_meter_intervall_object = IotWebConfNumberParameter("Read Meter Intervall", "read_meter_intervall", read_meter_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
@@ -154,7 +156,9 @@ void setup()
   group2.addItem(&backend_endpoint_object);
   group2.addItem(&backend_ID_object);
   group2.addItem(&backend_token_object);
-  group2.addItem(&backend_intervall_object);
+  group2.addItem(&read_meter_intervall_object);
+  group2.addItem(&backend_call_minute_object);
+  
   group2.addItem(&led_blink_object);
   group2.addItem(&mystrom_PV_object);
   group2.addItem(&mystrom_PV_IP_object);
@@ -184,7 +188,6 @@ void setup()
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
 
   timeClient.begin();
-  timeClient2.begin();
 
   Serial.println("Ready.");
 
@@ -258,9 +261,14 @@ bool prefix_suffix_correct(){
 //   && TELEGRAM[m_i_max-3] == 0x1A) return true;
 //   else return false;
 // }
-
+int32_t get_meter_value_from_primary();
 int32_t get_meter_value_from_telegram()
 {
+  return get_meter_value_from_primary();
+
+
+
+
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
   int32_t meter_value = -1;
@@ -291,19 +299,19 @@ int32_t get_meter_value_PV() {
     return 0;
   }
   
-  Serial.println(F("Connecting..."));
+  Serial.println(F("get_meter_value_PV Connecting..."));
 
   // Connect to HTTP server
 
   client.setTimeout(1000);
   if (!client.connect(mystrom_PV_IP, 80)) {
-    Serial.println(F("Connection failed"));
+    Serial.println(F("get_meter_value_PV Connection failed"));
     return -1;
   }
   // 192.168.188.111
   // mystrom-switch-b3e3c0
 
-  Serial.println(F("Connected!"));
+  Serial.println(F("get_meter_value_PV Connected!"));
 
   // Send HTTP request
   client.println(F("GET /report HTTP/1.0"));
@@ -321,7 +329,7 @@ int32_t get_meter_value_PV() {
   client.readBytesUntil('\r', status, sizeof(status));
   // It should be "HTTP/1.0 200 OK" or "HTTP/1.1 200 OK"
   if (strcmp(status + 9, "200 OK") != 0) {
-    Serial.print(F("Unexpected response: "));
+    Serial.print(F("get_meter_value_PV Unexpected response: "));
     Serial.println(status);
     client.stop();
     return -3;
@@ -330,7 +338,7 @@ int32_t get_meter_value_PV() {
   // Skip HTTP headers
   char endOfHeaders[] = "\r\n\r\n";
   if (!client.find(endOfHeaders)) {
-    Serial.println(F("Invalid response"));
+    Serial.println(F("get_meter_value_PV Invalid response"));
     client.stop();
     return -4;
   }
@@ -342,7 +350,7 @@ int32_t get_meter_value_PV() {
   // Parse JSON object
   DeserializationError error = deserializeJson(doc, client);
   if (error) {
-    Serial.print(F("deserializeJson() failed: "));
+    Serial.print(F("get_meter_value_PV deserializeJson() failed: "));
     Serial.println(error.f_str());
     client.stop();
     return -5;
@@ -353,6 +361,54 @@ int32_t get_meter_value_PV() {
   return (doc["energy_since_boot"].as<int>());
 
   // Disconnect
+  client.stop();
+}
+String meter_value;
+String lastLine;
+int32_t get_meter_value_from_primary() {
+ 
+  // Serial.println(F("Connecting..."));
+
+  // Connect to HTTP server
+
+  client.setTimeout(1000);
+  if (!client.connect("192.168.0.2", 80)) {
+    Serial.println(F("get_meter_value_from_primary Connection failed"));
+    return -1;
+  }
+  // Serial.println(F("Connected!"));
+
+  // Send HTTP request
+  client.println(F("GET /showMeterValue HTTP/1.0"));
+  client.print(F("Host: "));
+  client.println("192.168.0.2");
+  client.println(F("Connection: close"));
+  if (client.println() == 0) {
+    Serial.println(F("get_meter_value_from_primary Failed to send request"));
+    client.stop();
+    return -2;
+  }
+  
+  meter_value = client.readString();
+ 
+  // Serial.println("Meter Value from Primary: ");
+  // Serial.println(meter_value);
+  // Serial.println("Meter Value from Primary END ");
+  // Finde die Position des letzten Zeilenumbruchs
+  int lastNewlineIndex = meter_value.lastIndexOf('\n');
+
+  // Extrahiere den Teil des Strings nach dem letzten Zeilenumbruch
+  lastLine = meter_value.substring(lastNewlineIndex + 1);
+
+  // Entferne mögliche Leerzeichen (falls vorhanden)
+  lastLine.trim();
+
+  // Konvertiere die letzte Zeile in eine Zahl
+  int32_t meter_value_i32 = lastLine.toInt();
+  // Disconnect
+  // Serial.print("get_meter_value_from_primary Extrahiert: ");
+  // Serial.println(meter_value_i32);
+  return meter_value_i32;
   client.stop();
 }
 
@@ -454,94 +510,178 @@ Serial.println("json " + json);
   } 
  // else { Serial.println("connection to sunzilla.de failed"); }
 }
+
 bool call_backend_V2_successfull;
+
+int last_call_backend_v2 = 0;
 void call_backend_V2(){
-  
-  
-
-Serial.println("call backend V2");
 
 
-
+  Serial.println("call backend V2");
   if (docArray.size() > 0) 
   { 
     call_backend_V2_successfull = false;
-    Serial.println("Connected to Backend @ " + String(backend_endpoint));
-    
-JsonDocument doc;
+    Serial.println("call backend V2 Connect to Backend @ " + String(backend_endpoint));
+      Serial.print("Free Heap1: ");
+  Serial.println(ESP.getFreeHeap());
+    WiFiClientSecure client;
+      Serial.print("Free Heap2: ");
+  Serial.println(ESP.getFreeHeap());
+    client.setInsecure();
+      Serial.print("Free Heap3: ");
+  Serial.println(ESP.getFreeHeap());
+    if (!client.connect("zwergenkoenig.com", 443)) {
+        Serial.print("Free Heap5: ");
+  Serial.println(ESP.getFreeHeap());
+      Serial.println("call backend V2 Connection failed WiFiClientSecure");
+      return;
+    }
+  Serial.print("Free Heap6: ");
+  Serial.println(ESP.getFreeHeap());
+    JsonDocument doc;
+Serial.print("Free Heap8: ");
+  Serial.println(ESP.getFreeHeap());
+    // create an object
+    JsonObject object = doc.to<JsonObject>();
+Serial.print("Free Heap9: ");
+  Serial.println(ESP.getFreeHeap());
+    object["ID"] = "Z17";
+    object["values"] = docArray;
 
-// create an object
-JsonObject object = doc.to<JsonObject>();
-object["ID"] = "Z17";
-object["values"] = docArray;
-
-
-    // JsonObject newEntry = docArray.add<JsonObject>(); //docArray.createNestedObject();
-    // newEntry["ID"] = "Z17";
-
+Serial.print("Free Heap10: ");
+  Serial.println(ESP.getFreeHeap());
     String json;
+    Serial.print("Free Heap11: ");
+  Serial.println(ESP.getFreeHeap());
     serializeJson(doc, json);
-    Serial.println("json " + json);
 
-    HTTPClient http;
-    call_backend_V2_successfull = http.begin(clientSecure, backend_endpoint);
-    if(http.POST(json) == 200)
-    {
-      call_backend_V2_successfull = true;
+    Serial.print("Free Heap12: ");
+  Serial.println(ESP.getFreeHeap());
+    // Serial.println("json " + json);
+
+    // Prepare the HTTP request
+    client.println("POST /hz/v2/ HTTP/1.1");
+    client.println("Host: zwergenkoenig.com");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.print("Content-Length: ");
+    Serial.print("Free Heap13: ");
+  Serial.println(ESP.getFreeHeap());
+    client.println(json.length());
+    client.println();
+    client.println(json);
+    Serial.print("Free Heap14: ");
+  Serial.println(ESP.getFreeHeap());
+
+    // Read the response
+    while (client.connected()) {
+      String line = client.readStringUntil('\n');
+      Serial.print("Free Heap15: ");
+  Serial.println(ESP.getFreeHeap());
+      // The first line of the response contains the HTTP status code, e.g., "HTTP/1.1 200 OK"
+      if (line.startsWith("HTTP/")) {
+        int statusCode = line.substring(9, 12).toInt();  // Extract the 3-digit status code
+        Serial.print("call backend V2 HTTP Status Code: ");
+        Serial.println(statusCode);
+        Serial.print("Free Heap16: ");
+  Serial.println(ESP.getFreeHeap());
+        // Check the status code
+        if (statusCode == 200) {
+          Serial.println("call backend V2 Success: HTTP 200 OK");
+          call_backend_V2_successfull = true;
+          last_call_backend_v2 = millis();
+        } else {
+          Serial.print("call backend V2 HTTP Error: ");
+          Serial.println(statusCode);
+        }
+        break;
+      }
     }
 
-    // Read response
-    Serial.print(http.getString());
+    //String response = client.readString();
+    //Serial.println("call backend V2 Response: " + response);
+    Serial.print("Free Heap17: ");
+  Serial.println(ESP.getFreeHeap());
+    client.stop();
+    Serial.print("Free Heap18: ");
+  Serial.println(ESP.getFreeHeap());
 
-    // Disconnect
-    http.end();
+    // CONSUMING TOO MUCH HEAP AND NOT RELEASING IT!
+    // //HTTPClient http;
+    // HTTPClient* http = new HTTPClient();
+    // call_backend_V2_successfull = http->begin(clientSecure, backend_endpoint);
+    // Serial.print("Free Heap6 ");
+    // Serial.println(ESP.getFreeHeap());
+    // (void)http->POST(json);
+    // //if(http->POST(json) == 200)
+    // {
+      
+    //   call_backend_V2_successfull = true;
+    //   Serial.print("Free Heap6.5 ");
+    //   Serial.println(ESP.getFreeHeap());
+    // }
+    
+    // // Read response
+    // Serial.print(http->getString());
+    // Serial.print("Free Heap7 ");
+    // Serial.println(ESP.getFreeHeap());
+    // // Disconnect
+    // http->end();
+    // delete http;  // Free the allocated memory
+
+
+    doc.clear();
+
   } 
   if(call_backend_V2_successfull == true)
   {
     docArray.clear();
   }
-  // Call Successfull: Delete Array, Set flag
-  // Not: try Next time to call Backend)
 
+  
 }
 
-String ueberfluss = "noch im Rahmen";
+
 const int meter_values_buffer_length = 10;
 unsigned long meter_values[meter_values_buffer_length][2] = {0};
-
+int32_t previous_meter_value = 0;
 void store_meter_value() 
 {
 
-  if(ESP.getFreeHeap() < 5000)
+  if(ESP.getFreeHeap() < 1000)
   {
     Serial.println("Not enough free heap to store another value");
     return;
   }
 
-  
+  int32_t meter_value = get_meter_value_from_telegram();
+  if(meter_value <= 0) return;
+  if(meter_value == previous_meter_value) return;
+  previous_meter_value = meter_value;
   
   JsonObject newEntry = docArray.add<JsonObject>(); //docArray.createNestedObject();
-  newEntry["timestamp"] = timeClient.getEpochTime();;
-  newEntry["meter_value"] = get_meter_value_from_telegram();
+  newEntry["ts"] = timeClient.getEpochTime();
+  
+
+  
+  newEntry["meter"] = meter_value; //();
   if(temperature_object.isChecked()) 
   {
   Temp_sensors.requestTemperatures();
-  newEntry["temperature"] = Temp_sensors.getTempCByIndex(0);
+  newEntry["temp"] = Temp_sensors.getTempCByIndex(0);
   } 
 
-  Serial.print("Size: "),
+  Serial.print("Size: ");
   Serial.println(docArray.size());
-  String jsonString;
-  serializeJson(docArray, jsonString);
-  Serial.println(jsonString);
-  if(docArray.size() == 20)
-  {
-    docArray.clear();
-    docArray.shrinkToFit();
-  }
+  Serial.print("Free Heap: ");
+  Serial.println(ESP.getFreeHeap());
+  // String jsonString;
+  // serializeJson(docArray, jsonString);
+  // Serial.println(jsonString);
+
   
 }
-int last_call_backend_v2 = 0;
+
 
 void loop()
 {
@@ -549,22 +689,21 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   timeClient.update();
-  timeClient2.update();
   handle_telegram();
   
 
-   if(millis() - last_call > 1000*max(5, atoi(backend_intervall)))
+   if(millis() - last_call > 1000*max(5, atoi(read_meter_intervall)))
     {
       call_backend();
       last_call = millis();
       store_meter_value();
     }
 
-    if(timeClient.getMinutes() %  1 == 0 && millis() - last_call_backend_v2 > 60000)
+    if(timeClient.getMinutes() %  atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000)
     {
       
       call_backend_V2();
-      last_call_backend_v2 = millis();
+      
     }
     
 }
@@ -585,7 +724,7 @@ void handleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>IotWebConf 03 Custom Parameters</title></head><body>Hello world!";
   s += "<ul>";
-   s += "<li>Meter Value Offset: ";
+  s += "<li>Meter Value Offset: ";
   s += atoi(telegram_offset);
   s += "<li>Meter Value length: ";
   s += atoi(telegram_length);
@@ -602,8 +741,10 @@ void handleRoot()
   s += backend_ID;
   s += "<li>Backend Token: ";
   s += backend_token;
-  s += "<li>Backend Intervall: ";
-  s += atoi(backend_intervall);
+  s += "<li>Read Meter Intervall: ";
+  s += atoi(read_meter_intervall);
+  s += "<li>Backend call Minute: ";
+  s += atoi(backend_call_minute);  
   s += "<li>MyStrom PV : ";
   s += mystrom_PV;
   s += "<li>MyStrom PV IP: ";
@@ -615,12 +756,8 @@ void handleRoot()
   s += " / ";
   s += String(timeClient.getEpochTime());
   s += "</ul>";
-  s += "<li>Systemzeit 2: ";
-  s += String(timeClient2.getFormattedTime());
-  s += " / ";
-  s += String(timeClient2.getEpochTime());
-  s += "</ul><br>diff ";
-  s += String(timeClient.getEpochTime()-timeClient2.getEpochTime()) + "<br>";
+
+  s += "</ul><br>";
   s += "Free Heap ";
   s += String(ESP.getFreeHeap());
 
@@ -635,12 +772,6 @@ void handleRoot()
   s += "<br><br>";
   s += jsonString;
 s += "<br><br>";
-s += ueberfluss;
-s += "<br><br>";
-for (int i = 0; i<meter_values_buffer_length; i++)
-{
-  s += "<br>"+String(meter_values[i][0]) + " "+String(meter_values[i][1]);
-}
 
   s += "<br></body></html>\n";
 
