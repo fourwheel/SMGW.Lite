@@ -44,7 +44,7 @@ const char wifiInitialApPassword[] = "hammelhammel";
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
 #ifndef D2
-#define D2 2
+#define D2 3
 #endif
 
 #define CONFIG_PIN D2
