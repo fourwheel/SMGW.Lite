@@ -657,7 +657,25 @@ void loop()
     }
   }
 }
-
+#if defined(ESP32)
+String esp_reset_reason_string()
+{
+  switch (esp_reset_reason()) {
+      case ESP_RST_UNKNOWN: return "Unknown";
+      case ESP_RST_POWERON: return "Power on";
+      case ESP_RST_EXT: return "External reset";
+      case ESP_RST_SW: return "Software reset";
+      case ESP_RST_PANIC: return "Exception/panic";
+      case ESP_RST_INT_WDT: return "Interrupt watchdog";
+      case ESP_RST_TASK_WDT: return "Task watchdog";
+      case ESP_RST_WDT: return "Other watchdogs";
+      case ESP_RST_DEEPSLEEP: return "Deep sleep";
+      case ESP_RST_BROWNOUT: return "Brownout";
+      case ESP_RST_SDIO: return "SDIO";
+      default: return "Unknown";
+  }
+}
+#endif
 /**
  * Handle web requests to "/" path.
  */
@@ -709,9 +727,7 @@ void handleRoot()
   #if defined(ESP32)
 
   s += "<li>Reset Reason: ";
-  s += String(esp_reset_reason());
-  s += " / ";
-  s += String(esp_reset_reason());
+  s += esp_reset_reason_string();
   #elif defined(ESP8266)
 
   s += "<li>Reset Reason: ";
