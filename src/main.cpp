@@ -52,7 +52,7 @@ const char wifiInitialApPassword[] = "hammelhammel";
 // -- Status indicator pin.
 //      First it will light up (kept LOW), on Wifi connection it will blink,
 //      when connected to the Wifi it will turn off (kept HIGH).
-#ifndef LED_BUILTIND
+#ifndef LED_BUILTIN
 #define LED_BUILTIN 2
 #endif
 
@@ -78,7 +78,7 @@ int m_i_max = 0;
 #endif
 // #include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
-// #include <ArduinoOTA.h>
+#include <ArduinoOTA.h>
 #include "NTPClient.h"
 // #include <ArduinoJson.h>
 
@@ -181,7 +181,7 @@ void setup()
   
 
   Serial.println();
-  Serial.println("Starting up...");
+  Serial.println("Starting up...HELLAU!");
 
   group1.addItem(&telegram_offset_object);
   group1.addItem(&telegram_length_object);
@@ -209,7 +209,9 @@ void setup()
   iotWebConf.getApTimeoutParameter()->visible = true;
 
   // -- Initializing the configuration.
+  iotWebConf.skipApStartup();
   iotWebConf.init();
+  // WiFi.begin("iPhone L", "harrod24");
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
   else
@@ -232,26 +234,35 @@ void setup()
 #endif
 
   Serial.println("Ready.");
+    ArduinoOTA
+    .onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+        type = "sketch";
+      else // U_SPIFFS
+        type = "filesystem";
 
-  // ArduinoOTA.onStart([]()
-                    //  { Serial.println("Start"); });
-  // ArduinoOTA.onEnd([]() {
-  //   Serial.println("\nEnd");
-  // });
-  // ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-  //   Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  // });
-  // ArduinoOTA.onError([](ota_error_t error) {
-  //   Serial.printf("Error[%u]: ", error);
-  //   if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-  //   else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-  //   else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-  //   else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-  //   else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  // });
-  //ArduinoOTA.begin();
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type);
+    })
+    .onEnd([]() {
+      Serial.println("\nEnd");
+    })
+    .onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    })
+    .onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+
   client = WiFiClient();
-  // client.setInsecure();
+  
 
   clientSecure = WiFiClientSecure();
   clientSecure.setInsecure();
@@ -632,7 +643,7 @@ void loop()
 {
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
-  // ArduinoOTA.handle();
+  ArduinoOTA.handle();
   timeClient.update();
   handle_telegram();
 
@@ -646,7 +657,8 @@ void loop()
     }
     else if (WiFi.status() == WL_CONNECTED && !wifi_connected)
     {
-      Serial.println("Resetting Backend Timer, Connection has returned");
+      Serial.println("Connection has returned: Resetting Backend Timer, starting OTA");
+      ArduinoOTA.begin();
       wifi_connected = true;
       last_call_backend_v2 = 0;
       call_backend_V2();
