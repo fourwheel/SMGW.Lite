@@ -47,7 +47,7 @@ int m_i_max = 0;
 #include <ESP8266HTTPClient.h>
 
 #endif
-
+#include <ArduinoJson.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "NTPClient.h"
@@ -284,73 +284,73 @@ unsigned long last_serial;
 
 int32_t get_meter_value_PV()
 {
-  // if(!mystrom_PV_object.isChecked())
+  if(!mystrom_PV_object.isChecked())
   {
     return 0;
   }
 
-  // Serial.println(F("get_meter_value_PV Connecting..."));
+  Serial.println(F("get_meter_value_PV Connecting..."));
 
-  // // Connect to HTTP server
+  // Connect to HTTP server
 
-  // client.setTimeout(1000);
-  // if (!client.connect(mystrom_PV_IP, 80)) {
-  //   Serial.println(F("get_meter_value_PV Connection failed"));
-  //   return -1;
-  // }
-  // // 192.168.188.111
-  // // mystrom-switch-b3e3c0
+  client.setTimeout(1000);
+  if (!client.connect(mystrom_PV_IP, 80)) {
+    Serial.println(F("get_meter_value_PV Connection failed"));
+    return -1;
+  }
+  // 192.168.188.111
+  // mystrom-switch-b3e3c0
 
-  // Serial.println(F("get_meter_value_PV Connected!"));
+  Serial.println(F("get_meter_value_PV Connected!"));
 
-  // // Send HTTP request
-  // client.println(F("GET /report HTTP/1.0"));
-  // client.print(F("Host: "));
-  // client.println(mystrom_PV_IP);
-  // client.println(F("Connection: close"));
-  // if (client.println() == 0) {
-  //   Serial.println(F("Failed to send request"));
-  //   client.stop();
-  //   return -2;
-  // }
+  // Send HTTP request
+  client.println(F("GET /report HTTP/1.0"));
+  client.print(F("Host: "));
+  client.println(mystrom_PV_IP);
+  client.println(F("Connection: close"));
+  if (client.println() == 0) {
+    Serial.println(F("Failed to send request"));
+    client.stop();
+    return -2;
+  }
 
-  // // Check HTTP status
-  // char status[32] = {0};
-  // client.readBytesUntil('\r', status, sizeof(status));
-  // // It should be "HTTP/1.0 200 OK" or "HTTP/1.1 200 OK"
-  // if (strcmp(status + 9, "200 OK") != 0) {
-  //   Serial.print(F("get_meter_value_PV Unexpected response: "));
-  //   Serial.println(status);
-  //   client.stop();
-  //   return -3;
-  // }
+  // Check HTTP status
+  char status[32] = {0};
+  client.readBytesUntil('\r', status, sizeof(status));
+  // It should be "HTTP/1.0 200 OK" or "HTTP/1.1 200 OK"
+  if (strcmp(status + 9, "200 OK") != 0) {
+    Serial.print(F("get_meter_value_PV Unexpected response: "));
+    Serial.println(status);
+    client.stop();
+    return -3;
+  }
 
-  // // Skip HTTP headers
-  // char endOfHeaders[] = "\r\n\r\n";
-  // if (!client.find(endOfHeaders)) {
-  //   Serial.println(F("get_meter_value_PV Invalid response"));
-  //   client.stop();
-  //   return -4;
-  // }
+  // Skip HTTP headers
+  char endOfHeaders[] = "\r\n\r\n";
+  if (!client.find(endOfHeaders)) {
+    Serial.println(F("get_meter_value_PV Invalid response"));
+    client.stop();
+    return -4;
+  }
 
-  // // Allocate the JSON document
-  // //JsonDocument doc;
+  // Allocate the JSON document
+  JsonDocument doc;
 
-  // // Parse JSON object
-  // // DeserializationError error = deserializeJson(doc, client);
-  // // if (error) {
-  // //   Serial.print(F("get_meter_value_PV deserializeJson() failed: "));
-  // //   Serial.println(error.f_str());
-  // //   client.stop();
-  // //   return -5;
-  // // }
+  // Parse JSON object
+  DeserializationError error = deserializeJson(doc, client);
+  if (error) {
+    Serial.print(F("get_meter_value_PV deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    client.stop();
+    return -5;
+  }
 
-  // // Extract values
+  // Extract values
 
-  // return (doc["energy_since_boot"].as<int>());
+  return (doc["energy_since_boot"].as<int>());
 
-  // // Disconnect
-  // client.stop();
+  // Disconnect
+  client.stop();
 }
 String meter_value;
 String lastLine;
