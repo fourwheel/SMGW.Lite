@@ -43,27 +43,45 @@ const char wifiInitialApPassword[] = "hammelhammel";
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
+#ifndef D2
+#define D2 2
+#endif
+
 #define CONFIG_PIN D2
 
 // -- Status indicator pin.
 //      First it will light up (kept LOW), on Wifi connection it will blink,
 //      when connected to the Wifi it will turn off (kept HIGH).
+#ifndef LED_BUILTIND
+#define LED_BUILTIN 2
+#endif
+
 #define STATUS_PIN LED_BUILTIN
 
 int m_i = 0;
 int m_i_max = 0;
 
 #define TELEGRAM_LENGTH 700
-
-#include <SoftwareSerial.h>
-
+#if defined(ESP32)
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <HardwareSerial.h>
+// #include <AsyncTCP.h>
+#include <HTTPClient.h>
+#elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
-// #include <ArduinoJson.h>
+#include <SoftwareSerial.h>
+// #include <ESPAsyncTCP.h>
 #include <ESP8266HTTPClient.h>
+
+#endif
+// #include <ESPAsyncWebServer.h>
+#include <WiFiUdp.h>
+// #include <ArduinoOTA.h>
 #include "NTPClient.h"
+// #include <ArduinoJson.h>
+
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
@@ -76,7 +94,12 @@ bool wifi_connected;
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 
+#if defined(ESP32)
+HardwareSerial mySerial(1); // RX, TX
+#elif defined(ESP8266)
 SoftwareSerial mySerial(D5, D6); // RX, TX
+#endif
+
 
 // -- Method declarations.
 void handleRoot();
@@ -148,7 +171,14 @@ void clear_data_array()
 void setup()
 {
   Serial.begin(115200);
+
+  #if defined(ESP32)
+  mySerial.begin(9600, SERIAL_8N1, 15, 16);
+  #elif defined(ESP8266)
   mySerial.begin(9600);
+  #endif
+
+  
 
   Serial.println();
   Serial.println("Starting up...");
@@ -197,12 +227,14 @@ void setup()
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
 
-  timeClient.begin();
+#if defined(ESP8266)
+  timeClient.begin(); // do we still need this?
+#endif
 
   Serial.println("Ready.");
 
-  ArduinoOTA.onStart([]()
-                     { Serial.println("Start"); });
+  // ArduinoOTA.onStart([]()
+                    //  { Serial.println("Start"); });
   // ArduinoOTA.onEnd([]() {
   //   Serial.println("\nEnd");
   // });
@@ -217,7 +249,7 @@ void setup()
   //   else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
   //   else if (error == OTA_END_ERROR) Serial.println("End Failed");
   // });
-  ArduinoOTA.begin();
+  //ArduinoOTA.begin();
   client = WiFiClient();
   // client.setInsecure();
 
@@ -600,7 +632,7 @@ void loop()
 {
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
-  ArduinoOTA.handle();
+  // ArduinoOTA.handle();
   timeClient.update();
   handle_telegram();
 
@@ -696,10 +728,21 @@ void handleRoot()
   s += String(millis() / 60000);
   s += "<li>Last Call ago (min): ";
   s += String((millis() - last_call_backend_v2) / 60000);
+
+  #if defined(ESP32)
+
+  s += "<li>Reset Reason: ";
+  s += String(esp_reset_reason());
+  s += " / ";
+  s += String(esp_reset_reason());
+  #elif defined(ESP8266)
+
   s += "<li>Reset Reason: ";
   s += String(/*esp_reset_reason()*/ESP.getResetReason());
   s += " / ";
   s += String(/*esp_reset_reason()*/ESP.getResetInfo());
+  #endif
+
   s += "<li>Systemzeit: ";
   s += String(timeClient.getFormattedTime());
   s += " / ";
