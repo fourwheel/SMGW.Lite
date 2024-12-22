@@ -1,33 +1,6 @@
-/**
- * IotWebConf03CustomParameters.ino -- IotWebConf is an ESP8266/ESP32
- *   non blocking WiFi/AP web configuration library for Arduino.
- *   https://github.com/prampec/IotWebConf
- *
- * Copyright (C) 2020 Balazs Kelemen <prampec+arduino@gmail.com>
- *
- * This software may be modified and distributed under the terms
- * of the MIT license.  See the LICENSE file for details.
- */
-
-/**
- * Example: Custom parameters
- * Description:
- *   In this example it is shown how to attach your custom parameters
- *   to the config portal. Your parameters will be maintained by
- *   IotWebConf. This means, they will be loaded from/saved to EEPROM,
- *   and will appear in the config portal.
- *   Note the configSaved and formValidator callbacks!
- *   (See previous examples for more details!)
- *
- * Hardware setup for this example:
- *   - An LED is attached to LED_BUILTIN pin with setup On=LOW.
- *   - [Optional] A push button is attached to pin D2, the other leg of the
- *     button should be attached to GND.
- */
-
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
-//#define IOTWEBCONF_WEBSERVER ESP8266WebServer
+
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMLReader";
 
@@ -66,28 +39,26 @@ int m_i_max = 0;
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <HardwareSerial.h>
-// #include <AsyncTCP.h>
 #include <HTTPClient.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <SoftwareSerial.h>
-// #include <ESPAsyncTCP.h>
 #include <ESP8266HTTPClient.h>
 
 #endif
-// #include <ESPAsyncWebServer.h>
+
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "NTPClient.h"
-// #include <ArduinoJson.h>
+
 
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
 
 bool wifi_connected;
-// First we include the libraries
+
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #define ONE_WIRE_BUS 4
@@ -101,14 +72,13 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
 
 
-// -- Method declarations.
+// -- Forward declarations.
 void handleRoot();
 void showTelegram();
 void showMeterValue();
 void showTemperature();
-// -- Callback methods.
 void configSaved();
-//bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper);
+
 DNSServer dnsServer;
 WebServer server(80);
 
@@ -211,7 +181,7 @@ void setup()
   // -- Initializing the configuration.
   iotWebConf.skipApStartup();
   iotWebConf.init();
-  // WiFi.begin("iPhone L", "harrod24");
+  
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
   else
@@ -260,11 +230,9 @@ void setup()
       else if (error == OTA_END_ERROR) Serial.println("End Failed");
     });
 
-
-  client = WiFiClient();
-  
-
-  clientSecure = WiFiClientSecure();
+// Still needed?  
+  // client = WiFiClient();
+  // clientSecure = WiFiClientSecure();
   clientSecure.setInsecure();
 
   clear_data_array();
@@ -296,11 +264,7 @@ int32_t get_meter_value_from_telegram()
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
   int32_t meter_value = -1;
-  // Serial.print("offset ");
-  // Serial.print(offset);
-  // Serial.print("\nlength ");
-  // Serial.println(length);
-
+  
   if (!prefix_suffix_correct())
     return -2;
 
@@ -511,6 +475,7 @@ void call_backend_V2()
   if (meter_value_i == 0)
   {
     last_call_backend_v2 = millis();
+    Serial.println("Zero Values to transmit");
     call_backend_V2_successfull = true;
     return;
   }
@@ -518,8 +483,8 @@ void call_backend_V2()
   call_backend_V2_successfull = false;
 
   // Verbindung zum Server herstellen
-  WiFiClientSecure client;
-  client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
+  // WiFiClientSecure client;
+  // client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
   if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
   {
     Serial.println("Connection to server failed");
@@ -849,19 +814,3 @@ void configSaved()
   else
     iotWebConf.disableBlink();
 }
-
-// bool formValidator(iotwebconf::WebRequestWrapper *webRequestWrapper)
-// {
-//   Serial.println("Validating form.");
-//   bool valid = true;
-
-//   /*
-//     int l = webRequestWrapper->arg(API_endpoint.getId()).length();
-//     if (l < 3)
-//     {
-//       API_endpoint.errorMessage = "Please provide at least 3 characters for this test!";
-//       valid = false;
-//     }
-//   */
-//   return valid;
-// }
