@@ -483,8 +483,8 @@ void call_backend_V2()
   call_backend_V2_successfull = false;
 
   // Verbindung zum Server herstellen
-  // WiFiClientSecure client;
-  // client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
+  WiFiClientSecure client;
+  client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
   if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
   {
     Serial.println("Connection to server failed");
@@ -508,8 +508,8 @@ void call_backend_V2()
   header += String(millis() / 60000);
   header += " HTTP/1.1\r\n";
   // header += "Host: DOMAIN.URL from IotWebConf\r\n";
-  header += "Host: ";
-  header += backend_endpoint;
+  header += "Host: ip87-106-235-113.pbiaas.com";
+  //header += backend_endpoint;
   header += "\r\n";
   header += "Content-Type: application/octet-stream\r\n";
   header += "Content-Length: " + String(bufferSize) + "\r\n";
