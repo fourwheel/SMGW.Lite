@@ -184,9 +184,12 @@ void setup()
   
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
-  else
+  else {
     iotWebConf.disableBlink();
+    digitalWrite(LED_BUILTIN, LOW);
 
+  }
+    
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/showTelegram", showTelegram);
@@ -506,6 +509,16 @@ void call_backend_V2()
   header += backend_ID;
   header += "&uptime=";
   header += String(millis() / 60000);
+  header += "&time=";
+  header += String(timeClient.getFormattedTime());
+  header += "&heap=";
+  header += String(ESP.getFreeHeap());
+  header += "&meter_value_i=";
+  header += String(meter_value_i);
+
+  
+  
+  
   header += " HTTP/1.1\r\n";
   // header += "Host: DOMAIN.URL from IotWebConf\r\n";
   header += "Host: ip87-106-235-113.pbiaas.com";
@@ -828,5 +841,9 @@ void configSaved()
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
   else
+  {
     iotWebConf.disableBlink();
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+    
 }
