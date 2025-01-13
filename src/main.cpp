@@ -437,8 +437,8 @@ void reset_telegram()
   bool transfer = false;
   if (BUFFER[0] != 0x00 && BUFFER[1] != 0x00 && BUFFER[2] != 0x00)
   {
-    Serial.print(millis());
-    Serial.println(" Transfering Buffer");
+    // Serial.print(millis());
+    // Serial.println(" Transfering Buffer");
 
     transfer = true;
   }
@@ -451,7 +451,10 @@ void reset_telegram()
     BUFFER[q] = 0;
   }
   if (transfer)
-    Serial.println(get_meter_value_from_telegram());
+  {
+    // Serial.print("Meter Value: ");
+    // Serial.println(get_meter_value_from_telegram());
+  }
 
   m_i = 0;
   m_i_max = 0;
@@ -700,6 +703,8 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
+  Temp_sensors.requestTemperatures();
+    
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>IotWebConf 03 Custom Parameters</title></head><body>Hello world!";
   s += "<ul>";
@@ -729,7 +734,7 @@ void handleRoot()
   s += "<li>MyStrom PV IP: ";
   s += mystrom_PV_IP;
   s += "<li>temperatur: ";
-  s += String(temperature);
+  s += String(Temp_sensors.getTempCByIndex(0));
   s += "<li>Ring Buffer i: ";
   s += String(meter_value_i);
   s += "<li>Uptime (min): ";
