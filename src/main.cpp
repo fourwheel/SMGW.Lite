@@ -101,6 +101,7 @@ void showTemperature();
 void configSaved();
 void call_backend_V2();
 void reset_telegram();
+void store_meter_value();
 
 DNSServer dnsServer;
 WebServer server(80);
@@ -405,7 +406,11 @@ void setup()
             { ESP.restart(); });
   server.on("/resetLog", []
             { resetLogBuffer();
-            location_href_home(); });   
+            location_href_home(); }); 
+  server.on("/StoreMeterValue", []
+            { location_href_home();
+            store_meter_value(); });               
+            
   server.on("/sendStatus", []
             { send_status_report = true;
             location_href_home(); });         
@@ -646,7 +651,7 @@ int32_t get_meter_value_from_primary()
 void saveCompleteTelegram() {
   size_t telegramLength = bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
   if (telegramLength > TELEGRAM_SIZE) {
-    Serial.println("Fehler: Telegramm zu groß für Speicher!");
+    // Serial.println("Fehler: Telegramm zu groß für Speicher!");
     AddLogEntry(3003);
     return;
   }
@@ -719,8 +724,8 @@ void handle_telegram2() {
       buffer[bufferIndex++] = incomingByte;
     } else {
       // Fehler: Pufferüberlauf
-      Serial.println("Fehler: Pufferüberlauf! Eingabepuffer zurückgesetzt.");
-      AddLogEntry(3001);
+      // Serial.println("Fehler: Pufferüberlauf! Eingabepuffer zurückgesetzt.");
+      // AddLogEntry(3001);
       resetBuffer();
       continue;
     }
@@ -741,8 +746,8 @@ void handle_telegram2() {
 
   // Prüfen, ob ein Timeout aufgetreten ist
   if (bufferIndex > 0 && (millis() - lastByteTime > TIMEOUT_MS)) {
-    Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
-    AddLogEntry(3002);
+    // Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
+    // AddLogEntry(3002);
     resetBuffer(); // Eingabepuffer zurücksetzen
   }
 }
@@ -1087,7 +1092,7 @@ void loop()
       wifi_connected = true;
       wifi_reconnection_time = millis();
       call_backend_V2_successfull = false;
-      configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+      // configTime(0, 0, "pool.ntp.org", "time.nist.gov");
       if(firstTime == true) 
       {
         firstTime = false;
@@ -1226,6 +1231,8 @@ void handleRoot()
   s += String(timeClient.getFormattedTime());
   s += " / ";
   s += String(timeClient.getEpochTime());
+  s += "<li><b>Detected Meter Value</b>: " + String(get_meter_value_from_telegram());
+  s += "<li><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
   s += "</ul>";
 
   s += "<li>Log Buffer:<br>";
@@ -1237,12 +1244,12 @@ void handleRoot()
 
   s += "<br>Go to <a href='config'>configure page</a> to change values.";
   s += "<br><a href='showTelegram'>Show Telegram</a>";
+  s += "<br><a href='StoreMeterValue'>Store Meter Value</a>";
   s += "<br><a href='sendStatus'>Send Status Report with next backend call</a>";
   s += "<br><a href='callBackend'>Call Backend</a>";
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
-  s += "<br><b>Detected Meter Value</b>: " + String(get_meter_value_from_telegram());
-  s += "<br><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
+
 
   s += "<br><br>";
 
