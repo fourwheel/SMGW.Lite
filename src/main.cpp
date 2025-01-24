@@ -405,8 +405,10 @@ void setup()
   server.on("/restart", []
             { ESP.restart(); });
   server.on("/resetLog", []
-            { resetLogBuffer();
-            location_href_home(); }); 
+            { 
+              location_href_home();
+              resetLogBuffer();
+             }); 
   server.on("/StoreMeterValue", []
             { location_href_home();
             store_meter_value(); });               
@@ -416,8 +418,8 @@ void setup()
             location_href_home(); });         
 server.on("/callBackend", []
             { 
+              location_href_home();
             call_backend_V2();
-            location_href_home();
             
             });   
             
