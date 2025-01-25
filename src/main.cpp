@@ -144,8 +144,8 @@ IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyS
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 
-WiFiClient client;
-WiFiClientSecure clientSecure;
+// WiFiClient client;
+// WiFiClientSecure clientSecure;
 
 const char* rootCACertificate = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -563,7 +563,7 @@ int32_t get_meter_value_PV()
   Serial.println(F("get_meter_value_PV Connecting..."));
 
   // Connect to HTTP server
-
+  WiFiClient client;
   client.setTimeout(1000);
   if (!client.connect(mystrom_PV_IP, 80)) {
     Serial.println(F("get_meter_value_PV Connection failed"));
@@ -631,7 +631,7 @@ int32_t get_meter_value_from_primary()
   // Serial.println(F("Connecting..."));
 
   // Connect to HTTP server
-
+  WiFiClient client;
   client.setTimeout(1000);
   if (!client.connect("192.168.0.2", 80))
   {
@@ -876,8 +876,8 @@ void send_status_report_function()
   Serial.println("send_status_report");
   AddLogEntry(1019);
    WiFiClientSecure client;
-  client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
-  //clientSecure.setCACert(rootCACertificate);
+  // client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
+  client.setCACert(rootCACertificate);
   if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
   {
     Serial.println("Connection to server failed");
@@ -949,8 +949,8 @@ void call_backend_V2()
 
   // Verbindung zum Server herstellen
   WiFiClientSecure client;
-  client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
-  // clientSecure.setCACert(rootCACertificate);
+  // client.setInsecure(); // Zertifikatsprüfung deaktivieren (für Testzwecke)
+  client.setCACert(rootCACertificate);
   if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
   {
     Serial.println("Connection to server failed");
