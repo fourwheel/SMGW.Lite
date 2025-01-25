@@ -75,8 +75,8 @@ size_t TELEGRAM_SIZE_USED = 0;   // Tatsächliche Länge des gespeicherten Teleg
 
 
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
+// WiFiUDP ntpUDP;
+// NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 36000000);
 
 bool wifi_connected;
 
@@ -241,13 +241,38 @@ String StatusCodeToString(int statusCode) {
 
     return "Unknown status code";
 }
+// Hilfsfunktion: Holt die aktuelle Zeit als time_t (Unix-Timestamp)
+time_t getCurrentTime() {
+    return time(nullptr);
+}
 
+unsigned long timeClient_getEpochTime() {
+    return static_cast<unsigned long>(getCurrentTime());
+}
+
+int timeClient_getMinutes() {
+    time_t now = getCurrentTime();
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo); // Konvertiere in lokale Zeitstruktur
+
+    return timeinfo.tm_min;      // Extrahiere Minuten (0–59)
+}
+
+String timeClient_getFormattedTime() {
+    time_t now = getCurrentTime();
+    char timeStr[64];
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo); // Lokale Zeit (Zeitzone angewendet)
+
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo); // Zeitformat HH:MM:SS
+    return String(timeStr);        // Gibt Zeit als lesbaren String aus
+}
 void AddLogEntry(int statusCode) {
     
     unsigned long uptimeSeconds = millis() / 60000; // Uptime in Sekunden
 
     // Füge neuen Eintrag in den Ring-Buffer ein
-    logBuffer[logIndex].timestamp = timeClient.getEpochTime();
+    logBuffer[logIndex].timestamp = timeClient_getEpochTime();
     logBuffer[logIndex].uptime = uptimeSeconds;
     logBuffer[logIndex].statusCode = statusCode;
 
@@ -522,6 +547,9 @@ int32_t get_meter_value_from_telegram()
   return meter_value;
 }
 
+
+
+
 unsigned long last_serial;
 
 int32_t get_meter_value_PV()
@@ -662,7 +690,7 @@ void saveCompleteTelegram() {
   memcpy(TELEGRAM, buffer, bufferIndex); // Kopiere Hauptdaten
   memcpy(TELEGRAM + bufferIndex, extraBytes, 3); // Kopiere zusätzliche Bytes
   TELEGRAM_SIZE_USED = telegramLength;
-  timestamp_telegram = timeClient.getEpochTime(); //last_serial;
+  timestamp_telegram = timeClient_getEpochTime(); //last_serial;
   // Telegramm ausgeben
   // Serial.println("Telegramm erfolgreich gespeichert:");
   // for (size_t i = 0; i < TELEGRAM_SIZE_USED; i++) {
@@ -825,7 +853,7 @@ void reset_telegram()
 
   m_i = 0;
   m_i_max = 0;
-  timestamp_telegram = timeClient.getEpochTime(); //last_serial;
+  timestamp_telegram = timeClient_getEpochTime(); //last_serial;
   last_serial = millis();
   // Serial.println("meter " + get_meter_value_from_telegram());
 }
@@ -946,7 +974,7 @@ void call_backend_V2()
   header += "&uptime=";
   header += String(millis() / 60000);
   header += "&time=";
-  header += String(timeClient.getFormattedTime());
+  header += String(timeClient_getFormattedTime());
   header += "&heap=";
   header += String(ESP.getFreeHeap());
   header += "&meter_value_i=";
@@ -1030,7 +1058,7 @@ void store_meter_value()
     meter_value_i = 0;
   Serial.println("buffer i: " + String(meter_value_i));
 
-  data[meter_value_i][0] = timestamp_telegram; //timeClient.getEpochTime();
+  data[meter_value_i][0] = timestamp_telegram; //timeClient_getEpochTime();
   data[meter_value_i][1] = meter_value;
 
   if (temperature_object.isChecked())
@@ -1074,7 +1102,7 @@ void loop()
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
   ArduinoOTA.handle();
-  timeClient.update();
+  // timeClient.update();
   handle_telegram2();
 
   if (millis() - last_wifi_check > 500)
@@ -1097,6 +1125,10 @@ void loop()
       // configTime(0, 0, "pool.ntp.org", "time.nist.gov");
       if(firstTime == true) 
       {
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        // while (time(nullptr) < 100000) { // Warten, bis Zeit synchronisiert ist
+        //   delay(100);
+        // }
         firstTime = false;
       }
       else
@@ -1119,8 +1151,8 @@ void loop()
   }
 
   if (!wifi_connected &&
-      //timeClient.getMinutes() % 15 == 0 
-      (timeClient.getEpochTime()-3) % 900 < 60
+      //timeClient_getMinutes() % 15 == 0 
+      (timeClient_getEpochTime()-3) % 900 < 60
       && millis() - last_meter_value > 60000)
   {
     AddLogEntry(1010);
@@ -1141,7 +1173,7 @@ void loop()
 
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if (!call_backend_V2_successfull || (timeClient.getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
+    if (!call_backend_V2_successfull || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
     {
       //AddLogEntry(1012);
       call_backend_V2();
@@ -1230,9 +1262,9 @@ void handleRoot()
   #endif
 
   s += "<li>Systemzeit: ";
-  s += String(timeClient.getFormattedTime());
+  s += String(timeClient_getFormattedTime());
   s += " / ";
-  s += String(timeClient.getEpochTime());
+  s += String(timeClient_getEpochTime());
   s += "<li><b>Detected Meter Value</b>: " + String(get_meter_value_from_telegram());
   s += "<li><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
   s += "</ul>";
