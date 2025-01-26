@@ -353,6 +353,23 @@ void location_href_home()
   {
     server.send(200, "text/html", "<meta http-equiv='refresh' content = '0;url=/'>");
   }
+void splitHostAndPath(const String& url, String& host, String& path) {
+    // Suche nach dem ersten "/"
+    int slashIndex = url.indexOf('/');
+
+    if (slashIndex == -1) {
+        // Kein "/" gefunden -> Alles ist der Host
+        host = url;
+        path = "/";
+    } else {
+        // Host ist der Teil vor dem ersten "/"
+        host = url.substring(0, slashIndex);
+        // Pfad ist der Teil ab dem ersten "/"
+        path = url.substring(slashIndex);
+    }
+}
+    String backend_host;
+    String backend_path;
 void setup()
 {
   AddLogEntry(1001);
@@ -474,7 +491,8 @@ void setup()
     });
 
   clear_data_array();
-
+    
+  splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
 }
 
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -828,7 +846,7 @@ void send_status_report_function()
    WiFiClientSecure client;
   
   client.setCACert(rootCACertificate);
-  if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
+  if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
     AddLogEntry(4000);
@@ -850,8 +868,12 @@ void send_status_report_function()
     memcpy(logDataBuffer, logBuffer, logBufferSize);
 
     // HTTP POST-Anfrage für den Log-Buffer erstellen
-    String logHeader = "POST /hz/v3/log.php HTTP/1.1\r\n";
-    logHeader += "Host: ip87-106-235-113.pbiaas.com\r\n";
+    String logHeader = "POST ";
+    logHeader += backend_path;
+    logHeader += "log.php HTTP/1.1\r\n";
+    logHeader += "Host: ";
+    logHeader += backend_host;
+    logHeader += "\r\n";
     logHeader += "Content-Type: application/octet-stream\r\n";
     logHeader += "Content-Length: " + String(logBufferSize) + "\r\n";
     logHeader += "Connection: close\r\n\r\n";
@@ -901,7 +923,7 @@ void call_backend_V2()
   WiFiClientSecure client;
   
   client.setCACert(rootCACertificate);
-  if (!client.connect("ip87-106-235-113.pbiaas.com", 443))
+  if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
     AddLogEntry(4000);
@@ -919,7 +941,9 @@ void call_backend_V2()
   memcpy(buffer, data, bufferSize);
 
   // HTTP POST-Anfrage manuell erstellen
-  String header = "POST /hz/v3/?ID=";
+  String header = "POST ";
+  header += backend_path;
+  header += "?ID=";
   header += backend_ID;
   header += "&uptime=";
   header += String(millis() / 60000);
@@ -935,8 +959,8 @@ void call_backend_V2()
   
   header += " HTTP/1.1\r\n";
   
-  header += "Host: ip87-106-235-113.pbiaas.com";
-  //header += backend_endpoint;
+  header += "Host: ";
+  header += backend_host;
   header += "\r\n";
   header += "Content-Type: application/octet-stream\r\n";
   header += "Content-Length: " + String(bufferSize) + "\r\n";
@@ -1173,6 +1197,11 @@ void handleRoot()
 
   s += "<li>Backend Endpoint: ";
   s += backend_endpoint;
+  
+  s += "<li>Backend Host: ";
+  s += backend_host;
+  s += "<li>Backend Path: ";
+  s += backend_path;
   s += "<li>LED blink: ";
   s += led_blink;
   s += "<li>Backend ID: ";
@@ -1311,5 +1340,5 @@ void configSaved()
     iotWebConf.disableBlink();
     digitalWrite(LED_BUILTIN, LOW);
   }
-    
+  splitHostAndPath(String(backend_endpoint), backend_host, backend_path);   
 }
