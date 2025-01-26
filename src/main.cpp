@@ -180,14 +180,14 @@ const int data_buffer = 200;
 unsigned long data[data_buffer + 1][3];
 
 // Definition des Logbuffers
-const int LOG_BUFFER_SIZE = 100;
+const int LOG_BUFFER_SIZE = 10;
 struct LogEntry {
     unsigned long timestamp; // Zeitstempel in Millisekunden seit Start
     unsigned long uptime;    // Betriebszeit in Sekunden
     int statusCode;          // Statuscode
 };
 LogEntry logBuffer[LOG_BUFFER_SIZE];
-int logIndex = 0; // Index des nächsten Eintrags
+int logIndex = -1; // Index des nächsten Eintrags
 void resetLogBuffer() {
     for (int i = 0; i < LOG_BUFFER_SIZE; ++i) {
         logBuffer[i].timestamp = 0;
@@ -207,10 +207,10 @@ String StatusCodeToString(int statusCode) {
         case 1006: return "store_meter_value()";
         case 1008: return "WiFi returned";
         case 1009: return "WiFi lost";
-        case 1010: return ".15min meter reading trigger";
-        case 1014: return "900s meter reading trigger";
+        case 1010: return "Taf7 meter reading trigger";
+        case 1014: return "Taf7-900s meter reading trigger";
         case 1015: return "not enough heap to store value";
-        case 1011: return "individual meter reading trigger";
+        case 1011: return "Taf14 meter reading trigger";
         case 1012: return "call backend trigger";
         case 1019: return "Sending Log";
         case 1020: return "Sending Log successful";
@@ -261,7 +261,9 @@ String timeClient_getFormattedTime() {
     return String(timeStr);        // Gibt Zeit als lesbaren String aus
 }
 void AddLogEntry(int statusCode) {
-    
+    // Aktualisiere den Index (Ring-Puffer-Verhalten)
+    logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
+
     unsigned long uptimeSeconds = millis() / 60000; // Uptime in Sekunden
 
     // Füge neuen Eintrag in den Ring-Buffer ein
@@ -269,8 +271,7 @@ void AddLogEntry(int statusCode) {
     logBuffer[logIndex].uptime = uptimeSeconds;
     logBuffer[logIndex].statusCode = statusCode;
 
-    // Aktualisiere den Index (Ring-Puffer-Verhalten)
-    logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
+       
 }
 
 // Funktion zum Debuggen des Logbuffers
@@ -301,42 +302,42 @@ String formatTimestamp(unsigned long timestamp) {
     struct tm timeinfo;
     localtime_r(&rawTime, &timeinfo);
 
-    // Formatieren: YYYY-MM-DD HH:MM:SS
-    char buffer[8];
-    strftime(buffer, sizeof(buffer), "%H:%M:%S", &timeinfo);
+    char buffer[20];
+    strftime(buffer, sizeof(buffer), "%D %H:%M:%S", &timeinfo);
     return String(buffer);
 }
-
-String LogBufferToString() {
-    // Temporäres Array für die sortierten Einträge
-    LogEntry sortedEntries[LOG_BUFFER_SIZE];
-    
-    // Ringbuffer in das temporäre Array kopieren
-    for (int i = 0; i < LOG_BUFFER_SIZE; i++) {
-        sortedEntries[i] = logBuffer[i];
-    }
-    
-    // sortLogEntries(sortedEntries, LOG_BUFFER_SIZE);
-    // std::stable_sort(sortedEntries, sortedEntries + LOG_BUFFER_SIZE, [](const LogEntry &a, const LogEntry &b) {
-    //     return a.timestamp > b.timestamp; // Absteigende Sortierung
-    // });
-    
-    // String erstellen
-    String logString = "";
-    for (int i = 0; i < LOG_BUFFER_SIZE; i++) {
-        if (sortedEntries[i].statusCode == 0) continue; // Leere Einträge überspringen
-
-        logString += String(sortedEntries[i].timestamp) + ", ";
-        logString += formatTimestamp(sortedEntries[i].timestamp) + ", ";
-        logString += String(sortedEntries[i].uptime) + ", ";
-        logString += String(sortedEntries[i].statusCode) + ": ";
-        logString += StatusCodeToString(sortedEntries[i].statusCode);
+String LogBufferEntryToString(int i)
+{
+        if (logBuffer[i].statusCode == 0) return "zero <br>"; // Leere Einträge überspringen
+        String logString;
+        logString += String(i) + ", ";
+        logString += String(logBuffer[i].timestamp) + ", ";
+        logString += formatTimestamp(logBuffer[i].timestamp) + ", ";
+        logString += String(logBuffer[i].uptime) + ", ";
+        logString += String(logBuffer[i].statusCode) + ": ";
+        logString += StatusCodeToString(logBuffer[i].statusCode);
         
         logString += "<br>";
-    }
-
-    return logString;
+        return logString;
 }
+String LogBufferToString() {
+
+    String logString = "";
+
+    // Erste Schleife: Neuerer Bereich (ab logIndex rückwärts bis 0)
+    for (int i = logIndex; i >= 0; i--) {
+        logString += LogBufferEntryToString(i);
+    }
+    logString += "-----<br>";
+    // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
+    // if (logIndex < LOG_BUFFER_SIZE - 1) {
+        for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--) {
+            logString += LogBufferEntryToString(i);
+        }
+    // }
+    
+        return logString;
+    }
 
 void clear_data_array()
 {
@@ -913,6 +914,7 @@ void call_backend_V2()
   {
     last_call_backend_v2 = millis();
     Serial.println("Zero Values to transmit");
+    AddLogEntry(0);
     call_backend_V2_successfull = true;
     return;
   }
@@ -1256,7 +1258,7 @@ void handleRoot()
   s += "<br><a href='callBackend'>Call Backend</a>";
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
-  s += "<br><br>Log Buffer:<br>";
+  s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
   s += LogBufferToString();
 
   s += "<br><br>";
