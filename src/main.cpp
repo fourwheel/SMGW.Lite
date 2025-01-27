@@ -112,6 +112,7 @@ char telegram_suffix[NUMBER_LEN];
 
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
+char UseSslCertValue[STRING_LEN]; // Platz für "0" oder "1"
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
@@ -141,6 +142,7 @@ IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
+IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Use SSL Cert", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
 
 
@@ -351,7 +353,7 @@ void splitHostAndPath(const String& url, String& host, String& path) {
     
 char* FullCert = new char[2000];
 void SetSslCert() {
-  server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'></textarea><br><input type='submit'></form>");
+  server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>"+String(FullCert)+"</textarea><br><input type='submit'></form>");
 }
 void handleCertUpload() {
   if (server.hasArg("cert")) {
@@ -427,6 +429,8 @@ void setup()
   group2.addItem(&mystrom_PV_object);
   group2.addItem(&mystrom_PV_IP_object);
   group2.addItem(&temperature_object);
+  group2.addItem(&UseSslCert_object);
+  
 
 
   iotWebConf.setStatusPin(STATUS_PIN);
@@ -895,13 +899,14 @@ void send_status_report_function()
   AddLogEntry(1019);
    WiFiClientSecure client;
 
-  // if(led_blink_object.isChecked()) 
-  //   {
-  //     client.setCACert(rootCACertificate);
-  //   }
-  // else 
+
+  if(UseSslCert_object.isChecked())
   {
     client.setCACert(FullCert);
+  }
+  else
+  {
+    client.setInsecure();
   }
   
   if (!client.connect(backend_host.c_str(), 443))
@@ -966,10 +971,10 @@ void call_backend_V2()
   AddLogEntry(1005);
   AddLogEntry(meter_value_i);
   Serial.println("call_backend_V2");
-
+  last_call_backend_v2 = millis();
   if (meter_value_i == 0)
   {
-    last_call_backend_v2 = millis();
+    
     Serial.println("Zero Values to transmit");
     AddLogEntry(0);
     call_backend_V2_successfull = true;
@@ -981,13 +986,13 @@ void call_backend_V2()
   // Verbindung zum Server herstellen
   WiFiClientSecure client;
   
-  // if(led_blink_object.isChecked()) 
-  //   {
-  //     client.setCACert(rootCACertificate);
-  //   }
-  // else 
+  if(UseSslCert_object.isChecked())
   {
     client.setCACert(FullCert);
+  }
+  else
+  {
+    client.setInsecure();
   }
 
   if (!client.connect(backend_host.c_str(), 443))
@@ -1138,6 +1143,7 @@ void handle_check_wifi_connection()
 {
 }
 unsigned long wifi_reconnection_time = 0;
+unsigned long last_backend_call = 0;
 void loop()
 {
   
@@ -1211,7 +1217,8 @@ void loop()
 
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if (!call_backend_V2_successfull || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
+    if ((!call_backend_V2_successfull && millis() - last_call_backend_v2 > 30000)
+     || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
     {
       //AddLogEntry(1012);
       call_backend_V2();
@@ -1293,6 +1300,14 @@ void handleRoot()
   s += String(millis() / 60000);
   s += "<li>Last Call ago (min): ";
   s += String((millis() - last_call_backend_v2) / 60000);
+
+   if (UseSslCert_object.isChecked())
+    s += "<li>Use SSL Cert: true";
+  else {
+    s += "<li>Use SSL Cert: false";
+
+
+  }
 
   #if defined(ESP32)
 
