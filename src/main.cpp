@@ -179,11 +179,11 @@ String StatusCodeToString(int statusCode) {
         case 1006: return "store_meter_value()";
         case 1008: return "WiFi returned";
         case 1009: return "WiFi lost";
-        case 1010: return "Taf7 meter reading trigger";
-        case 1002: return "Taf6 meter reading trigger";
-        case 1014: return "Taf7-900s meter reading trigger";
+        case 1010: return "Taf 7 meter reading trigger";
+        case 1002: return "Taf 6 meter reading trigger";
+        case 1014: return "Taf 7-900s meter reading trigger";
         case 1015: return "not enough heap to store value";
-        case 1011: return "Taf14 meter reading trigger";
+        case 1011: return "Taf 14 meter reading trigger";
         case 1012: return "call backend trigger";
         case 1019: return "Sending Log";
         case 1020: return "Sending Log successful";
@@ -198,6 +198,8 @@ String StatusCodeToString(int statusCode) {
         case 3002: return "Telegram timeout";
         case 3003: return "Telegramm zu groß für Speicher";
         case 4000: return "Connection to server failed (Cert!?)";
+        case 7000: return "Stopping Wifi, Backendcall unsuccessfull";
+        case 7001: return "Restarting Wifi";
         case 8000: return "Spiffs not mounted";
         case 8001: return "Fehler beim Öffnen der Zertifikatsdatei!";
         case 8002: return "Zertifikat gespeichert";
@@ -401,6 +403,7 @@ void handleCertUpload() {
 }
 void setup()
 {
+  
   AddLogEntry(1001);
   Serial.begin(115200);
 
@@ -547,6 +550,7 @@ void setup()
     AddLogEntry(8000);
   }
   loadCertToCharArray();
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -1143,7 +1147,8 @@ void handle_check_wifi_connection()
 {
 }
 unsigned long wifi_reconnection_time = 0;
-unsigned long last_backend_call = 0;
+unsigned long last_wifi_retry = 0;
+bool restart_wifi = false;
 void loop()
 {
   
@@ -1151,6 +1156,16 @@ void loop()
   ArduinoOTA.handle();
   
   handle_telegram2();
+
+  if(restart_wifi
+   && millis() - last_wifi_retry > 5000)
+  {
+    Serial.println("7001A");
+    restart_wifi = false;
+    iotWebConf.goOnLine();
+    AddLogEntry(7001);
+    Serial.println("7001B");
+  }
 
   if (millis() - last_wifi_check > 500)
   {
@@ -1172,7 +1187,7 @@ void loop()
       
       if(firstTime == true) 
       {
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        
         
         firstTime = false;
       }
@@ -1196,7 +1211,7 @@ void loop()
 
   if (!wifi_connected &&
       //timeClient_getMinutes() % 15 == 0 
-      (timeClient_getEpochTime()-3) % 900 < 60
+      (timeClient_getEpochTime()-1) % 900 < 60
       && millis() - last_meter_value > 60000)
   {
     AddLogEntry(1010);
@@ -1222,6 +1237,16 @@ void loop()
     {
       //AddLogEntry(1012);
       call_backend_V2();
+
+      if(call_backend_V2_successfull == false)
+      {
+        Serial.println("7000 A");
+        iotWebConf.goOffLine();
+        last_wifi_retry = millis();
+        restart_wifi = true;
+        AddLogEntry(7000);
+        Serial.println("7000 B");
+      }
     }
   }
 }
