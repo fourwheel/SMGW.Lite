@@ -1,6 +1,6 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
-
+#include <SPIFFS.h>
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMLReader";
 
@@ -94,6 +94,7 @@ void handleRoot();
 void showTelegram();
 void showMeterValue();
 void showTemperature();
+void showCert();
 void configSaved();
 void call_backend_V2();
 void reset_telegram();
@@ -141,64 +142,6 @@ IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyS
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 
-// #define CHUNK_SIZE 512
-// #define NUM_CHUNKS 4  // Adjust this based on the key's total size
-
-// char publicKeyChunk1[CHUNK_SIZE];
-// char publicKeyChunk2[CHUNK_SIZE];
-// char publicKeyChunk3[CHUNK_SIZE];
-// char publicKeyChunk4[CHUNK_SIZE];
-// String SslCert;
-// IotWebConfTextParameter publicKeyParam1("Public Key Part 1", "keyPart1", publicKeyChunk1, CHUNK_SIZE);
-// IotWebConfTextParameter publicKeyParam2("Public Key Part 2", "keyPart2", publicKeyChunk2, CHUNK_SIZE);
-// IotWebConfTextParameter publicKeyParam3("Public Key Part 3", "keyPart3", publicKeyChunk3, CHUNK_SIZE);
-// IotWebConfTextParameter publicKeyParam4("Public Key Part 4", "keyPart4", publicKeyChunk4, CHUNK_SIZE);
-
-// String formatCertificateWithLineBreaks(const String &cert) {
-//     String formattedCert = "-----BEGIN CERTIFICATE-----\n";
-    
-//     // Gehe den Zertifikat-String in 64 Zeichen großen Schritten durch
-//     for (size_t i = 0; i < cert.length(); i += 64) {
-//         formattedCert += cert.substring(i, i + 64) + "\n";  // Füge 64 Zeichen mit Zeilenumbruch hinzu
-//     }
-    
-//     formattedCert += "-----END CERTIFICATE-----";
-//     return formattedCert;
-// }
-
-const char* rootCACertificate = R"EOF(
------BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
------END CERTIFICATE-----
-)EOF";
 
 
 int meter_value_i = 0;
@@ -222,64 +165,6 @@ void resetLogBuffer() {
     }
     logIndex = -1;
 }
-
-// void handleFormGeneration2() {
-//     server.sendContent(
-//         "<script>"
-//         "function splitKey() {"
-//         "  console.log('splitKey() wurde aufgerufen');"
-//         "  const fullKey = document.getElementById('fullKey').value;"
-//         "  console.log('Gesamter Public Key: ', fullKey);"
-//         "  document.getElementById('keyPart1').value = fullKey.slice(0, 512);"
-//         "  document.getElementById('keyPart2').value = fullKey.slice(512, 1024);"
-//         "  document.getElementById('keyPart3').value = fullKey.slice(1024, 1536);"
-//         "  document.getElementById('keyPart4').value = fullKey.slice(1536, 2048);"
-//         "  console.log('Aufteilen abgeschlossen');"
-//         "}"
-//         "</script>"
-//         "<div>"
-//         "  <label>Gesamter Public Key:</label><br>"
-//         "  <textarea id='fullKey' placeholder='Gesamten Public Key einfügen'></textarea><br>"
-//         "  <button type='button' onclick='splitKey()'>Aufteilen</button><br><br>"
-//         "</div>"
-//         "<div>"
-//         "  <label>Key Part 1:</label><br>"
-//         "  <input id='keyPart1' type='text' readonly><br>"
-//         "  <label>Key Part 2:</label><br>"
-//         "  <input id='keyPart2' type='text' readonly><br>"
-//         "  <label>Key Part 3:</label><br>"
-//         "  <input id='keyPart3' type='text' readonly><br>"
-//         "  <label>Key Part 4:</label><br>"
-//         "  <input id='keyPart4' type='text' readonly><br>"
-//         "</div>");
-// }
-// String fullKey;
-// void handleFormGeneration() {
-//     server.sendContent(
-//         "<script>"
-//         "function splitKey() {"
-//         "  const fullKey = document.getElementById('fullKey').value;"
-//         "  document.getElementById('publicKeyParam1').value = fullKey.slice(0, 512);"
-//         "  document.getElementById('publicKeyParam2').value = fullKey.slice(512, 1024);"
-//         "  document.getElementById('publicKeyParam3').value = fullKey.slice(1024, 1536);"
-//         "  document.getElementById('publicKeyParam4').value = fullKey.slice(1536, 2048);"
-//         "}"
-//         "</script>"
-//         "<form action='/config' method='post'>" // Das Formular speichert die Daten in IoTWebConf
-//         "  <label>Gesamter Public Key:</label><br>"
-//         "  <textarea id='fullKey' placeholder='Gesamten Public Key einfügen' rows='40' cols='70'>" + formatCertificateWithLineBreaks(fullKey) + "</textarea><br>"
-//         "  <button type='button' onclick='splitKey()'>Split SSL Cert</button><br><br>"
-//         "  <label>Key Part 1:</label><br>"
-//         "  <input id='publicKeyParam1' name='keyPart1' type='text' value='" + String(publicKeyChunk1) + "'><br>"
-//         "  <label>Key Part 2:</label><br>"
-//         "  <input id='publicKeyParam2' name='keyPart2' type='text' value='" + String(publicKeyChunk2) + "'><br>"
-//         "  <label>Key Part 3:</label><br>"
-//         "  <input id='publicKeyParam3' name='keyPart3' type='text' value='" + String(publicKeyChunk3) + "'><br>"
-//         "  <label>Key Part 4:</label><br>"
-//         "  <input id='publicKeyParam4' name='keyPart4' type='text' value='" + String(publicKeyChunk4) + "'><br>"
-//         "  <button type='submit'>Forward to config Form</button>"
-//         "</form>");
-// }
 
 bool send_status_report = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
@@ -311,6 +196,11 @@ String StatusCodeToString(int statusCode) {
         case 3002: return "Telegram timeout";
         case 3003: return "Telegramm zu groß für Speicher";
         case 4000: return "Connection to server failed (Cert!?)";
+        case 8000: return "Spiffs not mounted";
+        case 8001: return "Fehler beim Öffnen der Zertifikatsdatei!";
+        case 8002: return "Zertifikat gespeichert";
+        case 8003: return "Fehler beim Öffnen der Cert Datei";
+        case 8004: return "Kein Zertifikat erhalten!";
         //default: return "Unknown status code";
     }
     if(statusCode < 200)
@@ -459,42 +349,54 @@ void splitHostAndPath(const String& url, String& host, String& path) {
     String backend_host;
     String backend_path;
     
-//     String compare_string;
-//     String compareStrings(String str1, const char* cstr) {
-//   AddLogEntry(9876);
-//     int str1Length = str1.length();
-//     int cstrLength = strlen(cstr);
-//     int maxLength = max(str1Length, cstrLength);
+char* FullCert = new char[2000];
+void SetSslCert() {
+  server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'></textarea><br><input type='submit'></form>");
+}
+void handleCertUpload() {
+  if (server.hasArg("cert")) {
+    String cert = server.arg("cert");
+    File file = SPIFFS.open("/cert.pem", FILE_WRITE);
+    if (file) {
+      file.println(cert);
+      file.close();
+      AddLogEntry(8002);
+      location_href_home();
+    } else {
+      AddLogEntry(8003);
+      location_href_home();
+      server.send(500, "text/plain", "Fehler beim Öffnen der Datei!");
+    }
+  } else {
+    AddLogEntry(8004);
+    location_href_home();
 
-//     String result = "Vergleich der Strings:<br>";
+  }
+}
+ void loadCertToCharArray() {
 
+  File file = SPIFFS.open("/cert.pem", FILE_READ);
 
-//     bool differencesFound = false;
+  if (!file) {
 
-//     // Vergleiche Zeichen für Zeichen
-//     for (int i = 0; i < maxLength; i++) {
-//         char char1 = (i < str1Length) ? str1[i] : '\0'; // '\0', wenn außerhalb der Länge
-//         char char2 = (i < cstrLength) ? cstr[i] : '\0';
+    AddLogEntry(8001);
+    return;
+  }
 
-//         if (char1 != char2) {
-//             differencesFound = true;
-//             result += "Unterschied an Position ";
-//             result += String(i);
-//             result += ": '";
-//             result += char1;
-//             result += "' vs '";
-//             result += char2;
-//             result += "'<br>";
-//             AddLogEntry(9870);
-//         }
-//     }
+   size_t size = file.size();
 
-//     if (!differencesFound) {
-//         result += "Die Strings sind identisch.<br>";
-//     }
-// AddLogEntry(98768);
-//     return result;
-// }
+  // Lese den Dateiinhalt in das char-Array
+
+  file.readBytes(FullCert, size);
+
+  // Füge das Nullterminierungssymbol hinzu
+
+  FullCert[size] = '\0';
+
+  file.close();
+
+ 
+}
 void setup()
 {
   AddLogEntry(1001);
@@ -526,18 +428,12 @@ void setup()
   group2.addItem(&mystrom_PV_IP_object);
   group2.addItem(&temperature_object);
 
-  // Add parameters to a group
-  // groupSslCert.addItem(&publicKeyParam1);
-  // groupSslCert.addItem(&publicKeyParam2);
-  // groupSslCert.addItem(&publicKeyParam3);
-  // groupSslCert.addItem(&publicKeyParam4);
 
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
 
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
-  // iotWebConf.addParameterGroup(&groupSslCert);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
   // iotWebConf.setFormValidator(&formValidator);
@@ -560,6 +456,15 @@ void setup()
   server.on("/showTelegram", showTelegram);
   server.on("/showMeterValue", showMeterValue);
   server.on("/showTemperature", showTemperature);
+  server.on("/showCert", showCert);
+  server.on("/setCert", SetSslCert);
+  
+  server.on("/upload", []
+              {
+              handleCertUpload();
+              loadCertToCharArray();
+              });
+
   server.on("/config", []
             { iotWebConf.handleConfig(); });
   server.on("/restart", []
@@ -590,10 +495,6 @@ void setup()
             { wifi_connected = false;
             location_href_home(); }); 
   
-  // server.on("/setSSL", []
-  // {
-  //   handleFormGeneration();
-  // });
               
             
   server.onNotFound([]()
@@ -638,6 +539,10 @@ void setup()
   // fullKey.replace("\n", ""); // Entfernt alle Zeilenumbrüche
   // fullKey.trim();
   // compare_string = compareStrings((formatCertificateWithLineBreaks(fullKey)), rootCACertificate);
+  if (!SPIFFS.begin(true)) {
+    AddLogEntry(8000);
+  }
+  loadCertToCharArray();
 }
 
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -991,14 +896,13 @@ void send_status_report_function()
    WiFiClientSecure client;
 
   // if(led_blink_object.isChecked()) 
-    {
-      client.setCACert(rootCACertificate);
-    }
+  //   {
+  //     client.setCACert(rootCACertificate);
+  //   }
   // else 
-  // {
-  //   const char* CACert = formatCertificateWithLineBreaks(fullKey).c_str();
-  //   client.setCACert(CACert);
-  // }
+  {
+    client.setCACert(FullCert);
+  }
   
   if (!client.connect(backend_host.c_str(), 443))
   {
@@ -1078,14 +982,13 @@ void call_backend_V2()
   WiFiClientSecure client;
   
   // if(led_blink_object.isChecked()) 
-    {
-      client.setCACert(rootCACertificate);
-    }
+  //   {
+  //     client.setCACert(rootCACertificate);
+  //   }
   // else 
-  // {
-  //   const char* CACert = formatCertificateWithLineBreaks(fullKey).c_str();
-  //   client.setCACert(CACert);
-  // }
+  {
+    client.setCACert(FullCert);
+  }
 
   if (!client.connect(backend_host.c_str(), 443))
   {
@@ -1414,9 +1317,12 @@ void handleRoot()
   s += "</ul><br>";
   s += "Free Heap ";
   s += String(ESP.getFreeHeap());
+  
 
   s += "<br>Go to <a href='config'>configure page</a> to change values.";
   s += "<br><a href='showTelegram'>Show Telegram</a>";
+  s += "<br><a href='showCert'>Show Cert</a>";
+  s += "<br><a href='setCert'>Set Cert</a>";
   s += "<br><a href='StoreMeterValue'>Store Meter Value</a>";
   s += "<br><a href='sendStatus'>Send Status Report with next backend call</a>";
   s += "<br><a href='callBackend'>Call Backend</a>";
@@ -1425,24 +1331,16 @@ void handleRoot()
   s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
   s += LogBufferToString();
 
-  // s += "<br>SSL<br>";
-  // if(formatCertificateWithLineBreaks(fullKey) == String(rootCACertificate)) { s += "String ist gleich"; }
-  // else { s += "String ist NICHT gleich"; }
-  // s += " string length:"+String(formatCertificateWithLineBreaks(fullKey).length())+"<br>";
-  // s += " char length:"+String(String(rootCACertificate).length())+"<br>";
-  // if(formatCertificateWithLineBreaks(fullKey).c_str() == rootCACertificate) { s += " char ist gleich"; }
-  // else { s += " char ist NICHT gleich"; }
-  // s += "direkter vergleich<br> ";
-  // s += compare_string;
-  // s += "<br>komisch";
-  // s += "<br>"+String(rootCACertificate) + "\n<br>\n";
-  // s += formatCertificateWithLineBreaks(fullKey) + "\n<br>";
-  // s += "SSL<br>" + formatCertificateWithLineBreaks(fullKey);
-  // s += "SSL2<br>" + String(rootCACertificate);
+
   s += "<br></body></html>\n";
 
   server.send(200, "text/html", s);
 }
+void showCert()
+{
+  server.send(200, "text/html", String(FullCert));
+}
+
 void showTemperature()
 {
   Temp_sensors.requestTemperatures();
@@ -1519,7 +1417,5 @@ void configSaved()
     digitalWrite(LED_BUILTIN, LOW);
   }
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);   
-  // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
-  // fullKey.replace(" ", "");  // Entfernt alle Leerzeichen
-  // fullKey.replace("\n", ""); // Entfernt alle Zeilenumbrüche
+
 }
