@@ -124,6 +124,7 @@ IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CON
 
 IotWebConfParameterGroup group1 = IotWebConfParameterGroup("group1", "Telegram Param");
 IotWebConfParameterGroup group2 = IotWebConfParameterGroup("group2", "Backend Config");
+// IotWebConfParameterGroup groupSslCert = IotWebConfParameterGroup("groupSslCert", "SSL Cert");
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
@@ -139,6 +140,31 @@ IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
+
+// #define CHUNK_SIZE 512
+// #define NUM_CHUNKS 4  // Adjust this based on the key's total size
+
+// char publicKeyChunk1[CHUNK_SIZE];
+// char publicKeyChunk2[CHUNK_SIZE];
+// char publicKeyChunk3[CHUNK_SIZE];
+// char publicKeyChunk4[CHUNK_SIZE];
+// String SslCert;
+// IotWebConfTextParameter publicKeyParam1("Public Key Part 1", "keyPart1", publicKeyChunk1, CHUNK_SIZE);
+// IotWebConfTextParameter publicKeyParam2("Public Key Part 2", "keyPart2", publicKeyChunk2, CHUNK_SIZE);
+// IotWebConfTextParameter publicKeyParam3("Public Key Part 3", "keyPart3", publicKeyChunk3, CHUNK_SIZE);
+// IotWebConfTextParameter publicKeyParam4("Public Key Part 4", "keyPart4", publicKeyChunk4, CHUNK_SIZE);
+
+// String formatCertificateWithLineBreaks(const String &cert) {
+//     String formattedCert = "-----BEGIN CERTIFICATE-----\n";
+    
+//     // Gehe den Zertifikat-String in 64 Zeichen großen Schritten durch
+//     for (size_t i = 0; i < cert.length(); i += 64) {
+//         formattedCert += cert.substring(i, i + 64) + "\n";  // Füge 64 Zeichen mit Zeilenumbruch hinzu
+//     }
+    
+//     formattedCert += "-----END CERTIFICATE-----";
+//     return formattedCert;
+// }
 
 const char* rootCACertificate = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -180,7 +206,7 @@ const int data_buffer = 200;
 unsigned long data[data_buffer + 1][3];
 
 // Definition des Logbuffers
-const int LOG_BUFFER_SIZE = 10;
+const int LOG_BUFFER_SIZE = 100;
 struct LogEntry {
     unsigned long timestamp; // Zeitstempel in Millisekunden seit Start
     unsigned long uptime;    // Betriebszeit in Sekunden
@@ -194,7 +220,66 @@ void resetLogBuffer() {
         logBuffer[i].uptime = 0;
         logBuffer[i].statusCode = 0;
     }
+    logIndex = -1;
 }
+
+// void handleFormGeneration2() {
+//     server.sendContent(
+//         "<script>"
+//         "function splitKey() {"
+//         "  console.log('splitKey() wurde aufgerufen');"
+//         "  const fullKey = document.getElementById('fullKey').value;"
+//         "  console.log('Gesamter Public Key: ', fullKey);"
+//         "  document.getElementById('keyPart1').value = fullKey.slice(0, 512);"
+//         "  document.getElementById('keyPart2').value = fullKey.slice(512, 1024);"
+//         "  document.getElementById('keyPart3').value = fullKey.slice(1024, 1536);"
+//         "  document.getElementById('keyPart4').value = fullKey.slice(1536, 2048);"
+//         "  console.log('Aufteilen abgeschlossen');"
+//         "}"
+//         "</script>"
+//         "<div>"
+//         "  <label>Gesamter Public Key:</label><br>"
+//         "  <textarea id='fullKey' placeholder='Gesamten Public Key einfügen'></textarea><br>"
+//         "  <button type='button' onclick='splitKey()'>Aufteilen</button><br><br>"
+//         "</div>"
+//         "<div>"
+//         "  <label>Key Part 1:</label><br>"
+//         "  <input id='keyPart1' type='text' readonly><br>"
+//         "  <label>Key Part 2:</label><br>"
+//         "  <input id='keyPart2' type='text' readonly><br>"
+//         "  <label>Key Part 3:</label><br>"
+//         "  <input id='keyPart3' type='text' readonly><br>"
+//         "  <label>Key Part 4:</label><br>"
+//         "  <input id='keyPart4' type='text' readonly><br>"
+//         "</div>");
+// }
+// String fullKey;
+// void handleFormGeneration() {
+//     server.sendContent(
+//         "<script>"
+//         "function splitKey() {"
+//         "  const fullKey = document.getElementById('fullKey').value;"
+//         "  document.getElementById('publicKeyParam1').value = fullKey.slice(0, 512);"
+//         "  document.getElementById('publicKeyParam2').value = fullKey.slice(512, 1024);"
+//         "  document.getElementById('publicKeyParam3').value = fullKey.slice(1024, 1536);"
+//         "  document.getElementById('publicKeyParam4').value = fullKey.slice(1536, 2048);"
+//         "}"
+//         "</script>"
+//         "<form action='/config' method='post'>" // Das Formular speichert die Daten in IoTWebConf
+//         "  <label>Gesamter Public Key:</label><br>"
+//         "  <textarea id='fullKey' placeholder='Gesamten Public Key einfügen' rows='40' cols='70'>" + formatCertificateWithLineBreaks(fullKey) + "</textarea><br>"
+//         "  <button type='button' onclick='splitKey()'>Split SSL Cert</button><br><br>"
+//         "  <label>Key Part 1:</label><br>"
+//         "  <input id='publicKeyParam1' name='keyPart1' type='text' value='" + String(publicKeyChunk1) + "'><br>"
+//         "  <label>Key Part 2:</label><br>"
+//         "  <input id='publicKeyParam2' name='keyPart2' type='text' value='" + String(publicKeyChunk2) + "'><br>"
+//         "  <label>Key Part 3:</label><br>"
+//         "  <input id='publicKeyParam3' name='keyPart3' type='text' value='" + String(publicKeyChunk3) + "'><br>"
+//         "  <label>Key Part 4:</label><br>"
+//         "  <input id='publicKeyParam4' name='keyPart4' type='text' value='" + String(publicKeyChunk4) + "'><br>"
+//         "  <button type='submit'>Forward to config Form</button>"
+//         "</form>");
+// }
 
 bool send_status_report = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
@@ -208,6 +293,7 @@ String StatusCodeToString(int statusCode) {
         case 1008: return "WiFi returned";
         case 1009: return "WiFi lost";
         case 1010: return "Taf7 meter reading trigger";
+        case 1002: return "Taf6 meter reading trigger";
         case 1014: return "Taf7-900s meter reading trigger";
         case 1015: return "not enough heap to store value";
         case 1011: return "Taf14 meter reading trigger";
@@ -308,7 +394,7 @@ String formatTimestamp(unsigned long timestamp) {
 }
 String LogBufferEntryToString(int i)
 {
-        if (logBuffer[i].statusCode == 0) return "zero <br>"; // Leere Einträge überspringen
+        if (logBuffer[i].statusCode == 0) return ""; // Leere Einträge überspringen
         String logString;
         logString += String(i) + ", ";
         logString += String(logBuffer[i].timestamp) + ", ";
@@ -330,11 +416,11 @@ String LogBufferToString() {
     }
     logString += "-----<br>";
     // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
-    // if (logIndex < LOG_BUFFER_SIZE - 1) {
+     if (logIndex < LOG_BUFFER_SIZE - 1) {
         for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--) {
             logString += LogBufferEntryToString(i);
         }
-    // }
+     }
     
         return logString;
     }
@@ -350,9 +436,10 @@ void clear_data_array()
   meter_value_i = 0;
   //AddLogEntry(1013);
 }
-void location_href_home()
+void location_href_home(int delay = 0)
   {
-    server.send(200, "text/html", "<meta http-equiv='refresh' content = '0;url=/'>");
+    String call = "<meta http-equiv='refresh' content = '"+ String(delay)+";url=/'>";
+    server.send(200, "text/html", call);
   }
 void splitHostAndPath(const String& url, String& host, String& path) {
     // Suche nach dem ersten "/"
@@ -371,6 +458,43 @@ void splitHostAndPath(const String& url, String& host, String& path) {
 }
     String backend_host;
     String backend_path;
+    
+//     String compare_string;
+//     String compareStrings(String str1, const char* cstr) {
+//   AddLogEntry(9876);
+//     int str1Length = str1.length();
+//     int cstrLength = strlen(cstr);
+//     int maxLength = max(str1Length, cstrLength);
+
+//     String result = "Vergleich der Strings:<br>";
+
+
+//     bool differencesFound = false;
+
+//     // Vergleiche Zeichen für Zeichen
+//     for (int i = 0; i < maxLength; i++) {
+//         char char1 = (i < str1Length) ? str1[i] : '\0'; // '\0', wenn außerhalb der Länge
+//         char char2 = (i < cstrLength) ? cstr[i] : '\0';
+
+//         if (char1 != char2) {
+//             differencesFound = true;
+//             result += "Unterschied an Position ";
+//             result += String(i);
+//             result += ": '";
+//             result += char1;
+//             result += "' vs '";
+//             result += char2;
+//             result += "'<br>";
+//             AddLogEntry(9870);
+//         }
+//     }
+
+//     if (!differencesFound) {
+//         result += "Die Strings sind identisch.<br>";
+//     }
+// AddLogEntry(98768);
+//     return result;
+// }
 void setup()
 {
   AddLogEntry(1001);
@@ -402,11 +526,18 @@ void setup()
   group2.addItem(&mystrom_PV_IP_object);
   group2.addItem(&temperature_object);
 
+  // Add parameters to a group
+  // groupSslCert.addItem(&publicKeyParam1);
+  // groupSslCert.addItem(&publicKeyParam2);
+  // groupSslCert.addItem(&publicKeyParam3);
+  // groupSslCert.addItem(&publicKeyParam4);
+
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
 
   iotWebConf.addParameterGroup(&group1);
   iotWebConf.addParameterGroup(&group2);
+  // iotWebConf.addParameterGroup(&groupSslCert);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
   // iotWebConf.setFormValidator(&formValidator);
@@ -432,7 +563,9 @@ void setup()
   server.on("/config", []
             { iotWebConf.handleConfig(); });
   server.on("/restart", []
-            { ESP.restart(); });
+            { 
+              location_href_home(5);
+              ESP.restart(); });
   server.on("/resetLog", []
             { 
               location_href_home();
@@ -440,6 +573,7 @@ void setup()
              }); 
   server.on("/StoreMeterValue", []
             { location_href_home();
+            AddLogEntry(1002);
             store_meter_value(); });               
             
   server.on("/sendStatus", []
@@ -455,6 +589,11 @@ void setup()
   server.on("/setOffline", []
             { wifi_connected = false;
             location_href_home(); }); 
+  
+  // server.on("/setSSL", []
+  // {
+  //   handleFormGeneration();
+  // });
               
             
   server.onNotFound([]()
@@ -494,6 +633,11 @@ void setup()
   clear_data_array();
     
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
+  // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
+  // fullKey.replace(" ", "");  // Entfernt alle Leerzeichen
+  // fullKey.replace("\n", ""); // Entfernt alle Zeilenumbrüche
+  // fullKey.trim();
+  // compare_string = compareStrings((formatCertificateWithLineBreaks(fullKey)), rootCACertificate);
 }
 
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -845,8 +989,17 @@ void send_status_report_function()
   Serial.println("send_status_report");
   AddLogEntry(1019);
    WiFiClientSecure client;
+
+  // if(led_blink_object.isChecked()) 
+    {
+      client.setCACert(rootCACertificate);
+    }
+  // else 
+  // {
+  //   const char* CACert = formatCertificateWithLineBreaks(fullKey).c_str();
+  //   client.setCACert(CACert);
+  // }
   
-  client.setCACert(rootCACertificate);
   if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
@@ -924,7 +1077,16 @@ void call_backend_V2()
   // Verbindung zum Server herstellen
   WiFiClientSecure client;
   
-  client.setCACert(rootCACertificate);
+  // if(led_blink_object.isChecked()) 
+    {
+      client.setCACert(rootCACertificate);
+    }
+  // else 
+  // {
+  //   const char* CACert = formatCertificateWithLineBreaks(fullKey).c_str();
+  //   client.setCACert(CACert);
+  // }
+
   if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
@@ -1175,6 +1337,8 @@ String esp_reset_reason_string()
 /**
  * Handle web requests to "/" path.
  */
+
+
 void handleRoot()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -1261,8 +1425,20 @@ void handleRoot()
   s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
   s += LogBufferToString();
 
-  s += "<br><br>";
-
+  // s += "<br>SSL<br>";
+  // if(formatCertificateWithLineBreaks(fullKey) == String(rootCACertificate)) { s += "String ist gleich"; }
+  // else { s += "String ist NICHT gleich"; }
+  // s += " string length:"+String(formatCertificateWithLineBreaks(fullKey).length())+"<br>";
+  // s += " char length:"+String(String(rootCACertificate).length())+"<br>";
+  // if(formatCertificateWithLineBreaks(fullKey).c_str() == rootCACertificate) { s += " char ist gleich"; }
+  // else { s += " char ist NICHT gleich"; }
+  // s += "direkter vergleich<br> ";
+  // s += compare_string;
+  // s += "<br>komisch";
+  // s += "<br>"+String(rootCACertificate) + "\n<br>\n";
+  // s += formatCertificateWithLineBreaks(fullKey) + "\n<br>";
+  // s += "SSL<br>" + formatCertificateWithLineBreaks(fullKey);
+  // s += "SSL2<br>" + String(rootCACertificate);
   s += "<br></body></html>\n";
 
   server.send(200, "text/html", s);
@@ -1343,4 +1519,7 @@ void configSaved()
     digitalWrite(LED_BUILTIN, LOW);
   }
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);   
+  // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
+  // fullKey.replace(" ", "");  // Entfernt alle Leerzeichen
+  // fullKey.replace("\n", ""); // Entfernt alle Zeilenumbrüche
 }
