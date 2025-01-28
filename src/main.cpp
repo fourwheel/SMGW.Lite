@@ -103,7 +103,7 @@ void store_meter_value();
 DNSServer dnsServer;
 WebServer server(80);
 
-float temperature;
+int temperature;
 
 char telegram_offset[NUMBER_LEN];
 char telegram_length[NUMBER_LEN];
@@ -1113,8 +1113,8 @@ void store_meter_value()
 
   if (temperature_object.isChecked())
   {
-    Temp_sensors.requestTemperatures();
-    data[meter_value_i][2] = int(Temp_sensors.getTempCByIndex(0) * 100);
+    
+    data[meter_value_i][2] = temperature;
   }
 
   Serial.print("Free Heap: ");
@@ -1149,12 +1149,34 @@ void handle_check_wifi_connection()
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
 bool restart_wifi = false;
+unsigned long last_temp = 0;
+bool read_temp = false;
+
+void handle_temperature()
+{
+  if (temperature_object.isChecked())
+  {
+    if(read_temp == true && millis() - last_temp > 20000)
+    {
+      last_temp = millis();
+      Temp_sensors.requestTemperatures();
+      read_temp = false;
+    }
+    else if(read_temp == false && millis() - last_temp > 1000)
+    {
+      last_temp = millis();
+      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
+      read_temp = true;
+    }
+  }
+
+}
 void loop()
 {
   
   iotWebConf.doLoop();
   ArduinoOTA.handle();
-  
+  handle_temperature();
   handle_telegram2();
 
   if(restart_wifi
@@ -1167,6 +1189,8 @@ void loop()
     Serial.println("7001B");
   }
 
+
+  
   if (millis() - last_wifi_check > 500)
   {
     last_wifi_check = millis();
@@ -1282,7 +1306,7 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
-  Temp_sensors.requestTemperatures();
+  
     
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>IotWebConf 03 Custom Parameters</title></head><body>Hello world!";
@@ -1318,7 +1342,7 @@ void handleRoot()
   s += "<li>MyStrom PV IP: ";
   s += mystrom_PV_IP;
   s += "<li>temperatur: ";
-  s += String(Temp_sensors.getTempCByIndex(0));
+  s += String(temperature);
   s += "<li>Ring Buffer i: ";
   s += String(meter_value_i);
   s += "<li>Uptime (min): ";
@@ -1384,7 +1408,7 @@ void showCert()
 void showTemperature()
 {
   Temp_sensors.requestTemperatures();
-  server.send(200, "text/html", String(Temp_sensors.getTempCByIndex(0)));
+  server.send(200, "text/html", String(temperature));
 }
 void showTelegram()
 {
