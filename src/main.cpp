@@ -1069,12 +1069,12 @@ void call_backend_V2()
     }
   }
 
-
+  client.stop();
   if(send_status_report == true) {
     send_status_report_function();
     
   }
-  client.stop();
+  
 }
 unsigned long last_meter_value = 0;
 int32_t previous_meter_value = 0;
@@ -1184,7 +1184,7 @@ void loop()
   {
     Serial.println("7001A");
     restart_wifi = false;
-    iotWebConf.goOnLine();
+    iotWebConf.goOnLine(false);
     AddLogEntry(7001);
     Serial.println("7001B");
   }
