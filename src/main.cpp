@@ -401,6 +401,9 @@ void handleCertUpload() {
 
  
 }
+bool call_backend_V2_successfull = true;
+
+unsigned long last_call_backend_v2 = 0;
 void setup()
 {
   
@@ -495,7 +498,8 @@ void setup()
   server.on("/callBackend", []
             { 
             location_href_home();
-            call_backend_V2();
+            call_backend_V2_successfull = false;
+            last_call_backend_v2 = 0;
             });   
             
   server.on("/setOffline", []
@@ -892,9 +896,7 @@ void handle_telegram()
 }
 
 
-bool call_backend_V2_successfull = true;
 
-unsigned long last_call_backend_v2 = 0;
 
 
 void send_status_report_function()
@@ -1070,10 +1072,7 @@ void call_backend_V2()
   }
 
   client.stop();
-  if(send_status_report == true) {
-    send_status_report_function();
-    
-  }
+
   
 }
 unsigned long last_meter_value = 0;
@@ -1261,7 +1260,10 @@ void loop()
     {
       //AddLogEntry(1012);
       call_backend_V2();
-
+      if(send_status_report == true) {
+        send_status_report_function();
+        
+      }
       if(call_backend_V2_successfull == false)
       {
         Serial.println("7000 A");
