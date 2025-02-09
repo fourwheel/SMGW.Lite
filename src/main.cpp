@@ -99,6 +99,7 @@ void configSaved();
 void call_backend_V2();
 void reset_telegram();
 void store_meter_value();
+void send_status_report_function();
 
 DNSServer dnsServer;
 WebServer server(80);
@@ -357,6 +358,29 @@ char* FullCert = new char[2000];
 void SetSslCert() {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>"+String(FullCert)+"</textarea><br><input type='submit'></form>");
 }
+void TestSslCert() {
+  WiFiClientSecure client;
+  
+  client.setCACert(FullCert);
+  String res;
+  if (client.connect(backend_host.c_str(), 443))
+  {
+    res = ("Host reachable, Cert correct");
+  }
+  else
+  {
+    client.setInsecure();
+    if (client.connect(backend_host.c_str(), 443))
+    {
+      res = ("Host reachable, Cert not working.");
+    }
+    else {
+      res = ("Host not reachable.");
+    }
+  }
+  server.send(200, "text/html", res);
+}
+
 void handleCertUpload() {
   if (server.hasArg("cert")) {
     String cert = server.arg("cert");
@@ -468,6 +492,7 @@ void setup()
   server.on("/showTemperature", showTemperature);
   server.on("/showCert", showCert);
   server.on("/setCert", SetSslCert);
+  server.on("/testCert", TestSslCert);
   
   server.on("/upload", []
               {
@@ -493,13 +518,13 @@ void setup()
             
   server.on("/sendStatus", []
             { 
-            send_status_report = true;
-            location_href_home(); });         
+            location_href_home(3);
+            send_status_report_function();
+            });         
   server.on("/callBackend", []
             { 
-            location_href_home();
-            call_backend_V2_successfull = false;
-            last_call_backend_v2 = 0;
+            location_href_home(3);
+            call_backend_V2();
             });   
             
   server.on("/setOffline", []
@@ -554,7 +579,8 @@ void setup()
     AddLogEntry(8000);
   }
   loadCertToCharArray();
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  configTime(0, 0, "ptbnts1.ptb.de", "pool.ntp.org", "time.nist.gov");
+  
 }
 
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
@@ -1389,9 +1415,10 @@ void handleRoot()
   s += "<br><a href='showTelegram'>Show Telegram</a>";
   s += "<br><a href='showCert'>Show Cert</a>";
   s += "<br><a href='setCert'>Set Cert</a>";
-  s += "<br><a href='StoreMeterValue'>Store Meter Value</a>";
-  s += "<br><a href='sendStatus'>Send Status Report with next backend call</a>";
-  s += "<br><a href='callBackend'>Call Backend</a>";
+  s += "<br><a href='testCert'>Test Backend Connection</a>";
+  s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
+  s += "<br><a href='sendStatus'>Send Status Report to Backend</a>";
+  s += "<br><a href='callBackend'>Send Meter Values to Backend</a>";
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
   s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
