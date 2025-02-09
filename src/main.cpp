@@ -948,10 +948,10 @@ void send_status_report_function()
     return;
   }
 
-    // Log-Buffer stabil sortieren nach Timestamp
-    std::stable_sort(logBuffer, logBuffer + LOG_BUFFER_SIZE, [](const LogEntry &a, const LogEntry &b) {
-        return a.timestamp < b.timestamp;
-    });
+    // // Log-Buffer stabil sortieren nach Timestamp
+    // std::stable_sort(logBuffer, logBuffer + LOG_BUFFER_SIZE, [](const LogEntry &a, const LogEntry &b) {
+    //     return a.timestamp < b.timestamp;
+    // });
 
     // Binärdaten des LogBuffers in Puffer schreiben
     size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
