@@ -14,6 +14,9 @@ const char wifiInitialApPassword[] = "hammelhammel";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "1015"
 
+#define HOST_REACHABLE 0x01
+#define CERT_CORRECT 0x02
+
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
 #ifndef D2
@@ -426,11 +429,33 @@ void handleCertUpload() {
  
 }
 bool call_backend_V2_successfull = true;
-
+SemaphoreHandle_t Sema_Backend;  // Mutex für synchronisierten Zugriff
 unsigned long last_call_backend_v2 = 0;
+int watermark_meter_value = 0;
+int watermark_log_buffer = 0;
+void call_backend_V2_Task(void *pvParameters) {
+    if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(2000))) 
+    {  
+      call_backend_V2();
+      xSemaphoreGive(Sema_Backend);
+    }
+    watermark_meter_value = uxTaskGetStackHighWaterMark(NULL);
+    vTaskDelete(NULL); // Task löschen, wenn fertig
+}
+
+void send_status_report_function_Task(void *pvParameters) {
+    if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(2000))) 
+    {  
+      send_status_report_function();
+      xSemaphoreGive(Sema_Backend);
+    }
+    watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
+    vTaskDelete(NULL); // Task löschen, wenn fertig
+}
+
 void setup()
 {
-  
+  Sema_Backend = xSemaphoreCreateMutex();
   AddLogEntry(1001);
   Serial.begin(115200);
 
@@ -520,12 +545,24 @@ void setup()
             { 
             location_href_home(3);
             send_status_report_function();
-            });         
+            });  
+  server.on("/sendStatus_Task", []
+            { 
+            watermark_log_buffer = 0;
+            location_href_home(0);
+xTaskCreate(send_status_report_function_Task, "log buffer task", 8192, NULL, 1, NULL);
+            });                    
   server.on("/callBackend", []
             { 
+            watermark_meter_value = 0;
             location_href_home(3);
             call_backend_V2();
             });   
+  server.on("/callBackend_Task", []
+            { 
+            location_href_home(0);
+            xTaskCreate(call_backend_V2_Task, "meter value task", 8192, NULL, 2, NULL);
+            });             
             
   server.on("/setOffline", []
             { wifi_connected = false;
@@ -1285,9 +1322,13 @@ void loop()
      || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
     {
       //AddLogEntry(1012);
-      call_backend_V2();
+      // call_backend_V2();
+      
+      xTaskCreate(call_backend_V2_Task, "meter value task", 8192, NULL, 2, NULL);
+      
       if(send_status_report == true) {
-        send_status_report_function();
+        xTaskCreate(send_status_report_function_Task, "log buffer task", 8192, NULL, 1, NULL);
+        // send_status_report_function();
         
       }
       if(call_backend_V2_successfull == false)
@@ -1369,6 +1410,10 @@ void handleRoot()
   s += mystrom_PV;
   s += "<li>MyStrom PV IP: ";
   s += mystrom_PV_IP;
+  s += "<li>Water Mark Meter Value: ";
+  s += String(watermark_meter_value);
+  s += "<li>Water Mark Logbuffer: ";
+  s += String(watermark_log_buffer);
   s += "<li>temperatur: ";
   s += String(temperature);
   s += "<li>Ring Buffer i: ";
@@ -1417,8 +1462,8 @@ void handleRoot()
   s += "<br><a href='setCert'>Set Cert</a>";
   s += "<br><a href='testCert'>Test Backend Connection</a>";
   s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
-  s += "<br><a href='sendStatus'>Send Status Report to Backend</a>";
-  s += "<br><a href='callBackend'>Send Meter Values to Backend</a>";
+  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
+  s += "<br><a href='callBackend_Task'>Send Meter Values to Backend</a>";
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
   s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
