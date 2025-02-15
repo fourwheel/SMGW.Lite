@@ -109,8 +109,6 @@ void send_meter_values();
 void call_backend_wrapper(bool meter_values = true, bool status_report = false);
 int watermark_backend_buffer = 0;
 
-
-
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
 bool restart_wifi = false;
@@ -138,8 +136,11 @@ char backend_ID[ID_LEN];
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
 
-IotWebConfParameterGroup group1 = IotWebConfParameterGroup("group1", "Telegram Param");
-IotWebConfParameterGroup group2 = IotWebConfParameterGroup("group2", "Backend Config");
+IotWebConfParameterGroup groupTelegram = IotWebConfParameterGroup("groupTelegram", "Telegram Param");
+IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend", "Backend Config");
+IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupAdditionalMeter", "Additional Meters & Sensors");
+IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
+
 // IotWebConfParameterGroup groupSslCert = IotWebConfParameterGroup("groupSslCert", "SSL Cert");
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
@@ -150,17 +151,17 @@ IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backe
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
-IotWebConfNumberParameter read_meter_intervall_object = IotWebConfNumberParameter("Read Meter Intervall", "read_meter_intervall", read_meter_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+IotWebConfNumberParameter read_meter_intervall_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "read_meter_intervall", read_meter_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
 IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
-IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Use SSL Cert", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
+IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
 int meter_value_i = 0;
-const int data_buffer = 200;
-unsigned long data[data_buffer + 1][3];
+const int Meter_Value_Buffer_Size = 200;
+unsigned long data[Meter_Value_Buffer_Size + 1][3];
 
 // Definition des Logbuffers
 const int LOG_BUFFER_SIZE = 100;
@@ -323,8 +324,6 @@ void PrintLogBuffer()
   }
 }
 
-
-
 String formatTimestamp(unsigned long timestamp)
 {
   // Konvertiere Unix-Timestamp in lokale Zeit
@@ -376,7 +375,7 @@ String LogBufferToString()
 
 void clear_data_array()
 {
-  for (int m = 0; m < data_buffer; m++)
+  for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     data[m][0] = 0;
     data[m][1] = 0;
@@ -417,31 +416,93 @@ void SetSslCert()
 {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
 }
-void TestSslCert()
+// void TestBackendConnection()
+// {
+//   WiFiClientSecure client;
+
+//   client.setCACert(FullCert);
+//   String res;
+//   if (client.connect(backend_host.c_str(), 443))
+//   {
+//     res = ("Host reachable, Cert correct");
+//   }
+//   else
+//   {
+//     client.setInsecure();
+//     if (client.connect(backend_host.c_str(), 443))
+//     {
+//       res = ("Host reachable, Cert not working.");
+//     }
+//     else
+//     {
+//       res = ("Host not reachable.");
+//     }
+//   }
+//   server.send(200, "text/html", res);
+// }
+
+void TestBackendConnection()
 {
   WiFiClientSecure client;
-
   client.setCACert(FullCert);
+
   String res;
+
   if (client.connect(backend_host.c_str(), 443))
   {
-    res = ("Host reachable, Cert correct");
+    res = "Host reachable,<br>Cert correct";
   }
   else
   {
-    client.setInsecure();
+    client.setInsecure(); // Falls Zertifikat nicht akzeptiert wird
     if (client.connect(backend_host.c_str(), 443))
     {
-      res = ("Host reachable, Cert not working.");
+      res = "Host reachable<br>Cert not working.";
     }
     else
     {
-      res = ("Host not reachable.");
+      res = "Host not reachable.";
+      server.send(200, "text/html", res);
+      return;
     }
+  }
+
+  // ** Anfrage mit ID & Token an das Backend senden **
+  String url = backend_path + "?backend_test=true&ID=" + String(backend_ID) + "&token=" + String(backend_token);
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + backend_host + "\r\n" +
+               "Connection: close\r\n\r\n");
+
+  // Warte auf die Antwort
+  unsigned long timeout = millis();
+  while (client.available() == 0)
+  {
+    if (millis() - timeout > 5000) // Timeout nach 5 Sekunden
+    {
+      res += "<br>>No response from server.";
+      server.send(200, "text/html", res);
+      return;
+    }
+  }
+
+  // Antwort vom Server lesen
+  String response = "";
+  while (client.available())
+  {
+    response += client.readString();
+  }
+
+  // ** Prüfen, ob Authentifizierung erfolgreich war **
+  if (response.indexOf("200") != -1) // Backend sendet JSON {"success": true}
+  {
+    res += "<br>ID & Token valid.";
+  }
+  else
+  {
+    res += "<br>ID & Token invalid!";
   }
   server.send(200, "text/html", res);
 }
-
 void handleCertUpload()
 {
   if (server.hasArg("cert"))
@@ -496,8 +557,6 @@ bool call_backend_V2_successfull = true;
 SemaphoreHandle_t Sema_Backend; // Mutex für synchronisierten Zugriff
 unsigned long last_call_backend_v2 = 0;
 
-
-
 void call_backend_Task(void *pvParameters)
 {
   if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(2000)))
@@ -545,27 +604,28 @@ void setup()
   Serial.println();
   Serial.println("Starting up...HELLAU!");
 
-  group1.addItem(&telegram_offset_object);
-  group1.addItem(&telegram_length_object);
-  group1.addItem(&telegram_prefix_object);
-  group1.addItem(&telegram_suffix_object);
-  group2.addItem(&backend_endpoint_object);
-  group2.addItem(&backend_ID_object);
-  group2.addItem(&backend_token_object);
-  group2.addItem(&read_meter_intervall_object);
-  group2.addItem(&backend_call_minute_object);
+  groupTelegram.addItem(&telegram_offset_object);
+  groupTelegram.addItem(&telegram_length_object);
+  groupTelegram.addItem(&telegram_prefix_object);
+  groupTelegram.addItem(&telegram_suffix_object);
+  groupBackend.addItem(&backend_endpoint_object);
+  groupBackend.addItem(&backend_ID_object);
+  groupBackend.addItem(&backend_token_object);
+  groupAdditionalMeter.addItem(&read_meter_intervall_object);
+  groupBackend.addItem(&backend_call_minute_object);
 
-  group2.addItem(&led_blink_object);
-  group2.addItem(&mystrom_PV_object);
-  group2.addItem(&mystrom_PV_IP_object);
-  group2.addItem(&temperature_object);
-  group2.addItem(&UseSslCert_object);
+  groupSys.addItem(&led_blink_object);
+  groupAdditionalMeter.addItem(&mystrom_PV_object);
+  groupAdditionalMeter.addItem(&mystrom_PV_IP_object);
+  groupAdditionalMeter.addItem(&temperature_object);
+  groupBackend.addItem(&UseSslCert_object);
 
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
-
-  iotWebConf.addParameterGroup(&group1);
-  iotWebConf.addParameterGroup(&group2);
+  iotWebConf.addParameterGroup(&groupSys);
+  iotWebConf.addParameterGroup(&groupTelegram);
+  iotWebConf.addParameterGroup(&groupBackend);
+  iotWebConf.addParameterGroup(&groupAdditionalMeter);
 
   iotWebConf.setConfigSavedCallback(&configSaved);
   // iotWebConf.setFormValidator(&formValidator);
@@ -590,7 +650,7 @@ void setup()
   server.on("/showTemperature", showTemperature);
   server.on("/showCert", showCert);
   server.on("/setCert", SetSslCert);
-  server.on("/testCert", TestSslCert);
+  server.on("/testBackendConnection", TestBackendConnection);
 
   server.on("/upload", []
             {
@@ -673,7 +733,7 @@ void setup()
     AddLogEntry(8000);
   }
   loadCertToCharArray();
-  configTime(0, 0, "ptbnts1.ptb.de", "pool.ntp.org", "time.nist.gov");
+  configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
 }
 void call_backend_wrapper(bool meter_values, bool status_report)
 {
@@ -1131,7 +1191,7 @@ void send_meter_values()
   }
 
   // Binärdaten in Puffer schreiben
-  size_t bufferSize = data_buffer * 3 * sizeof(unsigned long);
+  size_t bufferSize = Meter_Value_Buffer_Size * 3 * sizeof(unsigned long);
   uint8_t *buffer = (uint8_t *)malloc(bufferSize);
   if (!buffer)
   {
@@ -1145,6 +1205,8 @@ void send_meter_values()
   header += backend_path;
   header += "?ID=";
   header += backend_ID;
+  header += "&token=";
+  header += String(backend_token);
   header += "&uptime=";
   header += String(millis() / 60000);
   header += "&time=";
@@ -1221,7 +1283,7 @@ void store_meter_value()
   previous_meter_value = meter_value;
 
   meter_value_i++;
-  if (meter_value_i >= data_buffer)
+  if (meter_value_i >= Meter_Value_Buffer_Size)
     meter_value_i = 0;
   Serial.println("buffer i: " + String(meter_value_i));
 
@@ -1239,7 +1301,7 @@ void store_meter_value()
 }
 void print_data_buffer()
 {
-  for (int m = 0; m < data_buffer; m++)
+  for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     if (data[m][0] != 0)
     {
@@ -1402,23 +1464,24 @@ String esp_reset_reason_string()
 /**
  * Handle web requests to "/" path.
  */
-String formatUptime() {
-    int64_t uptimeMicros = esp_timer_get_time(); // Zeit in Mikrosekunden
-    int64_t uptimeMillis = uptimeMicros / 1000;  // In Millisekunden umrechnen
-    int64_t uptimeSeconds = uptimeMillis / 1000; // In Sekunden umrechnen
+String formatUptime()
+{
+  int64_t uptimeMicros = esp_timer_get_time(); // Zeit in Mikrosekunden
+  int64_t uptimeMillis = uptimeMicros / 1000;  // In Millisekunden umrechnen
+  int64_t uptimeSeconds = uptimeMillis / 1000; // In Sekunden umrechnen
 
-    // Berechnung der Tage, Stunden, Minuten, Sekunden
-    int days = uptimeSeconds / 86400;
-    uptimeSeconds %= 86400;
-    int hours = uptimeSeconds / 3600;
-    uptimeSeconds %= 3600;
-    int minutes = uptimeSeconds / 60;
-    int seconds = uptimeSeconds % 60;
+  // Berechnung der Tage, Stunden, Minuten, Sekunden
+  int days = uptimeSeconds / 86400;
+  uptimeSeconds %= 86400;
+  int hours = uptimeSeconds / 3600;
+  uptimeSeconds %= 3600;
+  int minutes = uptimeSeconds / 60;
+  int seconds = uptimeSeconds % 60;
 
-    // Formatierte Ausgabe "dd hh-mm-ss"
-    char buffer[20];
-    sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
-    return String(buffer);
+  // Formatierte Ausgabe "dd hh-mm-ss"
+  char buffer[20];
+  sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
+  return String(buffer);
 }
 void handleRoot()
 {
@@ -1430,56 +1493,102 @@ void handleRoot()
   }
 
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>IotWebConf 03 Custom Parameters</title></head><body>Hello world!";
-  s += "<ul>";
-  s += "<li>Meter Value Offset: ";
+  s += "<title>" + String(thingName) + "</title></head><body>";
+  s += "<br>Go to <a href='config'><b>configuratoin page</b></a> to change <u>underlined</u> values.";
+  s += "Telegram Parse config<ul>";
+  s += "<li><u>Meter Value Offset:</u> ";
   s += atoi(telegram_offset);
-  s += "<li>Meter Value length: ";
+  s += "<li><u>Meter Value length:</u> ";
   s += atoi(telegram_length);
-  s += "<li>Prefix Begin (usualy 0): ";
+  s += "<li><u>Prefix Begin (usualy 0):</u> ";
   s += atoi(telegram_prefix);
-  s += "<li>Suffix Begin: ";
+  s += "<li><u>Suffix Begin: </u>";
   s += atoi(telegram_suffix);
+  s += "<li>Detected Meter Value: " + String(get_meter_value_from_telegram());
+  s += "<li><a href='showTelegram'>Show Telegram</a>";
+  s += "</ul>";
+  s += "Backend Config";
+  s += "<ul>";
 
-  s += "<li>Backend Endpoint: ";
+  s += "<li><u>Backend Endpoint:</u> ";
   s += backend_endpoint;
 
   s += "<li>Backend Host: ";
   s += backend_host;
   s += "<li>Backend Path: ";
   s += backend_path;
-  s += "<li>LED blink: ";
-  s += led_blink;
-  s += "<li>Backend ID: ";
+  s += "<li><u>Backend ID:</u> ";
   s += backend_ID;
-  s += "<li>Backend Token: ";
+  s += "<li><u>Backend Token: </u>";
   s += backend_token;
-  s += "<li>Read Meter Intervall: ";
-  s += atoi(read_meter_intervall);
-  s += "<li>Backend call Minute: ";
-  s += atoi(backend_call_minute);
-  s += "<li>MyStrom PV : ";
-  s += mystrom_PV;
-  s += "<li>MyStrom PV IP: ";
-  s += mystrom_PV_IP;
-  s += "<li>Water Mark Backend: ";
-  s += String(watermark_backend_buffer);
-
-  s += "<li>temperatur: ";
-  s += String(temperature);
-  s += "<li>Ring Buffer i: ";
-  s += String(meter_value_i);
-  s += "<li>Uptime (min): ";
-  s += formatUptime();
-  s += "<li>Last Call ago (min): ";
-  s += String((millis() - last_call_backend_v2) / 60000);
-
+  s += "<li><u>Wirk-PKI (Use SSL Cert): </u>";
   if (UseSslCert_object.isChecked())
-    s += "<li>Use SSL Cert: true";
+    s += "true";
   else
   {
-    s += "<li>Use SSL Cert: false";
+    s += "false";
   }
+  s += "<li><a href='showCert'>Show Cert</a>";
+  s += "<li><a href='setCert'>Set Cert</a>";
+  s += "<li><a href='testBackendConnection'>Test Backend Connection</a>";
+  s += "</ul>";
+  s += "Meter Values";
+  s += "<ul>";
+  s += "<li><u>Taf14 Read Meter Intervall: </u>";
+  s += atoi(read_meter_intervall);
+  s += "<li><u>Backend call Minute:</u> ";
+  s += atoi(backend_call_minute);
+  s += "<li>Meter Value Buffer used: ";
+  s += String(meter_value_i) + " / " + String(Meter_Value_Buffer_Size);
+  s += "<li>Last Backend Call ago (min): ";
+  s += String((millis() - last_call_backend_v2) / 60000);
+  s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
+  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
+  s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
+  s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
+  s += "</ul>";
+
+  s += "MyStrom config";
+  s += "<ul>";
+  s += "<li><u>MyStrom:</u> ";
+  if (mystrom_PV_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
+
+  s += "<li><u>MyStrom PV IP: </u>";
+  s += mystrom_PV_IP;
+  s += "<li><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
+  s += "</ul>";
+  s += "Additional Meter";
+  s += "<ul>";
+  s += "<li><u>Temperature Sensor:</u> ";
+  if (temperature_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
+  s += "<li>temperatur: ";
+  s += String(temperature);
+
+  s += "</ul>";
+
+  s += "System config";
+  s += "<ul>";
+  s += "<li><u>LED blink:</u> ";
+  if (led_blink_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
+  s += "<li>Water Mark Backend: ";
+  s += String(watermark_backend_buffer);
+  s += "<li>Uptime (min): ";
+  s += formatUptime();
 
 #if defined(ESP32)
 
@@ -1497,25 +1606,14 @@ void handleRoot()
   s += String(timeClient_getFormattedTime());
   s += " / ";
   s += String(timeClient_getEpochTime());
-  s += "<li><b>Detected Meter Value</b>: " + String(get_meter_value_from_telegram());
-  s += "<li><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
-  s += "</ul>";
-
-  s += "</ul><br>";
-  s += "Free Heap ";
+  s += "<li>Free Heap: ";
   s += String(ESP.getFreeHeap());
-
-  s += "<br>Go to <a href='config'>configure page</a> to change values.";
-  s += "<br><a href='showTelegram'>Show Telegram</a>";
-  s += "<br><a href='showCert'>Show Cert</a>";
-  s += "<br><a href='setCert'>Set Cert</a>";
-  s += "<br><a href='testCert'>Test Backend Connection</a>";
-  s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
-  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
-  s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
-  s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
+  s += "<li>Log Length (max): " + String(LOG_BUFFER_SIZE);
+  
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
+  s += "</ul>";
+
   s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
   s += LogBufferToString();
 
