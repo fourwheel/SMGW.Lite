@@ -160,8 +160,8 @@ IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Te
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
 int meter_value_i = 0;
-const int Meter_Value_Buffer_Size = 200;
-unsigned long data[Meter_Value_Buffer_Size + 1][3];
+const int Meter_Value_Buffer_Size = 400;
+unsigned long MeterValues[Meter_Value_Buffer_Size][3];
 
 // Definition des Logbuffers
 const int LOG_BUFFER_SIZE = 100;
@@ -192,7 +192,7 @@ String StatusCodeToString(int statusCode)
   switch (statusCode)
   {
   case 1013:
-    return "clear_data_array()";
+    return "clear_MeterValues_array()";
   case 1001:
     return "setup()";
   case 1005:
@@ -373,13 +373,13 @@ String LogBufferToString()
   return logString;
 }
 
-void clear_data_array()
+void clear_MeterValues_array()
 {
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    data[m][0] = 0;
-    data[m][1] = 0;
-    data[m][2] = 0;
+    MeterValues[m][0] = 0;
+    MeterValues[m][1] = 0;
+    MeterValues[m][2] = 0;
   }
   meter_value_i = 0;
   // AddLogEntry(1013);
@@ -389,6 +389,17 @@ void location_href_home(int delay = 0)
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
+void print_MeterValues_via_webserver()
+{
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Uptime</th><th>Value</th></tr>";
+  for (int m = 0; m < Meter_Value_Buffer_Size; m++)
+  {
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m][0]) + "</td><td>" + String(MeterValues[m][1]) + "</td><td>" + String(MeterValues[m][2]) + "</td></tr>";
+  }
+  MeterValues_string += "</table>";
+  server.send(200, "text/html", MeterValues_string);
+}
+
 void splitHostAndPath(const String &url, String &host, String &path)
 {
   // Suche nach dem ersten "/"
@@ -651,7 +662,7 @@ void setup()
   server.on("/showCert", showCert);
   server.on("/setCert", SetSslCert);
   server.on("/testBackendConnection", TestBackendConnection);
-
+  server.on("/showMeterValues", print_MeterValues_via_webserver);
   server.on("/upload", []
             {
               handleCertUpload();
@@ -720,7 +731,7 @@ void setup()
       else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
       else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
 
-  clear_data_array();
+  clear_MeterValues_array();
 
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
@@ -1192,13 +1203,14 @@ void send_meter_values()
 
   // Binärdaten in Puffer schreiben
   size_t bufferSize = Meter_Value_Buffer_Size * 3 * sizeof(unsigned long);
+  // size_t bufferSize = (meter_value_i+1) * 3 * sizeof(unsigned long);
   uint8_t *buffer = (uint8_t *)malloc(bufferSize);
   if (!buffer)
   {
     Serial.println("Buffer allocation failed");
     return;
   }
-  memcpy(buffer, data, bufferSize);
+  memcpy(buffer, MeterValues, bufferSize);
 
   // HTTP POST-Anfrage manuell erstellen
   String header = "POST ";
@@ -1243,9 +1255,9 @@ void send_meter_values()
 
       if (line.startsWith("HTTP/1.1 200"))
       {
-        Serial.println("Data successfully sent");
+        Serial.println("MeterValues successfully sent");
         call_backend_V2_successfull = true;
-        clear_data_array();
+        clear_MeterValues_array();
         last_call_backend_v2 = millis();
         AddLogEntry(1021);
       }
@@ -1287,29 +1299,29 @@ void store_meter_value()
     meter_value_i = 0;
   Serial.println("buffer i: " + String(meter_value_i));
 
-  data[meter_value_i][0] = timestamp_telegram; // timeClient_getEpochTime();
-  data[meter_value_i][1] = meter_value;
+  MeterValues[meter_value_i][0] = timestamp_telegram; // timeClient_getEpochTime();
+  MeterValues[meter_value_i][1] = meter_value;
 
   if (temperature_object.isChecked())
   {
 
-    data[meter_value_i][2] = temperature;
+    MeterValues[meter_value_i][2] = temperature;
   }
 
   Serial.print("Free Heap: ");
   Serial.println(ESP.getFreeHeap());
 }
-void print_data_buffer()
+void print_MeterValues_buffer()
 {
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    if (data[m][0] != 0)
+    if (MeterValues[m][0] != 0)
     {
-      Serial.print(data[m][0]);
+      Serial.print(MeterValues[m][0]);
       Serial.print(" - ");
-      Serial.print(data[m][1]);
+      Serial.print(MeterValues[m][1]);
       Serial.print(" - ");
-      Serial.println(data[m][2]);
+      Serial.println(MeterValues[m][2]);
     }
   }
 }
@@ -1494,7 +1506,7 @@ void handleRoot()
 
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
-  s += "<br>Go to <a href='config'><b>configuratoin page</b></a> to change <u>underlined</u> values.";
+  s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <u>underlined</u> values.";
   s += "Telegram Parse config<ul>";
   s += "<li><u>Meter Value Offset:</u> ";
   s += atoi(telegram_offset);
@@ -1609,7 +1621,7 @@ void handleRoot()
   s += "<li>Free Heap: ";
   s += String(ESP.getFreeHeap());
   s += "<li>Log Length (max): " + String(LOG_BUFFER_SIZE);
-  
+
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
   s += "</ul>";
