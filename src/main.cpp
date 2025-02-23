@@ -106,8 +106,11 @@ void store_meter_value();
 void send_status_report_function();
 void call_backend_Task();
 void send_meter_values();
-void call_backend_wrapper(bool meter_values = true, bool status_report = false);
-int watermark_backend_buffer = 0;
+// void call_backend_wrapper(bool meter_values = true, bool status_report = false);
+void Send_Meter_Values_to_backend_wrapper();
+void Send_Log_to_backend_wrapper();
+int watermark_meter_buffer = 0;
+int watermark_log_buffer = 0;
 
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
@@ -194,7 +197,7 @@ void resetLogBuffer()
   logIndex = -1;
 }
 
-bool send_status_report = false;
+bool b_send_log_to_backend = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
 bool firstTime = true;
 String StatusCodeToString(int statusCode)
@@ -380,7 +383,7 @@ String LogBufferToString()
     }
   }
 
-  return "</table>"+logString;
+  return "</table>" + logString;
 }
 
 void clear_MeterValues_array()
@@ -579,39 +582,32 @@ bool call_backend_V2_successfull = true;
 SemaphoreHandle_t Sema_Backend; // Mutex für synchronisierten Zugriff
 unsigned long last_call_backend_v2 = 0;
 
-void call_backend_Task(void *pvParameters)
+void Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
-  if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(2000)))
+  if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
-    bool meter_values_local = ((TaskParams *)pvParameters)->param1;
-    bool status_report_local = ((TaskParams *)pvParameters)->param2;
-
-    if (meter_values_local == true)
-    {
-      send_meter_values();
-    }
-    
-    if (status_report_local == true)
-    {
-      send_status_report_function();
-    }
-
-    // if(call_backend_V2_successfull == false)
-    // {
-    //   Serial.println("7000 A");
-    //   iotWebConf.goOffLine();
-
-    //   last_wifi_retry = millis();
-    //   restart_wifi = true;
-    //   AddLogEntry(7000);
-    //   Serial.println("7000 B");
-    // }
-
+    send_meter_values();
     xSemaphoreGive(Sema_Backend);
   }
-  watermark_backend_buffer = uxTaskGetStackHighWaterMark(NULL);
+  watermark_meter_buffer = uxTaskGetStackHighWaterMark(NULL);
   vTaskDelete(NULL); // Task löschen, wenn fertig
 }
+void Send_Log_to_backend_Task(void *pvParameters)
+{
+  b_send_log_to_backend = false;
+  if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
+  {
+    send_status_report_function();
+    xSemaphoreGive(Sema_Backend);
+  }
+  else
+  {
+    // b_send_log_to_backend = true;
+  }
+  watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
+  vTaskDelete(NULL); // Task löschen, wenn fertig
+}
+
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
@@ -700,18 +696,20 @@ void setup()
   server.on("/sendboth_Task", []
             { 
             
-            location_href_home(0);
-            call_backend_wrapper(true, true); });
+            location_href_home(2);
+
+            Send_Meter_Values_to_backend_wrapper();
+            Send_Log_to_backend_wrapper(); });
   server.on("/sendStatus_Task", []
             { 
-            location_href_home(0);
-            call_backend_wrapper(false, true); });
+            location_href_home(2);
+            Send_Log_to_backend_wrapper(); });
 
   server.on("/sendMeterValues_Task", []
             { 
             
-            location_href_home(0);
-            call_backend_wrapper(true, false);; });
+            location_href_home(2);
+            Send_Meter_Values_to_backend_wrapper(); });
 
   server.on("/setOffline", []
             { wifi_connected = false;
@@ -760,11 +758,14 @@ void setup()
   loadCertToCharArray();
   configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
 }
-void call_backend_wrapper(bool meter_values, bool status_report)
+void Send_Meter_Values_to_backend_wrapper()
 {
-  watermark_backend_buffer = 0;
-  TaskParams params = {meter_values, status_report};
-  xTaskCreate(call_backend_Task, "backend call task", 8192, &params, 2, NULL);
+  xTaskCreate(Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, NULL);
+}
+
+void Send_Log_to_backend_wrapper()
+{
+  xTaskCreate(Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
 }
 uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
 bool prefix_suffix_correct()
@@ -1128,6 +1129,7 @@ void send_status_report_function()
   if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
+    // b_send_log_to_backend = true;
     AddLogEntry(4000);
     return;
   }
@@ -1172,7 +1174,12 @@ void send_status_report_function()
         Serial.println("Log successfully sent");
 
         AddLogEntry(1020);
-        send_status_report = false;
+        b_send_log_to_backend = false;
+        break;
+      }
+      else
+      {
+        b_send_log_to_backend = true;
       }
     }
     vTaskDelay(pdMS_TO_TICKS(10)); // Wartet genau 10 ms, egal wie CONFIG_FREERTOS_HZ gesetzt ist
@@ -1421,7 +1428,7 @@ void loop()
       }
       else
       {
-        send_status_report = true;
+        b_send_log_to_backend = true;
       }
     }
     else if (WiFi.status() != WL_CONNECTED && wifi_connected)
@@ -1459,7 +1466,11 @@ void loop()
   {
     if ((!call_backend_V2_successfull && millis() - last_call_backend_v2 > 30000) || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
     {
-      call_backend_wrapper(true, send_status_report);
+      Send_Meter_Values_to_backend_wrapper();
+      if (b_send_log_to_backend == true)
+      {
+        Send_Log_to_backend_wrapper();
+      }
     }
   }
 }
@@ -1620,8 +1631,10 @@ void handleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>Water Mark Backend: ";
-  s += String(watermark_backend_buffer);
+  s += "<li>Water Mark meter Values: ";
+  s += String(watermark_meter_buffer);
+  s += "<li>Water Mark Logs: ";
+  s += String(watermark_log_buffer);
   s += "<li>Uptime (min): ";
   s += formatUptime();
 
