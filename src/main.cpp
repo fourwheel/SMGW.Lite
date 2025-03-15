@@ -2,11 +2,6 @@
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
 #include <SPIFFS.h>
 
-typedef struct
-{
-  bool param1;
-  bool param2;
-} TaskParams;
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMGW.Lite";
 
@@ -48,16 +43,16 @@ int m_i_max = 0;
 const uint8_t SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 
-#define BUFFER_SIZE 512   // Maximale Puffergröße für Eingangsdaten
-#define TELEGRAM_SIZE 512 // Maximale Größe eines Telegramms
-#define TIMEOUT_MS 30     // Timeout für Telegramme in Millisekunden
+#define BUFFER_SIZE 512        // Maximale Puffergröße für Eingangsdaten
+#define TELEGRAM_SIZE 512      // Maximale Größe eines Telegramms
+#define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
 
-uint8_t buffer[BUFFER_SIZE];    // Eingabepuffer für serielle Daten
-size_t bufferIndex = 0;         // Aktuelle Position im Eingabepuffer
-bool readingExtraBytes = false; // Status: Lesen der zusätzlichen Bytes
-uint8_t extraBytes[3];          // Zusätzliche Bytes nach der Endsignatur
-size_t extraIndex = 0;          // Index für zusätzliche Bytes
-unsigned long lastByteTime = 0; // Zeitstempel des letzten empfangenen Bytes
+uint8_t telegram_buffer[BUFFER_SIZE]; // Eingabepuffer für serielle Daten
+size_t telegram_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
+bool readingExtraBytes = false;       // Status: Lesen der zusätzlichen Bytes
+uint8_t extraBytes[3];                // Zusätzliche Bytes nach der Endsignatur
+size_t extraIndex = 0;                // Index für zusätzliche Bytes
+unsigned long lastByteTime = 0;       // Zeitstempel des letzten empfangenen Bytes
 unsigned long timestamp_telegram;
 uint8_t TELEGRAM[TELEGRAM_SIZE]; // Speicher für das vollständige Telegramm
 size_t TELEGRAM_SIZE_USED = 0;   // Tatsächliche Länge des gespeicherten Telegramms
@@ -106,7 +101,6 @@ void store_meter_value();
 void send_status_report_function();
 void call_backend_Task();
 void send_meter_values();
-// void call_backend_wrapper(bool meter_values = true, bool status_report = false);
 void Send_Meter_Values_to_backend_wrapper();
 void Send_Log_to_backend_wrapper();
 int watermark_meter_buffer = 0;
@@ -168,38 +162,34 @@ IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParam
 
 int meter_value_i = 0;
 
-// unsigned long MeterValues[Meter_Value_Buffer_Size][3];
-
 // Struktur für die Messwerte
 struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes (Unix-Timestamp)
   uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
-  uint32_t temperature; // 4 Bytes (Zahl bis 65535)
+  uint32_t temperature; // 4 Bytes (Zahl bis ~4 Mio.)
 };
-// MeterValue MeterValues[Meter_Value_Buffer_Size];
+
 MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
 
-void initMeterValueBuffer()
+// Hilfsfunktion: Holt die aktuelle Zeit als time_t (Unix-Timestamp)
+time_t getCurrentTime()
 {
-  Meter_Value_Buffer_Size = atoi(Meter_Value_Buffer_Size_Char);
-  // Alten Speicher freigeben, falls bereits allokiert
-  if (MeterValues)
-  {
-    delete[] MeterValues;
-    MeterValues = nullptr; // Setze auf nullptr, um sicherzustellen, dass kein Wildpointer entsteht
-  }
+  return time(nullptr);
+}
 
-  // Speicher reservieren
-  MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
-  if (!MeterValues)
-  {
-    Serial.println("Speicherzuweisung fehlgeschlagen!");
-    while (true)
-      ; // Stoppt das Programm, falls der Speicher nicht zugewiesen wurde
-  }
+unsigned long timeClient_getEpochTime()
+{
+  return static_cast<unsigned long>(getCurrentTime());
+}
 
-  clear_MeterValues_array();
+int timeClient_getMinutes()
+{
+  time_t now = getCurrentTime();
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo); // Konvertiere in lokale Zeitstruktur
+
+  return timeinfo.tm_min; // Extrahiere Minuten (0–59)
 }
 
 // Definition des Logbuffers
@@ -222,6 +212,39 @@ void resetLogBuffer()
   }
   logIndex = -1;
 }
+void AddLogEntry(int statusCode)
+{
+  // Aktualisiere den Index (Ring-Puffer-Verhalten)
+  logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
+
+  unsigned long uptimeSeconds = millis() / 60000; // Uptime in Sekunden
+
+  // Füge neuen Eintrag in den Ring-Buffer ein
+  logBuffer[logIndex].timestamp = timeClient_getEpochTime();
+  logBuffer[logIndex].uptime = uptimeSeconds;
+  logBuffer[logIndex].statusCode = statusCode;
+}
+void initMeterValueBuffer()
+{
+  Meter_Value_Buffer_Size = atoi(Meter_Value_Buffer_Size_Char);
+  // Alten Speicher freigeben, falls bereits allokiert
+  if (MeterValues)
+  {
+    delete[] MeterValues;
+    MeterValues = nullptr; // Setze auf nullptr, um sicherzustellen, dass kein Wildpointer entsteht
+  }
+
+  // Speicher reservieren
+  MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
+  if (!MeterValues)
+  {
+    Serial.println("Speicherzuweisung fehlgeschlagen!");
+    AddLogEntry(1002);
+  }
+
+  clear_MeterValues_array();
+}
+
 
 bool b_send_log_to_backend = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
@@ -230,30 +253,30 @@ String StatusCodeToString(int statusCode)
 {
   switch (statusCode)
   {
-  case 1013:
-    return "clear_MeterValues_array()";
   case 1001:
     return "setup()";
+  case 1002:
+    return "Speicherzuweisung fehlgeschlagen!";
   case 1005:
     return "call_backend()";
   case 1006:
-    return "store_meter_value()";
+    return "Taf 6 meter reading trigger";
   case 1008:
     return "WiFi returned";
   case 1009:
     return "WiFi lost";
   case 1010:
     return "Taf 7 meter reading trigger";
-  case 1002:
-    return "Taf 6 meter reading trigger";
-  case 1014:
-    return "Taf 7-900s meter reading trigger";
-  case 1015:
-    return "not enough heap to store value";
   case 1011:
     return "Taf 14 meter reading trigger";
   case 1012:
     return "call backend trigger";
+  case 1013:
+    return "clear_MeterValues_array()";
+  case 1014:
+    return "Taf 7-900s meter reading trigger";
+  case 1015:
+    return "not enough heap to store value";
   case 1019:
     return "Sending Log";
   case 1020:
@@ -294,7 +317,6 @@ String StatusCodeToString(int statusCode)
     return "Fehler beim Öffnen der Cert Datei";
   case 8004:
     return "Kein Zertifikat erhalten!";
-    // default: return "Unknown status code";
   }
   if (statusCode < 200)
   {
@@ -303,25 +325,7 @@ String StatusCodeToString(int statusCode)
 
   return "Unknown status code";
 }
-// Hilfsfunktion: Holt die aktuelle Zeit als time_t (Unix-Timestamp)
-time_t getCurrentTime()
-{
-  return time(nullptr);
-}
 
-unsigned long timeClient_getEpochTime()
-{
-  return static_cast<unsigned long>(getCurrentTime());
-}
-
-int timeClient_getMinutes()
-{
-  time_t now = getCurrentTime();
-  struct tm timeinfo;
-  localtime_r(&now, &timeinfo); // Konvertiere in lokale Zeitstruktur
-
-  return timeinfo.tm_min; // Extrahiere Minuten (0–59)
-}
 
 String timeClient_getFormattedTime()
 {
@@ -333,18 +337,7 @@ String timeClient_getFormattedTime()
   strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo); // Zeitformat HH:MM:SS
   return String(timeStr);                                    // Gibt Zeit als lesbaren String aus
 }
-void AddLogEntry(int statusCode)
-{
-  // Aktualisiere den Index (Ring-Puffer-Verhalten)
-  logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
 
-  unsigned long uptimeSeconds = millis() / 60000; // Uptime in Sekunden
-
-  // Füge neuen Eintrag in den Ring-Buffer ein
-  logBuffer[logIndex].timestamp = timeClient_getEpochTime();
-  logBuffer[logIndex].uptime = uptimeSeconds;
-  logBuffer[logIndex].statusCode = statusCode;
-}
 
 // Funktion zum Debuggen des Logbuffers
 void PrintLogBuffer()
@@ -467,7 +460,6 @@ void SetSslCert()
 {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
 }
-
 
 void TestBackendConnection()
 {
@@ -695,7 +687,7 @@ void setup()
               resetLogBuffer(); });
   server.on("/StoreMeterValue", []
             { location_href_home();
-            AddLogEntry(1002);
+            AddLogEntry(1006);
             store_meter_value(); });
   server.on("/initMeterValueBuffer", []
             {initMeterValueBuffer();
@@ -946,7 +938,7 @@ int32_t get_meter_value_from_primary()
 // Funktion zum Speichern eines vollständigen Telegramms
 void saveCompleteTelegram()
 {
-  size_t telegramLength = bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
+  size_t telegramLength = telegram_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
   if (telegramLength > TELEGRAM_SIZE)
   {
     // Serial.println("Fehler: Telegramm zu groß für Speicher!");
@@ -955,8 +947,8 @@ void saveCompleteTelegram()
   }
 
   // Telegramm in TELEGRAM-Array kopieren
-  memcpy(TELEGRAM, buffer, bufferIndex);         // Kopiere Hauptdaten
-  memcpy(TELEGRAM + bufferIndex, extraBytes, 3); // Kopiere zusätzliche Bytes
+  memcpy(TELEGRAM, telegram_buffer, telegram_bufferIndex); // Kopiere Hauptdaten
+  memcpy(TELEGRAM + telegram_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
   TELEGRAM_SIZE_USED = telegramLength;
   timestamp_telegram = timeClient_getEpochTime(); // last_serial;
 }
@@ -964,7 +956,7 @@ void saveCompleteTelegram()
 // Funktion zum Zurücksetzen des Eingabepuffers
 void resetBuffer()
 {
-  bufferIndex = 0;
+  telegram_bufferIndex = 0;
   readingExtraBytes = false;
   extraIndex = 0;
 }
@@ -1016,9 +1008,9 @@ void handle_telegram2()
     }
 
     // Byte im Eingabepuffer speichern
-    if (bufferIndex < BUFFER_SIZE)
+    if (telegram_bufferIndex < BUFFER_SIZE)
     {
-      buffer[bufferIndex++] = incomingByte;
+      telegram_buffer[telegram_bufferIndex++] = incomingByte;
     }
     else
     {
@@ -1030,14 +1022,14 @@ void handle_telegram2()
     }
 
     // Prüfen, ob die Startsignatur erkannt wurde
-    if (bufferIndex >= sizeof(SIGNATURE_START) &&
-        memcmp(buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
+    if (telegram_bufferIndex >= sizeof(SIGNATURE_START) &&
+        memcmp(telegram_buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
     {
 
       // Prüfen, ob die Endsignatur erkannt wurde
-      if (bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
+      if (telegram_bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
       {
-        if (memcmp(&buffer[bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
+        if (memcmp(&telegram_buffer[telegram_bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
         {
           // Endsignatur erkannt, auf zusätzliche Bytes warten
           readingExtraBytes = true;
@@ -1047,7 +1039,7 @@ void handle_telegram2()
   }
 
   // Prüfen, ob ein Timeout aufgetreten ist
-  if (bufferIndex > 0 && (millis() - lastByteTime > TIMEOUT_MS))
+  if (telegram_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {
     // Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
     // AddLogEntry(3002);
@@ -1304,7 +1296,7 @@ unsigned long last_meter_value = 0;
 int32_t previous_meter_value = 0;
 void store_meter_value()
 {
-  // AddLogEntry(1006);
+
   last_meter_value = millis();
   if (ESP.getFreeHeap() < 1000)
   {
