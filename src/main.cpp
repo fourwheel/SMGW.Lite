@@ -8,10 +8,10 @@ typedef struct
   bool param2;
 } TaskParams;
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMLReader";
+const char thingName[] = "SMGW.Lite";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
-const char wifiInitialApPassword[] = "hammelhammel";
+const char wifiInitialApPassword[] = "password";
 
 #define STRING_LEN 128
 #define ID_LEN 4
