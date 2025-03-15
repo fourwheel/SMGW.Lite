@@ -1,46 +1,72 @@
+# 📡 ESP32 Smart Meter Gateway (SMGW.Lite)
 
-This directory is intended for project specific (private) libraries.
-PlatformIO will compile them to static libraries and link into executable file.
+## 🚀 Projektbeschreibung
+Dieses Projekt ist eine Firmware für ein ESP32-basiertes Smart Meter Gateway. Es liest Verbrauchswerte aus, verarbeitet sie und sendet sie an ein Backend. Die Konfiguration erfolgt über eine Weboberfläche.
 
-The source code of each library should be placed in a an own separate directory
-("lib/your_library_name/[here are source files]").
+## 📦 Features
+- 📡 **WLAN-Anbindung** mit Webinterface zur Konfiguration
+- 🔄 **Datenverarbeitung** von Smart Meter Telegrammen
+- 🔗 **Backend-Anbindung** zur Übermittlung der Verbrauchsdaten
+- 🌡️ **Temperaturmessung** über Dallas DS18B20 Sensor
+- 🔄 **Over-the-Air (OTA) Updates** möglich
 
-For example, see a structure of the following two libraries `Foo` and `Bar`:
+---
 
-|--lib
-|  |
-|  |--Bar
-|  |  |--docs
-|  |  |--examples
-|  |  |--src
-|  |     |- Bar.c
-|  |     |- Bar.h
-|  |  |- library.json (optional, custom build options, etc) https://docs.platformio.org/page/librarymanager/config.html
-|  |
-|  |--Foo
-|  |  |- Foo.c
-|  |  |- Foo.h
-|  |
-|  |- README --> THIS FILE
-|
-|- platformio.ini
-|--src
-   |- main.c
+## 🛠️ Installation & Einrichtung
+### 1️⃣ Benötigte Hardware
+- ESP32-Board (z. B. ESP32 DevKit v1)
+- Optischer Lesekopf für moderne Messeinrichtung
+- DS18B20 Temperatursensor (optional)
 
-and a contents of `src/main.c`:
-```
-#include <Foo.h>
-#include <Bar.h>
 
-int main (void)
-{
-  ...
-}
-
+### 2️⃣ Abhängigkeiten installieren
+Benötigte Bibliotheken in der **Arduino IDE** oder **PlatformIO**:
+```cpp
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <IotWebConf.h>
 ```
 
-PlatformIO Library Dependency Finder will find automatically dependent
-libraries scanning project source files.
+### 3️⃣ Code hochladen
+1. Projekt mit der Arduino IDE oder PlatformIO öffnen
+2. **`main.cpp` anpassen**:
+   - WLAN-SSID & Passwort setzen (oder aus SPIFFS laden)
+   - Backend-URL konfigurieren
+3. Auf den ESP32 hochladen und seriellen Monitor beobachten.
 
-More information about PlatformIO Library Dependency Finder
-- https://docs.platformio.org/page/librarymanager/ldf.html
+---
+
+## 🌐 Webinterface
+Nach dem Start öffnet der ESP32 ein eigenes WLAN (SSID: `SMGW.Lite`).
+1. Mit diesem WLAN verbinden und `http://192.168.4.1` aufrufen.
+2. WLAN-Daten & Backend eintragen.
+3. Nach Neustart ist das Webinterface über die vergebene IP erreichbar.
+
+---
+
+## 🔌 API Endpunkte
+| Route | Beschreibung |
+|--------|--------------|
+| `/` | Startseite mit Systemstatus |
+| `/config` | Konfiguration aufrufen |
+| `/showMeterValue` | Aktuellen Zählerstand anzeigen |
+| `/showCert` | SSL-Zertifikat anzeigen |
+| `/sendMeterValues_Task` | Messwerte an Backend senden |
+| `/restart` | ESP32 neustarten |
+
+---
+
+## 📜 Lizenz
+Dieses Projekt verwendet die **MIT-Lizenz**. Siehe `LICENSE` für weitere Details.
+
+---
+
+## 👨‍💻 Beitrag leisten
+- Fehler melden & Vorschläge machen: [GitHub Issues]
+- Code verbessern: Fork & Pull Request erstellen.
+- Fragen? Schreibe eine Nachricht! 🚀
+
