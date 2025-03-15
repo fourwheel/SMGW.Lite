@@ -3,24 +3,7 @@
 #ini_set('display_startup_errors', 1);
 #error_reporting(E_ALL);
 
-#$valid_ids = ["Z18", "Z17", "N41", "L11"];
-#$data = [];
-#$data["ID"] = "";
-#if (in_array($_GET['ID'], $valid_ids)) {
-#    $data["ID"] = $_GET['ID'];
-#} else {#
-#	echo "hau ab.";
-#    exit;
-#}
-
-
-// Gültige ID-Token-Paare (Beispiel: ["ID" => "TOKEN"])
-$valid_clients = [
-    "Z18" => "Miauuuuxu",
-    "Z17" => "TOKEN456",
-    "N41" => "TOKEN789",
-    "L11" => "TOKENABC"
-];
+include("valid_clients.php");
 
 // Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
