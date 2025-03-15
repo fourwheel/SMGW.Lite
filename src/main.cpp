@@ -100,7 +100,7 @@ void showMeterValue();
 void showTemperature();
 void showCert();
 void configSaved();
-
+void clear_MeterValues_array();
 void reset_telegram();
 void store_meter_value();
 void send_status_report_function();
@@ -124,6 +124,8 @@ char telegram_offset[NUMBER_LEN];
 char telegram_length[NUMBER_LEN];
 char telegram_prefix[NUMBER_LEN];
 char telegram_suffix[NUMBER_LEN];
+char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
+int Meter_Value_Buffer_Size = 234;
 
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
@@ -162,11 +164,12 @@ IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom 
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
+IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
+
 int meter_value_i = 0;
 
 // unsigned long MeterValues[Meter_Value_Buffer_Size][3];
 
-const int Meter_Value_Buffer_Size = 200;
 // Struktur für die Messwerte
 struct MeterValue
 {
@@ -174,7 +177,30 @@ struct MeterValue
   uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
   uint32_t temperature; // 4 Bytes (Zahl bis 65535)
 };
-MeterValue MeterValues[Meter_Value_Buffer_Size];
+// MeterValue MeterValues[Meter_Value_Buffer_Size];
+MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
+
+void initMeterValueBuffer()
+{
+  Meter_Value_Buffer_Size = atoi(Meter_Value_Buffer_Size_Char);
+  // Alten Speicher freigeben, falls bereits allokiert
+  if (MeterValues)
+  {
+    delete[] MeterValues;
+    MeterValues = nullptr; // Setze auf nullptr, um sicherzustellen, dass kein Wildpointer entsteht
+  }
+
+  // Speicher reservieren
+  MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
+  if (!MeterValues)
+  {
+    Serial.println("Speicherzuweisung fehlgeschlagen!");
+    while (true)
+      ; // Stoppt das Programm, falls der Speicher nicht zugewiesen wurde
+  }
+
+  clear_MeterValues_array();
+}
 
 // Definition des Logbuffers
 const int LOG_BUFFER_SIZE = 100;
@@ -405,7 +431,7 @@ void location_href_home(int delay = 0)
 }
 void print_MeterValues_via_webserver()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Uptime</th><th>Value</th></tr>";
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
@@ -441,30 +467,7 @@ void SetSslCert()
 {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
 }
-// void TestBackendConnection()
-// {
-//   WiFiClientSecure client;
 
-//   client.setCACert(FullCert);
-//   String res;
-//   if (client.connect(backend_host.c_str(), 443))
-//   {
-//     res = ("Host reachable, Cert correct");
-//   }
-//   else
-//   {
-//     client.setInsecure();
-//     if (client.connect(backend_host.c_str(), 443))
-//     {
-//       res = ("Host reachable, Cert not working.");
-//     }
-//     else
-//     {
-//       res = ("Host not reachable.");
-//     }
-//   }
-//   server.send(200, "text/html", res);
-// }
 
 void TestBackendConnection()
 {
@@ -632,6 +635,7 @@ void setup()
   groupBackend.addItem(&backend_token_object);
   groupAdditionalMeter.addItem(&read_meter_intervall_object);
   groupBackend.addItem(&backend_call_minute_object);
+  groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
   groupSys.addItem(&led_blink_object);
   groupAdditionalMeter.addItem(&mystrom_PV_object);
@@ -671,6 +675,7 @@ void setup()
   server.on("/setCert", SetSslCert);
   server.on("/testBackendConnection", TestBackendConnection);
   server.on("/showMeterValues", print_MeterValues_via_webserver);
+
   server.on("/upload", []
             {
               handleCertUpload();
@@ -692,7 +697,9 @@ void setup()
             { location_href_home();
             AddLogEntry(1002);
             store_meter_value(); });
-
+  server.on("/initMeterValueBuffer", []
+            {initMeterValueBuffer();
+            location_href_home(); });
   server.on("/sendboth_Task", []
             { 
             
@@ -743,8 +750,6 @@ void setup()
       else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
       else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
 
-  clear_MeterValues_array();
-
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
   // fullKey.replace(" ", "");  // Entfernt alle Leerzeichen
@@ -756,6 +761,9 @@ void setup()
     AddLogEntry(8000);
   }
   loadCertToCharArray();
+
+  initMeterValueBuffer();
+
   configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
 }
 void Send_Meter_Values_to_backend_wrapper()
@@ -1439,13 +1447,11 @@ void loop()
     }
     else
     {
-
       // Still offline
     }
   }
 
   if (!wifi_connected &&
-      // timeClient_getMinutes() % 15 == 0
       (timeClient_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
   {
     AddLogEntry(1010);
@@ -1540,7 +1546,7 @@ void handleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
   s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
-  s += "Telegram Parse config<ul>";
+  s += "<br>Telegram Parse config<ul>";
   s += "<li><i>Meter Value Offset:</i> ";
   s += atoi(telegram_offset);
   s += "<li><i>Meter Value length:</i> ";
@@ -1552,6 +1558,21 @@ void handleRoot()
   s += "<li>Detected Meter Value: " + String(get_meter_value_from_telegram());
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
   s += "<li><a href='showTelegram'>Show Telegram</a>";
+  if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
+  {
+    s += "<li><font color=red>Buffer Size changed, please ";
+    if (meter_value_i > 0)
+    {
+      s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (";
+      s += String(meter_value_i);
+      s += ") Meter Values and ";
+    }
+  }
+  else
+  {
+    s += "<li><font>";
+  }
+  s += "<a href='initMeterValueBuffer'>Re-Init Meter Array</a></font>";
   s += "</ul>";
   s += "Backend Config";
   s += "<ul>";
