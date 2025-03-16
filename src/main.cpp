@@ -57,6 +57,20 @@ unsigned long lastByteTime = 0;       // Zeitstempel des letzten empfangenen Byt
 unsigned long timestamp_telegram;
 uint8_t TELEGRAM[TELEGRAM_LENGTH]; // Speicher für das vollständige Telegramm
 
+int meter_value_i = 0;
+
+// Struktur für die Messwerte
+struct MeterValue
+{
+  uint32_t timestamp;   // 4 Bytes (Unix-Timestamp)
+  uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
+  uint32_t temperature; // 4 Bytes (Zahl bis ~4 Mio.)
+};
+
+MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
+
+unsigned long last_meter_value = 0;
+unsigned long previous_meter_value = 0;
 
 #if defined(ESP32)
 #include <WiFi.h>
@@ -90,9 +104,8 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
 const int LOG_BUFFER_SIZE = 100;
 // -- Forward declarations.
-void AddLogEntry(int statusCode);
 
-void MeterValues_clear_Buffer();
+void AddLogEntry(int statusCode);
 void configSaved();
 void handle_call_backend();
 void handle_check_wifi_connection();
@@ -100,39 +113,34 @@ void handle_MeterValue_store();
 void handle_temperature();
 void handle_telegram2();
 void loadCertToCharArray();
-void loop();
+void LogBuffer_reset();
 void MeterValue_init_Buffer();
-void MeterValue_store();
+void MeterValues_clear_Buffer();
 int32_t MeterValue_get_from_remote();
 int32_t MeterValue_get_from_telegram();
-int32_t myStrom_get_Meter_value();
-
-bool Telegram_prefix_suffix_correct();
-void LogBuffer_reset();
-void reset_telegram();
-void saveCompleteTelegram();
+void MeterValue_store();
 void setup();
-void webclient_splitHostAndPath(const String &url, String &host, String &path);
-String StatusCodeToString(int statusCode);
+String LogBufferToString(int showNumber = LOG_BUFFER_SIZE);
+String LogEntryToString(int i);
+String LogStatusCodeToString(int statusCode);
+String time_formatTimestamp(unsigned long timestamp);
+String time_formatUptime();
 String time_getFormattedTime();
 unsigned long time_getEpochTime();
 int time_getMinutes();
-
-String time_formatTimestamp(unsigned long timestamp);
-String time_formatUptime();
-String LogBufferEntryToString(int i);
-String LogBufferToString(int showNumber = LOG_BUFFER_SIZE);
-#if defined(ESP32)
-String esp_reset_reason_string();
-#endif
+bool Telegram_prefix_suffix_correct();
+void Telegram_saveCompleteTelegram();
+void TelegramResetReceiveBuffer();
 void webclient_send_log_to_backend();
 void webclient_Send_Log_to_backend_Task(void *pvParameters);
 void webclient_Send_Log_to_backend_wrapper();
 void webclient_send_meter_values_to_backend();
 void webclient_Send_Meter_Values_to_backend_Task(void *pvParameters);
 void webclient_Send_Meter_Values_to_backend_wrapper();
+void webclient_splitHostAndPath(const String &url, String &host, String &path);
 void webserverHandleCertUpload();
 void webserverHandleRoot();
+void webserverLocationHrefHome(int delay = 0);
 void webserverSetCert();
 void webserverShowCert();
 void webserverShowLastMeterValue();
@@ -141,6 +149,10 @@ void webserverShowMeterValues();
 void webserverShowTelegram();
 void webserverShowTermperature();
 void webserverTestBackendConnection();
+void loop();
+#if defined(ESP32)
+String esp_reset_reason_string();
+#endif
 
 
 int watermark_meter_buffer = 0;
@@ -200,17 +212,7 @@ IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wir
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
-int meter_value_i = 0;
 
-// Struktur für die Messwerte
-struct MeterValue
-{
-  uint32_t timestamp;   // 4 Bytes (Unix-Timestamp)
-  uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
-  uint32_t temperature; // 4 Bytes (Zahl bis ~4 Mio.)
-};
-
-MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
 
 
 
@@ -285,7 +287,7 @@ void MeterValue_init_Buffer()
 bool b_send_log_to_backend = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
 bool firstTime = true;
-String StatusCodeToString(int statusCode)
+String LogStatusCodeToString(int statusCode)
 {
   switch (statusCode)
   {
@@ -388,7 +390,7 @@ String time_formatTimestamp(unsigned long timestamp)
   strftime(buffer, sizeof(buffer), "%D %H:%M:%S", &timeinfo);
   return String(buffer);
 }
-String LogBufferEntryToString(int i)
+String LogEntryToString(int i)
 {
   if (logBuffer[i].statusCode == 0)
     return ""; // Leere Einträge überspringen
@@ -398,7 +400,7 @@ String LogBufferEntryToString(int i)
   logString += time_formatTimestamp(logBuffer[i].timestamp) + "</td><td>";
   logString += String(logBuffer[i].uptime) + "</td><td>";
   logString += String(logBuffer[i].statusCode) + "</td><td>";
-  logString += StatusCodeToString(logBuffer[i].statusCode);
+  logString += LogStatusCodeToString(logBuffer[i].statusCode);
 
   logString += "</td></tr>";
   return logString;
@@ -411,7 +413,7 @@ String LogBufferToString(int showNumber)
   // Erste Schleife: Neuerer Bereich (ab logIndex rückwärts bis 0)
   for (int i = logIndex; i >= 0; i--)
   {
-    logString += LogBufferEntryToString(i);
+    logString += LogEntryToString(i);
     showed_number++;
     if(showed_number >= showNumber)
       break;
@@ -423,7 +425,7 @@ String LogBufferToString(int showNumber)
     // logString += "<tr><td>-----</td></tr>";
     for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--)
     {
-      logString += LogBufferEntryToString(i);
+      logString += LogEntryToString(i);
       showed_number++;
       if(showed_number >= showNumber)
         break;
@@ -444,7 +446,7 @@ void MeterValues_clear_Buffer()
   meter_value_i = 0;
   meter_value_buffer_overflow = 0;
 }
-void webserverLocationHrefHome(int delay = 0)
+void webserverLocationHrefHome(int delay)
 {
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
@@ -839,7 +841,7 @@ int32_t MeterValue_get_from_telegram()
   return meter_value;
 }
 
-unsigned long last_serial;
+
 
 int32_t myStrom_get_Meter_value()
 {
@@ -915,11 +917,12 @@ int32_t myStrom_get_Meter_value()
   // Disconnect
   client.stop();
 }
-String meter_value;
-String lastLine;
+
+
 int32_t MeterValue_get_from_remote()
 {
-
+  String meter_value;
+  String lastLine;
   // Serial.println(F("Connecting..."));
 
   // Connect to HTTP server
@@ -962,7 +965,7 @@ int32_t MeterValue_get_from_remote()
 }
 
 // Funktion zum Speichern eines vollständigen Telegramms
-void saveCompleteTelegram()
+void Telegram_saveCompleteTelegram()
 {
   size_t telegramLength = telegram_receive_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
   if (telegramLength > TELEGRAM_LENGTH)
@@ -976,7 +979,7 @@ void saveCompleteTelegram()
   memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
   gTelegramSizeUsed = telegramLength;
-  timestamp_telegram = time_getEpochTime(); // last_serial;
+  timestamp_telegram = time_getEpochTime();
 }
 
 // Funktion zum Zurücksetzen des Eingabepuffers
@@ -1005,7 +1008,7 @@ void handle_telegram2()
       // Wenn alle zusätzlichen Bytes gelesen wurden
       if (extraIndex == 3)
       {
-        saveCompleteTelegram(); // Telegramm speichern
+        Telegram_saveCompleteTelegram(); // Telegramm speichern
         TelegramResetReceiveBuffer();          // Eingabepuffer zurücksetzen
         // AddLogEntry(3000);
       }
@@ -1235,8 +1238,7 @@ void webclient_send_meter_values_to_backend()
   client.stop();
 }
 
-unsigned long last_meter_value = 0;
-unsigned long previous_meter_value = 0;
+
 void MeterValue_store()
 {
 
