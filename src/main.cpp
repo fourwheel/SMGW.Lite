@@ -257,6 +257,8 @@ String StatusCodeToString(int statusCode)
     return "setup()";
   case 1002:
     return "Speicherzuweisung fehlgeschlagen!";
+  case 1003:
+    return "Config gespeichert";    
   case 1005:
     return "call_backend()";
   case 1006:
@@ -382,23 +384,30 @@ String LogBufferEntryToString(int i)
   logString += "</td></tr>";
   return logString;
 }
-String LogBufferToString()
+String LogBufferToString(int showNumber = LOG_BUFFER_SIZE)
 {
-
+  int showed_number = 0;
   String logString = "<table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // Erste Schleife: Neuerer Bereich (ab logIndex rückwärts bis 0)
   for (int i = logIndex; i >= 0; i--)
   {
     logString += LogBufferEntryToString(i);
+    showed_number++;
+    if(showed_number >= showNumber)
+      break;
   }
-  logString += "<tr><td>-----</td></tr>";
+ 
   // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
   if (logIndex < LOG_BUFFER_SIZE - 1)
   {
+    // logString += "<tr><td>-----</td></tr>";
     for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--)
     {
       logString += LogBufferEntryToString(i);
+      showed_number++;
+      if(showed_number >= showNumber)
+        break;
     }
   }
 
@@ -432,7 +441,10 @@ void print_MeterValues_via_webserver()
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
 }
-
+void print_LogBuffer_via_webserver()
+{
+  server.send(200, "text/html", LogBufferToString());
+}
 void splitHostAndPath(const String &url, String &host, String &path)
 {
   // Suche nach dem ersten "/"
@@ -667,6 +679,8 @@ void setup()
   server.on("/setCert", SetSslCert);
   server.on("/testBackendConnection", TestBackendConnection);
   server.on("/showMeterValues", print_MeterValues_via_webserver);
+  server.on("/showLogBuffer", print_LogBuffer_via_webserver);
+  
 
   server.on("/upload", []
             {
@@ -1670,13 +1684,13 @@ void handleRoot()
   s += "<li>Free Heap: ";
   s += String(ESP.getFreeHeap());
   s += "<li>Log Buffer Length (max): " + String(LOG_BUFFER_SIZE);
-
+  s += "<br><a href='showLogBuffer'>Show entire Logbuffer</a>";
   s += "<br><a href='resetLog'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
   s += "</ul>";
 
-  s += "<br><br>Log Buffer (index " + String(logIndex) + ")<br>";
-  s += LogBufferToString();
+  s += "<br><br>Log Buffer (last 5 entries / index " + String(logIndex) + ")<br>";
+  s += LogBufferToString(5);
 
   s += "<br></body></html>\n";
 
@@ -1761,4 +1775,5 @@ void configSaved()
     digitalWrite(LED_BUILTIN, LOW);
   }
   splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
+  AddLogEntry(1003);
 }
