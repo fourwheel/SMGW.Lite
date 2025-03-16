@@ -90,11 +90,11 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
 
 // -- Forward declarations.
-void handleRoot();
-void showTelegram();
-void showMeterValue();
-void showTemperature();
-void showCert();
+void webserverHandleRoot();
+void webserverShowTelegram();
+void webserverShowLastMeterValue();
+void webserverShowTermperature();
+void webserverShowCert();
 void configSaved();
 void clear_MeterValues_array();
 void reset_telegram();
@@ -427,12 +427,12 @@ void clear_MeterValues_array()
   meter_value_buffer_overflow = 0;
   // AddLogEntry(1013);
 }
-void location_href_home(int delay = 0)
+void webserverLocationHrefHome(int delay = 0)
 {
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
-void print_MeterValues_via_webserver()
+void webserverShowMeterValues()
 {
   String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -442,7 +442,7 @@ void print_MeterValues_via_webserver()
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
 }
-void print_LogBuffer_via_webserver()
+void webserverShowLogBuffer()
 {
   server.send(200, "text/html", LogBufferToString());
 }
@@ -469,12 +469,12 @@ String backend_host;
 String backend_path;
 
 char *FullCert = new char[2000];
-void SetSslCert()
+void webserverSetCert()
 {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
 }
 
-void TestBackendConnection()
+void webserverTestBackendConnection()
 {
   WiFiClientSecure client;
   client.setCACert(FullCert);
@@ -536,7 +536,7 @@ void TestBackendConnection()
   }
   server.send(200, "text/html", res);
 }
-void handleCertUpload()
+void webserverHandleCertUpload()
 {
   if (server.hasArg("cert"))
   {
@@ -547,19 +547,19 @@ void handleCertUpload()
       file.println(cert);
       file.close();
       AddLogEntry(8002);
-      location_href_home();
+      webserverLocationHrefHome();
     }
     else
     {
       AddLogEntry(8003);
-      location_href_home();
+      webserverLocationHrefHome();
       server.send(500, "text/plain", "Fehler beim Öffnen der Datei!");
     }
   }
   else
   {
     AddLogEntry(8004);
-    location_href_home();
+    webserverLocationHrefHome();
   }
 }
 void loadCertToCharArray()
@@ -672,20 +672,20 @@ void setup()
   }
 
   // -- Set up required URL handlers on the web server.
-  server.on("/", handleRoot);
-  server.on("/showTelegram", showTelegram);
-  server.on("/showMeterValue", showMeterValue);
-  server.on("/showTemperature", showTemperature);
-  server.on("/showCert", showCert);
-  server.on("/setCert", SetSslCert);
-  server.on("/testBackendConnection", TestBackendConnection);
-  server.on("/showMeterValues", print_MeterValues_via_webserver);
-  server.on("/showLogBuffer", print_LogBuffer_via_webserver);
+  server.on("/", webserverHandleRoot);
+  server.on("/showTelegram", webserverShowTelegram);
+  server.on("/showLastMeterValue", webserverShowLastMeterValue);
+  server.on("/showTemperature", webserverShowTermperature);
+  server.on("/showCert", webserverShowCert);
+  server.on("/setCert", webserverSetCert);
+  server.on("/testBackendConnection", webserverTestBackendConnection);
+  server.on("/showMeterValues", webserverShowMeterValues);
+  server.on("/showLogBuffer", webserverShowLogBuffer);
   
 
   server.on("/upload", []
             {
-              handleCertUpload();
+              webserverHandleCertUpload();
               loadCertToCharArray(); });
 
   server.on("/config", []
@@ -694,40 +694,40 @@ void setup()
   // { malloc(300*sizeof(unsigned long)); });
   server.on("/restart", []
             { 
-              location_href_home(5);
+              webserverLocationHrefHome(5);
               ESP.restart(); });
   server.on("/resetLog", []
             { 
-              location_href_home();
+              webserverLocationHrefHome();
               resetLogBuffer(); });
   server.on("/StoreMeterValue", []
-            { location_href_home();
+            { webserverLocationHrefHome();
             AddLogEntry(1006);
             store_meter_value(); });
   server.on("/initMeterValueBuffer", []
             {initMeterValueBuffer();
-            location_href_home(); });
+            webserverLocationHrefHome(); });
   server.on("/sendboth_Task", []
             { 
             
-            location_href_home(2);
+            webserverLocationHrefHome(2);
 
             Send_Meter_Values_to_backend_wrapper();
             Send_Log_to_backend_wrapper(); });
   server.on("/sendStatus_Task", []
             { 
-            location_href_home(2);
+            webserverLocationHrefHome(2);
             Send_Log_to_backend_wrapper(); });
 
   server.on("/sendMeterValues_Task", []
             { 
             
-            location_href_home(2);
+            webserverLocationHrefHome(2);
             Send_Meter_Values_to_backend_wrapper(); });
 
   server.on("/setOffline", []
             { wifi_connected = false;
-            location_href_home(); });
+            webserverLocationHrefHome(); });
 
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
@@ -922,7 +922,7 @@ int32_t get_meter_value_from_primary()
   // Serial.println(F("Connected!"));
 
   // Send HTTP request
-  client.println(F("GET /showMeterValue HTTP/1.0"));
+  client.println(F("GET /showLastMeterValue HTTP/1.0"));
   client.print(F("Host: "));
   client.println("192.168.0.2");
   client.println(F("Connection: close"));
@@ -969,35 +969,14 @@ void saveCompleteTelegram()
 }
 
 // Funktion zum Zurücksetzen des Eingabepuffers
-void resetBuffer()
+void TelegramResetReceiveBuffer()
 {
   telegram_receive_bufferIndex = 0;
   readingExtraBytes = false;
   extraIndex = 0;
 }
 
-// Beispiel-Funktion zur Verarbeitung des Telegramms
-void processTelegram()
-{
-  Serial.println("Verarbeitung des Telegramms...");
 
-  // Ausgabe der Nutzdaten (ohne Start- und Endsignatur)
-  size_t dataStart = sizeof(SIGNATURE_START);
-  size_t dataEnd = gTelegramSizeUsed - sizeof(SIGNATURE_END) - 3;
-
-  Serial.println("Nutzdaten:");
-  for (size_t i = dataStart; i < dataEnd; i++)
-  {
-    Serial.printf("Byte %zu: 0x%02X\n", i, TELEGRAM[i]);
-  }
-
-  // Zusätzliche Bytes ausgeben
-  Serial.println("Zusätzliche Bytes:");
-  for (size_t i = gTelegramSizeUsed - 3; i < gTelegramSizeUsed; i++)
-  {
-    Serial.printf("Byte %zu: 0x%02X\n", i, TELEGRAM[i]);
-  }
-}
 
 void handle_telegram2()
 {
@@ -1016,7 +995,7 @@ void handle_telegram2()
       if (extraIndex == 3)
       {
         saveCompleteTelegram(); // Telegramm speichern
-        resetBuffer();          // Eingabepuffer zurücksetzen
+        TelegramResetReceiveBuffer();          // Eingabepuffer zurücksetzen
         // AddLogEntry(3000);
       }
       continue;
@@ -1032,7 +1011,7 @@ void handle_telegram2()
       // Fehler: Pufferüberlauf
       // Serial.println("Fehler: Pufferüberlauf! Eingabepuffer zurückgesetzt.");
       // AddLogEntry(3001);
-      resetBuffer();
+      TelegramResetReceiveBuffer();
       continue;
     }
 
@@ -1058,7 +1037,7 @@ void handle_telegram2()
   {
     // Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
     // AddLogEntry(3002);
-    resetBuffer(); // Eingabepuffer zurücksetzen
+    TelegramResetReceiveBuffer(); // Eingabepuffer zurücksetzen
   }
 }
 
@@ -1477,7 +1456,7 @@ String formatUptime()
   sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
   return String(buffer);
 }
-void handleRoot()
+void webserverHandleRoot()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
@@ -1633,17 +1612,17 @@ void handleRoot()
 
   server.send(200, "text/html", s);
 }
-void showCert()
+void webserverShowCert()
 {
   server.send(200, "text/html", String(FullCert));
 }
 
-void showTemperature()
+void webserverShowTermperature()
 {
   Temp_sensors.requestTemperatures();
   server.send(200, "text/html", String(temperature));
 }
-void showTelegram()
+void webserverShowTelegram()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
@@ -1689,7 +1668,7 @@ void showTelegram()
   server.send(200, "text/html", s);
 }
 
-void showMeterValue()
+void webserverShowLastMeterValue()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
