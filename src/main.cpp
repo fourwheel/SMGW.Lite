@@ -47,8 +47,8 @@ const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 #define TELEGRAM_SIZE 512      // Maximale Größe eines Telegramms
 #define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
 
-uint8_t telegram_buffer[BUFFER_SIZE]; // Eingabepuffer für serielle Daten
-size_t telegram_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
+uint8_t telegram_receive_buffer[BUFFER_SIZE]; // Eingabepuffer für serielle Daten
+size_t telegram_receive_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
 bool readingExtraBytes = false;       // Status: Lesen der zusätzlichen Bytes
 uint8_t extraBytes[3];                // Zusätzliche Bytes nach der Endsignatur
 size_t extraIndex = 0;                // Index für zusätzliche Bytes
@@ -952,7 +952,7 @@ int32_t get_meter_value_from_primary()
 // Funktion zum Speichern eines vollständigen Telegramms
 void saveCompleteTelegram()
 {
-  size_t telegramLength = telegram_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
+  size_t telegramLength = telegram_receive_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
   if (telegramLength > TELEGRAM_SIZE)
   {
     // Serial.println("Fehler: Telegramm zu groß für Speicher!");
@@ -961,8 +961,8 @@ void saveCompleteTelegram()
   }
 
   // Telegramm in TELEGRAM-Array kopieren
-  memcpy(TELEGRAM, telegram_buffer, telegram_bufferIndex); // Kopiere Hauptdaten
-  memcpy(TELEGRAM + telegram_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
+  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
+  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
   TELEGRAM_SIZE_USED = telegramLength;
   timestamp_telegram = timeClient_getEpochTime(); // last_serial;
 }
@@ -970,7 +970,7 @@ void saveCompleteTelegram()
 // Funktion zum Zurücksetzen des Eingabepuffers
 void resetBuffer()
 {
-  telegram_bufferIndex = 0;
+  telegram_receive_bufferIndex = 0;
   readingExtraBytes = false;
   extraIndex = 0;
 }
@@ -1022,9 +1022,9 @@ void handle_telegram2()
     }
 
     // Byte im Eingabepuffer speichern
-    if (telegram_bufferIndex < BUFFER_SIZE)
+    if (telegram_receive_bufferIndex < BUFFER_SIZE)
     {
-      telegram_buffer[telegram_bufferIndex++] = incomingByte;
+      telegram_receive_buffer[telegram_receive_bufferIndex++] = incomingByte;
     }
     else
     {
@@ -1036,14 +1036,14 @@ void handle_telegram2()
     }
 
     // Prüfen, ob die Startsignatur erkannt wurde
-    if (telegram_bufferIndex >= sizeof(SIGNATURE_START) &&
-        memcmp(telegram_buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
+    if (telegram_receive_bufferIndex >= sizeof(SIGNATURE_START) &&
+        memcmp(telegram_receive_buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
     {
 
       // Prüfen, ob die Endsignatur erkannt wurde
-      if (telegram_bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
+      if (telegram_receive_bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
       {
-        if (memcmp(&telegram_buffer[telegram_bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
+        if (memcmp(&telegram_receive_buffer[telegram_receive_bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
         {
           // Endsignatur erkannt, auf zusätzliche Bytes warten
           readingExtraBytes = true;
@@ -1053,7 +1053,7 @@ void handle_telegram2()
   }
 
   // Prüfen, ob ein Timeout aufgetreten ist
-  if (telegram_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
+  if (telegram_receive_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {
     // Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
     // AddLogEntry(3002);
@@ -1061,69 +1061,7 @@ void handle_telegram2()
   }
 }
 
-void receive_telegram()
-{
-  while (mySerial.available())
-  {
-    BUFFER[m_i] = mySerial.read();
-    // Serial.print(TELEGRAM[m_i], HEX);
-    // Serial.println(millis());
 
-    if (/*m_i == atoi(telegram_suffix) + 7*/
-        m_i > 8 && BUFFER[m_i - 7] == 0x1b && BUFFER[m_i - 6] == 0x1b && BUFFER[m_i - 5] == 0x1b && BUFFER[m_i - 4] == 0x1b && BUFFER[m_i - 3] == 0x1a)
-    {
-      // AddLogEntry(1234);
-      reset_telegram();
-      return;
-    }
-
-    m_i++;
-
-    m_i_max = max(m_i_max, m_i);
-
-    if (m_i >= TELEGRAM_LENGTH)
-    {
-      m_i = 0;
-      Serial.println("ERROR Buffer Size exceeded");
-      AddLogEntry(1205);
-    }
-
-    last_serial = millis();
-  }
-  // else Serial.print("nix empfangen\n");
-}
-
-void reset_telegram()
-{
-
-  bool transfer = false;
-  if (BUFFER[0] != 0x00 && BUFFER[1] != 0x00 && BUFFER[2] != 0x00)
-  {
-    transfer = true;
-  }
-
-  for (int q = 0; q < TELEGRAM_LENGTH; q++)
-  {
-    // Serial.println(q + " " + BUFFER[q]);
-    if (transfer)
-    {
-      TELEGRAM[q] = BUFFER[q]; // cpoy received message, so that only a complete telegram is processed
-    }
-    BUFFER[q] = 0;
-  }
-
-  m_i = 0;
-  m_i_max = 0;
-  timestamp_telegram = timeClient_getEpochTime(); // last_serial;
-  last_serial = millis();
-}
-
-void handle_telegram()
-{
-  receive_telegram();
-  if (millis() - last_serial > 30)
-    reset_telegram();
-}
 
 void send_status_report_function()
 {
