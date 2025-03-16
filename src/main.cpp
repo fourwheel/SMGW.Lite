@@ -38,24 +38,25 @@ const char wifiInitialApPassword[] = "password";
 int m_i = 0;
 int m_i_max = 0;
 
-#define TELEGRAM_LENGTH 512
+
 // Telegramm-Signaturen
 const uint8_t SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 
-#define BUFFER_SIZE 512        // Maximale Puffergröße für Eingangsdaten
-#define TELEGRAM_SIZE 512      // Maximale Größe eines Telegramms
-#define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
 
-uint8_t telegram_receive_buffer[BUFFER_SIZE]; // Eingabepuffer für serielle Daten
+#define TELEGRAM_LENGTH 512
+#define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
+size_t gTelegramSizeUsed = 0;   // Tatsächliche Länge des gespeicherten Telegramms
+
+uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // Eingabepuffer für serielle Daten
 size_t telegram_receive_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
 bool readingExtraBytes = false;       // Status: Lesen der zusätzlichen Bytes
 uint8_t extraBytes[3];                // Zusätzliche Bytes nach der Endsignatur
 size_t extraIndex = 0;                // Index für zusätzliche Bytes
 unsigned long lastByteTime = 0;       // Zeitstempel des letzten empfangenen Bytes
 unsigned long timestamp_telegram;
-uint8_t TELEGRAM[TELEGRAM_SIZE]; // Speicher für das vollständige Telegramm
-size_t TELEGRAM_SIZE_USED = 0;   // Tatsächliche Länge des gespeicherten Telegramms
+uint8_t TELEGRAM[TELEGRAM_LENGTH]; // Speicher für das vollständige Telegramm
+
 
 #if defined(ESP32)
 #include <WiFi.h>
@@ -781,7 +782,7 @@ void Send_Log_to_backend_wrapper()
 {
   xTaskCreate(Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
 }
-uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
+// uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
 bool prefix_suffix_correct()
 {
   int prefix = atoi(telegram_prefix);
@@ -953,7 +954,7 @@ int32_t get_meter_value_from_primary()
 void saveCompleteTelegram()
 {
   size_t telegramLength = telegram_receive_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
-  if (telegramLength > TELEGRAM_SIZE)
+  if (telegramLength > TELEGRAM_LENGTH)
   {
     // Serial.println("Fehler: Telegramm zu groß für Speicher!");
     AddLogEntry(3003);
@@ -963,7 +964,7 @@ void saveCompleteTelegram()
   // Telegramm in TELEGRAM-Array kopieren
   memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
-  TELEGRAM_SIZE_USED = telegramLength;
+  gTelegramSizeUsed = telegramLength;
   timestamp_telegram = timeClient_getEpochTime(); // last_serial;
 }
 
@@ -982,7 +983,7 @@ void processTelegram()
 
   // Ausgabe der Nutzdaten (ohne Start- und Endsignatur)
   size_t dataStart = sizeof(SIGNATURE_START);
-  size_t dataEnd = TELEGRAM_SIZE_USED - sizeof(SIGNATURE_END) - 3;
+  size_t dataEnd = gTelegramSizeUsed - sizeof(SIGNATURE_END) - 3;
 
   Serial.println("Nutzdaten:");
   for (size_t i = dataStart; i < dataEnd; i++)
@@ -992,7 +993,7 @@ void processTelegram()
 
   // Zusätzliche Bytes ausgeben
   Serial.println("Zusätzliche Bytes:");
-  for (size_t i = TELEGRAM_SIZE_USED - 3; i < TELEGRAM_SIZE_USED; i++)
+  for (size_t i = gTelegramSizeUsed - 3; i < gTelegramSizeUsed; i++)
   {
     Serial.printf("Byte %zu: 0x%02X\n", i, TELEGRAM[i]);
   }
@@ -1022,7 +1023,7 @@ void handle_telegram2()
     }
 
     // Byte im Eingabepuffer speichern
-    if (telegram_receive_bufferIndex < BUFFER_SIZE)
+    if (telegram_receive_bufferIndex < TELEGRAM_LENGTH)
     {
       telegram_receive_buffer[telegram_receive_bufferIndex++] = incomingByte;
     }
@@ -1245,7 +1246,7 @@ void send_meter_values()
 }
 
 unsigned long last_meter_value = 0;
-int32_t previous_meter_value = 0;
+unsigned long previous_meter_value = 0;
 void store_meter_value()
 {
 
@@ -1350,11 +1351,9 @@ void loop()
 
   if (restart_wifi && millis() - last_wifi_retry > 5000)
   {
-    Serial.println("7001A");
     restart_wifi = false;
     iotWebConf.goOnLine(false);
     AddLogEntry(7001);
-    Serial.println("7001B");
   }
 
   if (millis() - last_wifi_check > 500)
