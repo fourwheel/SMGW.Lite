@@ -28,7 +28,7 @@ const char wifiInitialApPassword[] = "password";
 
 #define STRING_LEN 128
 #define ID_LEN 4
-#define NUMBER_LEN 32
+#define NUMBER_LEN 5
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "1015"
@@ -120,10 +120,10 @@ void handle_temperature();
 void loop();
 void MeterValue_init_Buffer();
 void MeterValues_clear_Buffer();
-void ota_setup();
+void OTA_setup();
 void Param_configSaved();
 void Param_setup();
-void set_Led_Blink();
+void Led_update_Blink();
 String Log_BufferToString(int showNumber = LOG_BUFFER_SIZE);
 String Log_EntryToString(int i);
 String Log_StatusCodeToString(int statusCode);
@@ -384,8 +384,8 @@ String Time_formatTimestamp(unsigned long timestamp)
 }
 String Log_EntryToString(int i)
 {
-  if (logBuffer[i].statusCode == 0)
-    return ""; // Leere Einträge überspringen
+  if (logBuffer[i].statusCode == 0 && logBuffer[i].timestamp == 0 && logBuffer[i].uptime == 0)
+    return ""; // don't show empty entries
   String logString = "<tr><td>";
   logString += String(i) + "</td><td>";
   logString += String(logBuffer[i].timestamp) + "</td><td>";
@@ -707,9 +707,9 @@ void setup()
   Serial.println("Starting up...HELLAU!");
 
   Param_setup();
-  set_Led_Blink();
+  Led_update_Blink();
   Webserver_UrlConfig();
-  ota_setup();
+  OTA_setup();
 
   if (!SPIFFS.begin(true))
   {
@@ -756,7 +756,7 @@ void Param_setup()
   iotWebConf.skipApStartup();
   iotWebConf.init();
 }
-void ota_setup()
+void OTA_setup()
 {
   ArduinoOTA
       .onStart([]()
@@ -1526,7 +1526,7 @@ void Webserver_HandleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>Temperatur [1/100 °C]: ";
+  s += "<li>Temperatur [1/100 C]: ";
   s += String(temperature);
 
   s += "</ul>";
@@ -1649,12 +1649,12 @@ void Param_configSaved()
 {
   Serial.println("Configuration was updated.");
 
-  set_Led_Blink();
+  Led_update_Blink();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);
 }
 
-void set_Led_Blink()
+void Led_update_Blink()
 {
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
