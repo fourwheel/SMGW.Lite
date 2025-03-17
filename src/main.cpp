@@ -714,13 +714,12 @@ void setup()
   Webserver_UrlConfig();
   ota_setup();
 
-  Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
-
   if (!SPIFFS.begin(true))
   {
     Log_AddEntry(8000);
   }
   Webclient_loadCertToChar();
+  Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
 
   MeterValue_init_Buffer();
 
@@ -795,7 +794,7 @@ void Webclient_Send_Log_to_backend_wrapper()
 {
   xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
 }
-// uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
+
 bool Telegram_prefix_suffix_correct()
 {
   int prefix = atoi(telegram_prefix);
