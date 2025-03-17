@@ -38,22 +38,20 @@ const char wifiInitialApPassword[] = "password";
 int m_i = 0;
 int m_i_max = 0;
 
-
 // Telegramm-Signaturen
 const uint8_t SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 
-
 #define TELEGRAM_LENGTH 512
 #define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
-size_t gTelegramSizeUsed = 0;   // Tatsächliche Länge des gespeicherten Telegramms
+size_t gTelegramSizeUsed = 0;  // Tatsächliche Länge des gespeicherten Telegramms
 
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // Eingabepuffer für serielle Daten
-size_t telegram_receive_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
-bool readingExtraBytes = false;       // Status: Lesen der zusätzlichen Bytes
-uint8_t extraBytes[3];                // Zusätzliche Bytes nach der Endsignatur
-size_t extraIndex = 0;                // Index für zusätzliche Bytes
-unsigned long lastByteTime = 0;       // Zeitstempel des letzten empfangenen Bytes
+size_t telegram_receive_bufferIndex = 0;          // Aktuelle Position im Eingabepuffer
+bool readingExtraBytes = false;                   // Status: Lesen der zusätzlichen Bytes
+uint8_t extraBytes[3];                            // Zusätzliche Bytes nach der Endsignatur
+size_t extraIndex = 0;                            // Index für zusätzliche Bytes
+unsigned long lastByteTime = 0;                   // Zeitstempel des letzten empfangenen Bytes
 unsigned long timestamp_telegram;
 uint8_t TELEGRAM[TELEGRAM_LENGTH]; // Speicher für das vollständige Telegramm
 
@@ -111,7 +109,7 @@ void handle_call_backend();
 void handle_check_wifi_connection();
 void handle_MeterValue_store();
 void handle_temperature();
-void handle_telegram2();
+void Telegram_handle();
 void webClient_loadCertToChar();
 void LogBuffer_reset();
 void MeterValue_init_Buffer();
@@ -153,7 +151,6 @@ void loop();
 #if defined(ESP32)
 String esp_reset_reason_string();
 #endif
-
 
 int watermark_meter_buffer = 0;
 int watermark_log_buffer = 0;
@@ -211,10 +208,6 @@ IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Te
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
-
-
-
-
 
 unsigned long time_getEpochTime()
 {
@@ -283,7 +276,6 @@ void MeterValue_init_Buffer()
   MeterValues_clear_Buffer();
 }
 
-
 bool b_send_log_to_backend = false;
 // Funktion zur Hinzufügung eines neuen Log-Eintrags
 bool firstTime = true;
@@ -296,7 +288,7 @@ String LogStatusCodeToString(int statusCode)
   case 1002:
     return "Speicherzuweisung fehlgeschlagen!";
   case 1003:
-    return "Config gespeichert";    
+    return "Config gespeichert";
   case 1005:
     return "call_backend()";
   case 1006:
@@ -366,7 +358,6 @@ String LogStatusCodeToString(int statusCode)
   return "Unknown status code";
 }
 
-
 String time_getFormattedTime()
 {
   time_t now = time(nullptr);
@@ -377,7 +368,6 @@ String time_getFormattedTime()
   strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo); // Zeitformat HH:MM:SS
   return String(timeStr);                                    // Gibt Zeit als lesbaren String aus
 }
-
 
 String time_formatTimestamp(unsigned long timestamp)
 {
@@ -415,12 +405,12 @@ String LogBufferToString(int showNumber)
   {
     logString += LogEntryToString(i);
     showed_number++;
-    if(showed_number >= showNumber)
+    if (showed_number >= showNumber)
     {
       return logString + "</table>";
     }
   }
- 
+
   // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
   if (logIndex < LOG_BUFFER_SIZE - 1)
   {
@@ -429,7 +419,7 @@ String LogBufferToString(int showNumber)
     {
       logString += LogEntryToString(i);
       showed_number++;
-      if(showed_number >= showNumber)
+      if (showed_number >= showNumber)
         break;
     }
   }
@@ -637,6 +627,67 @@ void webclient_Send_Log_to_backend_Task(void *pvParameters)
   vTaskDelete(NULL); // Task löschen, wenn fertig
 }
 
+void webserver_UrlConfig()
+{
+    // -- Set up required URL handlers on the web server.
+    server.on("/", webserverHandleRoot);
+    server.on("/showTelegram", webserverShowTelegram);
+    server.on("/showLastMeterValue", webserverShowLastMeterValue);
+    server.on("/showTemperature", webserverShowTermperature);
+    server.on("/showCert", webserverShowCert);
+    server.on("/setCert", webserverSetCert);
+    server.on("/testBackendConnection", webserverTestBackendConnection);
+    server.on("/showMeterValues", webserverShowMeterValues);
+    server.on("/showLogBuffer", webserverShowLogBuffer);
+  
+    server.on("/upload", []
+              {
+                webserverHandleCertUpload();
+                webClient_loadCertToChar(); });
+  
+    server.on("/config", []
+              { iotWebConf.handleConfig(); });
+    server.on("/restart", []
+              { 
+                webserverLocationHrefHome(5);
+                ESP.restart(); });
+    server.on("/resetLogBuffer", []
+              { 
+                webserverLocationHrefHome();
+                LogBuffer_reset(); });
+    server.on("/StoreMeterValue", []
+              { webserverLocationHrefHome();
+              AddLogEntry(1006);
+              MeterValue_store(); });
+    server.on("/MeterValue_init_Buffer", []
+              {MeterValue_init_Buffer();
+              webserverLocationHrefHome(); });
+    server.on("/sendboth_Task", []
+              { 
+              
+              webserverLocationHrefHome(2);
+  
+              webclient_Send_Meter_Values_to_backend_wrapper();
+              webclient_Send_Log_to_backend_wrapper(); });
+    server.on("/sendStatus_Task", []
+              { 
+              webserverLocationHrefHome(2);
+              webclient_Send_Log_to_backend_wrapper(); });
+  
+    server.on("/sendMeterValues_Task", []
+              { 
+              
+              webserverLocationHrefHome(2);
+              webclient_Send_Meter_Values_to_backend_wrapper(); });
+  
+    server.on("/setOffline", []
+              { wifi_connected = false;
+              webserverLocationHrefHome(); });
+  
+    server.onNotFound([]()
+                      { iotWebConf.handleNotFound(); });
+}
+
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
@@ -691,65 +742,8 @@ void setup()
     iotWebConf.disableBlink();
     digitalWrite(LED_BUILTIN, LOW);
   }
+  webserver_UrlConfig();
 
-  // -- Set up required URL handlers on the web server.
-  server.on("/", webserverHandleRoot);
-  server.on("/showTelegram", webserverShowTelegram);
-  server.on("/showLastMeterValue", webserverShowLastMeterValue);
-  server.on("/showTemperature", webserverShowTermperature);
-  server.on("/showCert", webserverShowCert);
-  server.on("/setCert", webserverSetCert);
-  server.on("/testBackendConnection", webserverTestBackendConnection);
-  server.on("/showMeterValues", webserverShowMeterValues);
-  server.on("/showLogBuffer", webserverShowLogBuffer);
-  
-
-  server.on("/upload", []
-            {
-              webserverHandleCertUpload();
-              webClient_loadCertToChar(); });
-
-  server.on("/config", []
-            { iotWebConf.handleConfig(); });
-  server.on("/restart", []
-            { 
-              webserverLocationHrefHome(5);
-              ESP.restart(); });
-  server.on("/resetLogBuffer", []
-            { 
-              webserverLocationHrefHome();
-              LogBuffer_reset(); });
-  server.on("/StoreMeterValue", []
-            { webserverLocationHrefHome();
-            AddLogEntry(1006);
-            MeterValue_store(); });
-  server.on("/MeterValue_init_Buffer", []
-            {MeterValue_init_Buffer();
-            webserverLocationHrefHome(); });
-  server.on("/sendboth_Task", []
-            { 
-            
-            webserverLocationHrefHome(2);
-
-            webclient_Send_Meter_Values_to_backend_wrapper();
-            webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendStatus_Task", []
-            { 
-            webserverLocationHrefHome(2);
-            webclient_Send_Log_to_backend_wrapper(); });
-
-  server.on("/sendMeterValues_Task", []
-            { 
-            
-            webserverLocationHrefHome(2);
-            webclient_Send_Meter_Values_to_backend_wrapper(); });
-
-  server.on("/setOffline", []
-            { wifi_connected = false;
-            webserverLocationHrefHome(); });
-
-  server.onNotFound([]()
-                    { iotWebConf.handleNotFound(); });
 
   Serial.println("Ready.");
   ArduinoOTA
@@ -819,7 +813,6 @@ bool Telegram_prefix_suffix_correct()
   }
 }
 
-
 int32_t MeterValue_get_from_telegram()
 {
 
@@ -842,8 +835,6 @@ int32_t MeterValue_get_from_telegram()
   }
   return meter_value;
 }
-
-
 
 int32_t myStrom_get_Meter_value()
 {
@@ -920,7 +911,6 @@ int32_t myStrom_get_Meter_value()
   client.stop();
 }
 
-
 int32_t MeterValue_get_from_remote()
 {
   String meter_value;
@@ -979,7 +969,7 @@ void Telegram_saveCompleteTelegram()
 
   // Telegramm in TELEGRAM-Array kopieren
   memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
-  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
+  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // Kopiere zusätzliche Bytes
   gTelegramSizeUsed = telegramLength;
   timestamp_telegram = time_getEpochTime();
 }
@@ -992,9 +982,7 @@ void TelegramResetReceiveBuffer()
   extraIndex = 0;
 }
 
-
-
-void handle_telegram2()
+void Telegram_handle()
 {
   // Prüfen, ob Daten verfügbar sind
   while (mySerial.available() > 0)
@@ -1011,7 +999,7 @@ void handle_telegram2()
       if (extraIndex == 3)
       {
         Telegram_saveCompleteTelegram(); // Telegramm speichern
-        TelegramResetReceiveBuffer();          // Eingabepuffer zurücksetzen
+        TelegramResetReceiveBuffer();    // Eingabepuffer zurücksetzen
         // AddLogEntry(3000);
       }
       continue;
@@ -1056,8 +1044,6 @@ void handle_telegram2()
     TelegramResetReceiveBuffer(); // Eingabepuffer zurücksetzen
   }
 }
-
-
 
 void webclient_send_log_to_backend()
 {
@@ -1240,7 +1226,6 @@ void webclient_send_meter_values_to_backend()
   client.stop();
 }
 
-
 void MeterValue_store()
 {
 
@@ -1291,45 +1276,8 @@ void MeterValue_store()
 unsigned long last_wifi_check;
 int read_meter_intervall_int = 0;
 
-void handle_call_backend()
-{
-}
-void handle_MeterValue_store()
-{
-}
 void handle_check_wifi_connection()
 {
-}
-
-unsigned long last_temp = 0;
-bool read_temp = false;
-
-void handle_temperature()
-{
-  if (temperature_object.isChecked())
-  {
-    if (read_temp == true && millis() - last_temp > 20000)
-    {
-      last_temp = millis();
-      Temp_sensors.requestTemperatures();
-      read_temp = false;
-    }
-    else if (read_temp == false && millis() - last_temp > 1000)
-    {
-      last_temp = millis();
-      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
-      read_temp = true;
-    }
-  }
-}
-void loop()
-{
-
-  iotWebConf.doLoop();
-  ArduinoOTA.handle();
-  handle_temperature();
-  handle_telegram2();
-
   if (restart_wifi && millis() - last_wifi_retry > 5000)
   {
     restart_wifi = false;
@@ -1374,7 +1322,45 @@ void loop()
       // Still offline
     }
   }
+}
 
+unsigned long last_temp = 0;
+bool read_temp = false;
+
+void handle_temperature()
+{
+  if (temperature_object.isChecked())
+  {
+    if (read_temp == true && millis() - last_temp > 20000)
+    {
+      last_temp = millis();
+      Temp_sensors.requestTemperatures();
+      read_temp = false;
+    }
+    else if (read_temp == false && millis() - last_temp > 1000)
+    {
+      last_temp = millis();
+      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
+      read_temp = true;
+    }
+  }
+}
+void handle_call_backend()
+{
+  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
+  {
+    if ((!call_backend_V2_successfull && millis() - last_call_backend_v2 > 30000) || (time_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
+    {
+      webclient_Send_Meter_Values_to_backend_wrapper();
+      if (b_send_log_to_backend == true)
+      {
+        webclient_Send_Log_to_backend_wrapper();
+      }
+    }
+  }
+}
+void handle_MeterValue_store()
+{
   if (!wifi_connected &&
       (time_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
   {
@@ -1391,18 +1377,20 @@ void loop()
     AddLogEntry(1011);
     MeterValue_store();
   }
+}
+void loop()
+{
 
-  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
-  {
-    if ((!call_backend_V2_successfull && millis() - last_call_backend_v2 > 30000) || (time_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
-    {
-      webclient_Send_Meter_Values_to_backend_wrapper();
-      if (b_send_log_to_backend == true)
-      {
-        webclient_Send_Log_to_backend_wrapper();
-      }
-    }
-  }
+  iotWebConf.doLoop();
+  ArduinoOTA.handle();
+  handle_temperature();
+  Telegram_handle();
+
+  handle_check_wifi_connection();
+
+  handle_MeterValue_store();
+  handle_call_backend();
+
 }
 #if defined(ESP32)
 String esp_reset_reason_string()
@@ -1607,8 +1595,8 @@ void webserverHandleRoot()
   s += "<br><a href='restart'>Restart</a>";
   s += "</ul>";
 
-  s += "<br><br>Log Buffer (last 5 entries / index " + String(logIndex) + ")<br>";
-  s += LogBufferToString(5);
+  s += "<br><br>Log Buffer (last 10 entries / current buffer index " + String(logIndex) + ")<br>";
+  s += LogBufferToString(10);
 
   s += "<br></body></html>\n";
 
