@@ -33,8 +33,9 @@ Together with an **optical dongle**, it:
 - **Includes basic backend code** to store data in a database 🗄️  
 
 Although the implementation is **not** a complete German Smart Meter Gateway, it does imitate certain aspects such as:  
-- **TAF** (*Tarifanwendungsfall*)  
-- **Wirk-PKI** (TLS-secured backend communication)  
+- **TAF** (*Tarifanwendungsfall*): Taf 6, 7 and 14 implemented  
+- **Wirk-PKI**: TLS-secured backend communication including certificate handling
+- It can store >500 meter readings and transmit them day-after    
 
 ---
 
