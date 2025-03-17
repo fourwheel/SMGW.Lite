@@ -107,22 +107,11 @@ unsigned long last_wifi_check;
 bool wifi_connected;
 
 
-
-
-
 // -- Forward declarations.
-void Log_AddEntry(int statusCode);
 void handle_call_backend();
 void handle_check_wifi_connection();
 void handle_MeterValue_store();
-void MeterValue_store();
 void handle_temperature();
-void loop();
-void MeterValue_init_Buffer();
-void MeterValues_clear_Buffer();
-void OTA_setup();
-void Param_configSaved();
-void Param_setup();
 void Led_update_Blink();
 String Log_BufferToString(int showNumber = LOG_BUFFER_SIZE);
 String Log_EntryToString(int i);
@@ -130,6 +119,11 @@ String Log_StatusCodeToString(int statusCode);
 #if defined(ESP32)
 String Log_get_reset_reason();
 #endif
+void MeterValue_store();
+void MeterValues_clear_Buffer();
+void OTA_setup();
+void Param_configSaved();
+void Param_setup();
 String Time_formatTimestamp(unsigned long timestamp);
 String Time_formatUptime();
 String Time_getFormattedTime();
