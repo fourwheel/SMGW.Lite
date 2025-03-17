@@ -1,6 +1,24 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
 #include <SPIFFS.h>
+#if defined(ESP32)
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <HardwareSerial.h>
+#include <HTTPClient.h>
+#elif defined(ESP8266)
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <SoftwareSerial.h>
+#include <ESP8266HTTPClient.h>
+#endif
+#include <ArduinoJson.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include "NTPClient.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include "Arduino.h"
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMGW.Lite";
@@ -15,9 +33,6 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "1015"
 
-#define HOST_REACHABLE 0x01
-#define CERT_CORRECT 0x02
-
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
 #ifndef D2
@@ -26,86 +41,75 @@ const char wifiInitialApPassword[] = "password";
 
 #define CONFIG_PIN D2
 
-// -- Status indicator pin.
-//      First it will light up (kept LOW), on Wifi connection it will blink,
-//      when connected to the Wifi it will turn off (kept HIGH).
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
 #endif
 
 #define STATUS_PIN LED_BUILTIN
 
-int m_i = 0;
-int m_i_max = 0;
 
-// Telegramm-Signaturen
-const uint8_t SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
-const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-
+// Telegramm Vars
+const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
+const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 #define TELEGRAM_LENGTH 512
-#define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
-size_t gTelegramSizeUsed = 0;  // Tatsächliche Länge des gespeicherten Telegramms
+#define TELEGRAM_TIMEOUT_MS 30 // timeout for telegramm in ms
+size_t TelegramSizeUsed = 0;  // actual size of stored telegram
+uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
+size_t telegram_receive_bufferIndex = 0;          // positoin in serial data butter
+bool readingExtraBytes = false;                   // reading additional bytes?
+uint8_t extraBytes[3];                            // additional bytes after end signature
+size_t extraIndex = 0;                            // index of additional bytes
+unsigned long lastByteTime = 0;                   // timestamp of last received byte
+unsigned long timestamp_telegram;                 // timestamp of telegram
+uint8_t TELEGRAM[TELEGRAM_LENGTH]; // buffer for entire telegram
 
-uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // Eingabepuffer für serielle Daten
-size_t telegram_receive_bufferIndex = 0;          // Aktuelle Position im Eingabepuffer
-bool readingExtraBytes = false;                   // Status: Lesen der zusätzlichen Bytes
-uint8_t extraBytes[3];                            // Zusätzliche Bytes nach der Endsignatur
-size_t extraIndex = 0;                            // Index für zusätzliche Bytes
-unsigned long lastByteTime = 0;                   // Zeitstempel des letzten empfangenen Bytes
-unsigned long timestamp_telegram;
-uint8_t TELEGRAM[TELEGRAM_LENGTH]; // Speicher für das vollständige Telegramm
 
+// Meter Value Vsrs 
 int meter_value_i = 0;
-
-// Struktur für die Messwerte
 struct MeterValue
 {
-  uint32_t timestamp;   // 4 Bytes (Unix-Timestamp)
-  uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
-  uint32_t temperature; // 4 Bytes (Zahl bis ~4 Mio.)
+  uint32_t timestamp;   // 4 Bytes
+  uint32_t meter_value; // 4 Bytes
+  uint32_t temperature; // 4 Bytes
 };
-
-MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
-
+MeterValue *MeterValues = nullptr; // initiaize with nullptr
 unsigned long last_meter_value = 0;
 unsigned long previous_meter_value = 0;
+int meter_value_buffer_overflow = 0;
+int Meter_Value_Buffer_Size = 234;
 
+// Backend Vars
 bool call_backend_successfull = true;
-SemaphoreHandle_t Sema_Backend; // Mutex für synchronisierten Zugriff
+SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
 unsigned long last_call_backend = 0;
 
-#if defined(ESP32)
-#include <WiFi.h>
-#include <ESPmDNS.h>
-#include <HardwareSerial.h>
-#include <HTTPClient.h>
-#elif defined(ESP8266)
-#include <ESP8266WiFi.h>
-#include <ESP8266mDNS.h>
-#include <SoftwareSerial.h>
-#include <ESP8266HTTPClient.h>
 
-#endif
-#include <ArduinoJson.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
-#include "NTPClient.h"
-
-bool wifi_connected;
-
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include "Arduino.h"
+// Temperature Vars
 #define ONE_WIRE_BUS 4
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
+unsigned long last_temperature = 0;
+bool read_temperature = false;
+int temperature;
 
-#if defined(ESP32)
-HardwareSerial mySerial(1); // RX, TX
-#elif defined(ESP8266)
-SoftwareSerial mySerial(D5, D6); // RX, TX
-#endif
+// Log Vars
 const int LOG_BUFFER_SIZE = 100;
+
+// Tasks vars
+int watermark_meter_buffer = 0;
+int watermark_log_buffer = 0;
+
+// Wifi Vars
+unsigned long wifi_reconnection_time = 0;
+unsigned long last_wifi_retry = 0;
+bool restart_wifi = false;
+unsigned long last_wifi_check;
+bool wifi_connected;
+
+
+
+
+
 // -- Forward declarations.
 void Log_AddEntry(int statusCode);
 void handle_call_backend();
@@ -155,31 +159,19 @@ void Webserver_ShowTermperature();
 void Webserver_TestBackendConnection();
 void Webserver_UrlConfig();
 
-int watermark_meter_buffer = 0;
-int watermark_log_buffer = 0;
-
-unsigned long wifi_reconnection_time = 0;
-unsigned long last_wifi_retry = 0;
-bool restart_wifi = false;
 DNSServer dnsServer;
 WebServer server(80);
 
-unsigned long last_wifi_check;
-int read_meter_intervall_int = 0;
-unsigned long last_temp = 0;
-bool read_temp = false;
-int temperature;
-int meter_value_buffer_overflow = 0;
-char telegram_offset[NUMBER_LEN];
-char telegram_length[NUMBER_LEN];
-char telegram_prefix[NUMBER_LEN];
-char telegram_suffix[NUMBER_LEN];
-char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
-int Meter_Value_Buffer_Size = 234;
+#if defined(ESP32)
+HardwareSerial mySerial(1); // RX, TX
+#elif defined(ESP8266)
+SoftwareSerial mySerial(D5, D6); // RX, TX
+#endif
 
+// Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
-char UseSslCertValue[STRING_LEN]; // Platz für "0" oder "1"
+char UseSslCertValue[STRING_LEN]; 
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
@@ -187,6 +179,11 @@ char backend_token[STRING_LEN];
 char read_meter_intervall[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
+char telegram_offset[NUMBER_LEN];
+char telegram_length[NUMBER_LEN];
+char telegram_prefix[NUMBER_LEN];
+char telegram_suffix[NUMBER_LEN];
+char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
@@ -970,7 +967,7 @@ void Telegram_saveCompleteTelegram()
   // Telegramm in TELEGRAM-Array kopieren
   memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // Kopiere zusätzliche Bytes
-  gTelegramSizeUsed = telegramLength;
+  TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
 }
 
@@ -1015,14 +1012,14 @@ void Telegram_handle()
     }
 
     // Check for start signature
-    if (telegram_receive_bufferIndex >= sizeof(SIGNATURE_START) &&
-        memcmp(telegram_receive_buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
+    if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) &&
+        memcmp(telegram_receive_buffer, SML_SIGNATURE_START, sizeof(SML_SIGNATURE_START)) == 0)
     {
 
       // Check for end signature
-      if (telegram_receive_bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
+      if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) + sizeof(SML_SIGNATURE_END))
       {
-        if (memcmp(&telegram_receive_buffer[telegram_receive_bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
+        if (memcmp(&telegram_receive_buffer[telegram_receive_bufferIndex - sizeof(SML_SIGNATURE_END)], SML_SIGNATURE_END, sizeof(SML_SIGNATURE_END)) == 0)
         {
           // signatur check positive, wait for additional bytes
           readingExtraBytes = true;
@@ -1316,17 +1313,17 @@ void handle_temperature()
 {
   if (temperature_object.isChecked())
   {
-    if (read_temp == true && millis() - last_temp > 20000)
+    if (read_temperature == true && millis() - last_temperature > 20000)
     {
-      last_temp = millis();
+      last_temperature = millis();
       Temp_sensors.requestTemperatures();
-      read_temp = false;
+      read_temperature = false;
     }
-    else if (read_temp == false && millis() - last_temp > 1000)
+    else if (read_temperature == false && millis() - last_temperature > 1000)
     {
-      last_temp = millis();
+      last_temperature = millis();
       temperature = (Temp_sensors.getTempCByIndex(0) * 100);
-      read_temp = true;
+      read_temperature = true;
     }
   }
 }
@@ -1446,7 +1443,7 @@ void Webserver_HandleRoot()
   s += atoi(telegram_prefix);
   s += "<li><i>Suffix Begin: </i>";
   s += atoi(telegram_suffix);
-  s += "<li>Detected Meter Value: " + String(MeterValue_get_from_telegram());
+  s += "<li>Detected Meter Value [1/10 Wh]: " + String(MeterValue_get_from_telegram());
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
   s += "<li><a href='showTelegram'>Show Telegram</a>";
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
@@ -1529,7 +1526,7 @@ void Webserver_HandleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>temperatur: ";
+  s += "<li>Temperatur [1/100 °C]: ";
   s += String(temperature);
 
   s += "</ul>";
