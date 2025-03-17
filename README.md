@@ -13,6 +13,16 @@ In my free time, I developed a project to **extract** and **process** this data 
 
 ---
 
+## ⚠️ Disclaimer
+It is quite clear to me that this will never become an official, *geeichter* smart meter gateway and will never come anywhere near it.
+But firstly, I would like to show what magnificent possibilities the optical interface of the digital meter enables. I would also like to see my project as a contribution to the discussion about establishing a low-threshold, low-cost alternative to the classic smart meter gateway for optional installation cases.
+
+In my eyes, there is (at least) two reasons, why the Eichung (*certification*) is out of reach:
+1. It is difficult to implement time stamping with the legal time in a BSI-compliant manner
+2. Man-in-the-middle attacks could be prevented by using the signatures. However, this requires an adaptation of TR-3109-01. 
+
+---
+
 ## 🚀 Project Description
 
 This project consists of **firmware for an ESP32 microcontroller**.  
