@@ -112,7 +112,7 @@ void handle_check_wifi_connection();
 void handle_MeterValue_store();
 void handle_temperature();
 void handle_telegram2();
-void loadCertToCharArray();
+void webClient_loadCertToChar();
 void LogBuffer_reset();
 void MeterValue_init_Buffer();
 void MeterValues_clear_Buffer();
@@ -416,7 +416,9 @@ String LogBufferToString(int showNumber)
     logString += LogEntryToString(i);
     showed_number++;
     if(showed_number >= showNumber)
-      break;
+    {
+      return logString + "</table>";
+    }
   }
  
   // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
@@ -432,7 +434,7 @@ String LogBufferToString(int showNumber)
     }
   }
 
-  return "</table>" + logString;
+  return logString + "</table>";
 }
 
 void MeterValues_clear_Buffer()
@@ -581,7 +583,7 @@ void webserverHandleCertUpload()
     webserverLocationHrefHome();
   }
 }
-void loadCertToCharArray()
+void webClient_loadCertToChar()
 {
 
   File file = SPIFFS.open("/cert.pem", FILE_READ);
@@ -705,7 +707,7 @@ void setup()
   server.on("/upload", []
             {
               webserverHandleCertUpload();
-              loadCertToCharArray(); });
+              webClient_loadCertToChar(); });
 
   server.on("/config", []
             { iotWebConf.handleConfig(); });
@@ -780,7 +782,7 @@ void setup()
   {
     AddLogEntry(8000);
   }
-  loadCertToCharArray();
+  webClient_loadCertToChar();
 
   MeterValue_init_Buffer();
 
