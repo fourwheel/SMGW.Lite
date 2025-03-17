@@ -7,9 +7,8 @@ However, only households with an **EV charger**, **heat pump**, **PV power plant
 A Smart Meter does more than just provide **15-minute interval readings** which are transmitted day after — it also establishes a **secure communication channel**, allowing grid operators to **remotely manage** connected devices like heat pumps and EV chargers.  
 
 In my opinion, **every electricity consumer** should have access to **15-minute interval meter readings**, even if they don’t own the devices mentioned above. This is **key to actively participating in the energy transition** by shifting the consumption.
-Luckily, digital meters periodically transmit **valuable data**, including meter readings, via an **optical interface**.  
-In my free time, I developed a project to **extract** and **process** this data at **high frequency**.  
-## 🔥 **I call it *Smart Meter Gateway Lite*.**
+Luckily, digital meters periodically transmit **valuable data**, including meter readings, via an **optical interface**. In my free time, I developed a project to **extract** and **process** this data at **high frequency**.  
+🔥 **I call it *Smart Meter Gateway Lite*.**
 
 ---
 
