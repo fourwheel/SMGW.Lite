@@ -57,10 +57,10 @@ To use **SMGW.Lite**, you will need:
 - 🔗 **`Log_`** → Provides detailed logging of system events - aka *Eichlog*
 - 📝 **`Telegram_`** → Handles incoming telegrams from the meter  
 - 🔢 **`MeterValue_`** → Stores and processes meter readings  
-- ⚙️ **`Param_`** → Manages system parameters  
+- ⚙️ **`Param_`** → Manages system and individual parameters  
 - ⏳ **`Time_`** → Adds time-related functionalities  
 - 📡 **`Webclient_`** → Sends collected data to the backend  
-- 🌍 **`Webserver_`** → Provides a web interface for device management  
+- 🌍 **`Webserver_`** → Provides a web interface for device and parameter management  
 
 ---
 
