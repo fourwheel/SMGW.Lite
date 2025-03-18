@@ -54,7 +54,7 @@ To use **SMGW.Lite**, you will need:
 
 ## 🏗️ Core Code Blocks
 
-- 🔗 **`Log_`** → Provides detailed logging of system events  
+- 🔗 **`Log_`** → Provides detailed logging of system events - aka *Eichlog*
 - 📝 **`Telegram_`** → Handles incoming telegrams from the meter  
 - 🔢 **`MeterValue_`** → Stores and processes meter readings  
 - ⚙️ **`Param_`** → Manages system parameters  
