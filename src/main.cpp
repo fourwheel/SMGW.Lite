@@ -1,62 +1,6 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
 #include <SPIFFS.h>
-
-// -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGW.Lite";
-
-// -- Initial password to connect to the Thing, when it creates an own Access Point.
-const char wifiInitialApPassword[] = "password";
-
-#define STRING_LEN 128
-#define ID_LEN 4
-#define NUMBER_LEN 32
-
-// -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "1015"
-
-#define HOST_REACHABLE 0x01
-#define CERT_CORRECT 0x02
-
-// -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
-//      password to buld an AP. (E.g. in case of lost password)
-#ifndef D2
-#define D2 3
-#endif
-
-#define CONFIG_PIN D2
-
-// -- Status indicator pin.
-//      First it will light up (kept LOW), on Wifi connection it will blink,
-//      when connected to the Wifi it will turn off (kept HIGH).
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2
-#endif
-
-#define STATUS_PIN LED_BUILTIN
-
-int m_i = 0;
-int m_i_max = 0;
-
-#define TELEGRAM_LENGTH 512
-// Telegramm-Signaturen
-const uint8_t SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
-const uint8_t SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-
-#define BUFFER_SIZE 512        // Maximale Puffergröße für Eingangsdaten
-#define TELEGRAM_SIZE 512      // Maximale Größe eines Telegramms
-#define TELEGRAM_TIMEOUT_MS 30 // Timeout für Telegramme in Millisekunden
-
-uint8_t telegram_buffer[BUFFER_SIZE]; // Eingabepuffer für serielle Daten
-size_t telegram_bufferIndex = 0;      // Aktuelle Position im Eingabepuffer
-bool readingExtraBytes = false;       // Status: Lesen der zusätzlichen Bytes
-uint8_t extraBytes[3];                // Zusätzliche Bytes nach der Endsignatur
-size_t extraIndex = 0;                // Index für zusätzliche Bytes
-unsigned long lastByteTime = 0;       // Zeitstempel des letzten empfangenen Bytes
-unsigned long timestamp_telegram;
-uint8_t TELEGRAM[TELEGRAM_SIZE]; // Speicher für das vollständige Telegramm
-size_t TELEGRAM_SIZE_USED = 0;   // Tatsächliche Länge des gespeicherten Telegramms
-
 #if defined(ESP32)
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -67,20 +11,152 @@ size_t TELEGRAM_SIZE_USED = 0;   // Tatsächliche Länge des gespeicherten Teleg
 #include <ESP8266mDNS.h>
 #include <SoftwareSerial.h>
 #include <ESP8266HTTPClient.h>
-
 #endif
 #include <ArduinoJson.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "NTPClient.h"
-
-bool wifi_connected;
-
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include "Arduino.h"
+
+const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
+
+// -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
+const char thingName[] = "SMGW.Lite";
+
+// -- Initial password to connect to the Thing, when it creates an own Access Point.
+const char wifiInitialApPassword[] = "password";
+
+#define STRING_LEN 128
+#define ID_LEN 4
+#define NUMBER_LEN 5
+
+// -- Configuration specific key. The value should be modified if config structure was changed.
+#define CONFIG_VERSION "1015"
+
+// -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
+//      password to buld an AP. (E.g. in case of lost password)
+#ifndef D2
+#define D2 3
+#endif
+
+#define CONFIG_PIN D2
+
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2
+#endif
+
+#define STATUS_PIN LED_BUILTIN
+
+
+// Telegramm Vars
+const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
+const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
+#define TELEGRAM_LENGTH 512
+#define TELEGRAM_TIMEOUT_MS 30 // timeout for telegramm in ms
+size_t TelegramSizeUsed = 0;  // actual size of stored telegram
+uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
+size_t telegram_receive_bufferIndex = 0;          // positoin in serial data butter
+bool readingExtraBytes = false;                   // reading additional bytes?
+uint8_t extraBytes[3];                            // additional bytes after end signature
+size_t extraIndex = 0;                            // index of additional bytes
+unsigned long lastByteTime = 0;                   // timestamp of last received byte
+unsigned long timestamp_telegram;                 // timestamp of telegram
+uint8_t TELEGRAM[TELEGRAM_LENGTH]; // buffer for entire telegram
+
+
+// Meter Value Vsrs 
+int meter_value_i = 0;
+struct MeterValue
+{
+  uint32_t timestamp;   // 4 Bytes
+  uint32_t meter_value; // 4 Bytes
+  uint32_t temperature; // 4 Bytes
+};
+MeterValue *MeterValues = nullptr; // initiaize with nullptr
+unsigned long last_meter_value = 0;
+unsigned long previous_meter_value = 0;
+int meter_value_buffer_overflow = 0;
+int Meter_Value_Buffer_Size = 234;
+
+// Backend Vars
+bool call_backend_successfull = true;
+SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
+unsigned long last_call_backend = 0;
+
+
+// Temperature Vars
 #define ONE_WIRE_BUS 4
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
+unsigned long last_temperature = 0;
+bool read_temperature = false;
+int temperature;
+
+// Log Vars
+const int LOG_BUFFER_SIZE = 100;
+
+// Tasks vars
+int watermark_meter_buffer = 0;
+int watermark_log_buffer = 0;
+
+// Wifi Vars
+unsigned long wifi_reconnection_time = 0;
+unsigned long last_wifi_retry = 0;
+bool restart_wifi = false;
+unsigned long last_wifi_check;
+bool wifi_connected;
+
+
+// -- Forward declarations.
+void handle_call_backend();
+void handle_check_wifi_connection();
+void handle_MeterValue_store();
+void handle_temperature();
+void Led_update_Blink();
+String Log_BufferToString(int showNumber = LOG_BUFFER_SIZE);
+String Log_EntryToString(int i);
+String Log_StatusCodeToString(int statusCode);
+#if defined(ESP32)
+String Log_get_reset_reason();
+#endif
+void MeterValue_store();
+void MeterValues_clear_Buffer();
+void OTA_setup();
+void Param_configSaved();
+void Param_setup();
+String Time_formatTimestamp(unsigned long timestamp);
+String Time_formatUptime();
+String Time_getFormattedTime();
+unsigned long Time_getEpochTime();
+int Time_getMinutes();
+bool Telegram_prefix_suffix_correct();
+void Telegram_saveCompleteTelegram();
+void Telegram_ResetReceiveBuffer();
+void Telegram_handle();
+void Webclient_send_log_to_backend();
+void Webclient_Send_Log_to_backend_Task(void *pvParameters);
+void Webclient_Send_Log_to_backend_wrapper();
+void Webclient_send_meter_values_to_backend();
+void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters);
+void Webclient_Send_Meter_Values_to_backend_wrapper();
+void Webclient_splitHostAndPath(const String &url, String &host, String &path);
+void Webserver_HandleCertUpload();
+void Webserver_HandleRoot();
+void Webserver_LocationHrefHome(int delay = 0);
+void Webserver_SetCert();
+void Webserver_ShowCert();
+void Webserver_ShowLastMeterValue();
+void Webserver_ShowLogBuffer();
+void Webserver_ShowMeterValues();
+void Webserver_ShowTelegram();
+void Webserver_ShowTermperature();
+void Webserver_TestBackendConnection();
+void Webserver_UrlConfig();
+
+DNSServer dnsServer;
+WebServer server(80);
 
 #if defined(ESP32)
 HardwareSerial mySerial(1); // RX, TX
@@ -88,42 +164,10 @@ HardwareSerial mySerial(1); // RX, TX
 SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
 
-// -- Forward declarations.
-void handleRoot();
-void showTelegram();
-void showMeterValue();
-void showTemperature();
-void showCert();
-void configSaved();
-void clear_MeterValues_array();
-void reset_telegram();
-void store_meter_value();
-void send_status_report_function();
-void call_backend_Task();
-void send_meter_values();
-void Send_Meter_Values_to_backend_wrapper();
-void Send_Log_to_backend_wrapper();
-int watermark_meter_buffer = 0;
-int watermark_log_buffer = 0;
-
-unsigned long wifi_reconnection_time = 0;
-unsigned long last_wifi_retry = 0;
-bool restart_wifi = false;
-DNSServer dnsServer;
-WebServer server(80);
-
-int temperature;
-int meter_value_buffer_overflow = 0;
-char telegram_offset[NUMBER_LEN];
-char telegram_length[NUMBER_LEN];
-char telegram_prefix[NUMBER_LEN];
-char telegram_suffix[NUMBER_LEN];
-char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
-int Meter_Value_Buffer_Size = 234;
-
+// Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
-char UseSslCertValue[STRING_LEN]; // Platz für "0" oder "1"
+char UseSslCertValue[STRING_LEN]; 
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
@@ -131,6 +175,11 @@ char backend_token[STRING_LEN];
 char read_meter_intervall[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
+char telegram_offset[NUMBER_LEN];
+char telegram_length[NUMBER_LEN];
+char telegram_prefix[NUMBER_LEN];
+char telegram_suffix[NUMBER_LEN];
+char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
@@ -160,49 +209,29 @@ IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wir
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
-int meter_value_i = 0;
-
-// Struktur für die Messwerte
-struct MeterValue
+unsigned long Time_getEpochTime()
 {
-  uint32_t timestamp;   // 4 Bytes (Unix-Timestamp)
-  uint32_t meter_value; // 4 Bytes (Zahl bis ~4 Mio.)
-  uint32_t temperature; // 4 Bytes (Zahl bis ~4 Mio.)
-};
-
-MeterValue *MeterValues = nullptr; // Globaler Zeiger, initialisiert mit nullptr
-
-// Hilfsfunktion: Holt die aktuelle Zeit als time_t (Unix-Timestamp)
-time_t getCurrentTime()
-{
-  return time(nullptr);
+  return static_cast<unsigned long>(time(nullptr));
 }
 
-unsigned long timeClient_getEpochTime()
+int Time_getMinutes()
 {
-  return static_cast<unsigned long>(getCurrentTime());
-}
-
-int timeClient_getMinutes()
-{
-  time_t now = getCurrentTime();
+  time_t now = time(nullptr);
   struct tm timeinfo;
-  localtime_r(&now, &timeinfo); // Konvertiere in lokale Zeitstruktur
+  localtime_r(&now, &timeinfo); 
 
-  return timeinfo.tm_min; // Extrahiere Minuten (0–59)
+  return timeinfo.tm_min; // Extract minutes (0–59)
 }
 
-// Definition des Logbuffers
-const int LOG_BUFFER_SIZE = 100;
 struct LogEntry
 {
-  unsigned long timestamp; // Zeitstempel in Millisekunden seit Start
-  unsigned long uptime;    // Betriebszeit in Sekunden
-  int statusCode;          // Statuscode
+  unsigned long timestamp; // unix timestamp
+  unsigned long uptime;    
+  int statusCode;          
 };
 LogEntry logBuffer[LOG_BUFFER_SIZE];
-int logIndex = -1; // Index des nächsten Eintrags
-void resetLogBuffer()
+int logIndex = -1; 
+void LogBuffer_reset()
 {
   for (int i = 0; i < LOG_BUFFER_SIZE; ++i)
   {
@@ -212,19 +241,19 @@ void resetLogBuffer()
   }
   logIndex = -1;
 }
-void AddLogEntry(int statusCode)
+void Log_AddEntry(int statusCode)
 {
-  // Aktualisiere den Index (Ring-Puffer-Verhalten)
+  // Increase Log Index
+  // Rmember, it is a ringbuffer and overwrites oldest entries
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
 
-  unsigned long uptimeSeconds = millis() / 60000; // Uptime in Sekunden
+  unsigned long uptimeSeconds = millis() / 60000; // Uptime in seconds
 
-  // Füge neuen Eintrag in den Ring-Buffer ein
-  logBuffer[logIndex].timestamp = timeClient_getEpochTime();
+  logBuffer[logIndex].timestamp = Time_getEpochTime();
   logBuffer[logIndex].uptime = uptimeSeconds;
   logBuffer[logIndex].statusCode = statusCode;
 }
-void initMeterValueBuffer()
+void MeterValue_init_Buffer()
 {
   Meter_Value_Buffer_Size = atoi(Meter_Value_Buffer_Size_Char);
   // Alten Speicher freigeben, falls bereits allokiert
@@ -239,17 +268,16 @@ void initMeterValueBuffer()
   if (!MeterValues)
   {
     Serial.println("Speicherzuweisung fehlgeschlagen!");
-    AddLogEntry(1002);
+    Log_AddEntry(1002);
   }
 
-  clear_MeterValues_array();
+  MeterValues_clear_Buffer();
 }
 
-
 bool b_send_log_to_backend = false;
-// Funktion zur Hinzufügung eines neuen Log-Eintrags
+
 bool firstTime = true;
-String StatusCodeToString(int statusCode)
+String Log_StatusCodeToString(int statusCode)
 {
   switch (statusCode)
   {
@@ -258,7 +286,7 @@ String StatusCodeToString(int statusCode)
   case 1002:
     return "Speicherzuweisung fehlgeschlagen!";
   case 1003:
-    return "Config gespeichert";    
+    return "Config gespeichert";
   case 1005:
     return "call_backend()";
   case 1006:
@@ -274,7 +302,7 @@ String StatusCodeToString(int statusCode)
   case 1012:
     return "call backend trigger";
   case 1013:
-    return "clear_MeterValues_array()";
+    return "MeterValues_clear_Buffer()";
   case 1014:
     return "Taf 7-900s meter reading trigger";
   case 1015:
@@ -328,10 +356,9 @@ String StatusCodeToString(int statusCode)
   return "Unknown status code";
 }
 
-
-String timeClient_getFormattedTime()
+String Time_getFormattedTime()
 {
-  time_t now = getCurrentTime();
+  time_t now = time(nullptr);
   char timeStr[64];
   struct tm timeinfo;
   localtime_r(&now, &timeinfo); // Lokale Zeit (Zeitzone angewendet)
@@ -340,25 +367,7 @@ String timeClient_getFormattedTime()
   return String(timeStr);                                    // Gibt Zeit als lesbaren String aus
 }
 
-
-// Funktion zum Debuggen des Logbuffers
-void PrintLogBuffer()
-{
-  Serial.println("LogBuffer-Inhalt:");
-  for (int i = 0; i < LOG_BUFFER_SIZE; i++)
-  {
-    Serial.print("Index ");
-    Serial.print(i);
-    Serial.print(": Timestamp=");
-    Serial.print(logBuffer[i].timestamp);
-    Serial.print(", Uptime=");
-    Serial.print(logBuffer[i].uptime);
-    Serial.print(", StatusCode=");
-    Serial.println(logBuffer[i].statusCode);
-  }
-}
-
-String formatTimestamp(unsigned long timestamp)
+String Time_formatTimestamp(unsigned long timestamp)
 {
   // Konvertiere Unix-Timestamp in lokale Zeit
   time_t rawTime = static_cast<time_t>(timestamp);
@@ -369,52 +378,54 @@ String formatTimestamp(unsigned long timestamp)
   strftime(buffer, sizeof(buffer), "%D %H:%M:%S", &timeinfo);
   return String(buffer);
 }
-String LogBufferEntryToString(int i)
+String Log_EntryToString(int i)
 {
-  if (logBuffer[i].statusCode == 0)
-    return ""; // Leere Einträge überspringen
+  if (logBuffer[i].statusCode == 0 && logBuffer[i].timestamp == 0 && logBuffer[i].uptime == 0)
+    return ""; // don't show empty entries
   String logString = "<tr><td>";
   logString += String(i) + "</td><td>";
   logString += String(logBuffer[i].timestamp) + "</td><td>";
-  logString += formatTimestamp(logBuffer[i].timestamp) + "</td><td>";
+  logString += Time_formatTimestamp(logBuffer[i].timestamp) + "</td><td>";
   logString += String(logBuffer[i].uptime) + "</td><td>";
   logString += String(logBuffer[i].statusCode) + "</td><td>";
-  logString += StatusCodeToString(logBuffer[i].statusCode);
+  logString += Log_StatusCodeToString(logBuffer[i].statusCode);
 
   logString += "</td></tr>";
   return logString;
 }
-String LogBufferToString(int showNumber = LOG_BUFFER_SIZE)
+String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
   String logString = "<table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
-  // Erste Schleife: Neuerer Bereich (ab logIndex rückwärts bis 0)
+  // First Loop: more recent; from logIndex down to 0)
   for (int i = logIndex; i >= 0; i--)
   {
-    logString += LogBufferEntryToString(i);
+    logString += Log_EntryToString(i);
     showed_number++;
-    if(showed_number >= showNumber)
-      break;
+    if (showed_number >= showNumber)
+    {
+      return logString + "</table>";
+    }
   }
- 
-  // Zweite Schleife: Älterer Bereich (vom Ende des Buffers rückwärts bis nach logIndex)
+
+  // Second Loop: less recent; from buffer end to logindex
   if (logIndex < LOG_BUFFER_SIZE - 1)
   {
     // logString += "<tr><td>-----</td></tr>";
     for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--)
     {
-      logString += LogBufferEntryToString(i);
+      logString += Log_EntryToString(i);
       showed_number++;
-      if(showed_number >= showNumber)
+      if (showed_number >= showNumber)
         break;
     }
   }
 
-  return "</table>" + logString;
+  return logString + "</table>";
 }
 
-void clear_MeterValues_array()
+void MeterValues_clear_Buffer()
 {
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
@@ -424,14 +435,13 @@ void clear_MeterValues_array()
   }
   meter_value_i = 0;
   meter_value_buffer_overflow = 0;
-  // AddLogEntry(1013);
 }
-void location_href_home(int delay = 0)
+void Webserver_LocationHrefHome(int delay)
 {
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
-void print_MeterValues_via_webserver()
+void Webserver_ShowMeterValues()
 {
   String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -441,11 +451,11 @@ void print_MeterValues_via_webserver()
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
 }
-void print_LogBuffer_via_webserver()
+void Webserver_ShowLogBuffer()
 {
-  server.send(200, "text/html", LogBufferToString());
+  server.send(200, "text/html", Log_BufferToString());
 }
-void splitHostAndPath(const String &url, String &host, String &path)
+void Webclient_splitHostAndPath(const String &url, String &host, String &path)
 {
   // Suche nach dem ersten "/"
   int slashIndex = url.indexOf('/');
@@ -468,12 +478,12 @@ String backend_host;
 String backend_path;
 
 char *FullCert = new char[2000];
-void SetSslCert()
+void Webserver_SetCert()
 {
   server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
 }
 
-void TestBackendConnection()
+void Webserver_TestBackendConnection()
 {
   WiFiClientSecure client;
   client.setCACert(FullCert);
@@ -486,7 +496,7 @@ void TestBackendConnection()
   }
   else
   {
-    client.setInsecure(); // Falls Zertifikat nicht akzeptiert wird
+    client.setInsecure(); // If Cert not accepted, try without
     if (client.connect(backend_host.c_str(), 443))
     {
       res = "Host reachable<br>Cert not working.";
@@ -499,33 +509,33 @@ void TestBackendConnection()
     }
   }
 
-  // ** Anfrage mit ID & Token an das Backend senden **
+  // reach backend with token and ID
   String url = backend_path + "?backend_test=true&ID=" + String(backend_ID) + "&token=" + String(backend_token);
   client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                "Host: " + backend_host + "\r\n" +
                "Connection: close\r\n\r\n");
 
-  // Warte auf die Antwort
+
   unsigned long timeout = millis();
   while (client.available() == 0)
   {
-    if (millis() - timeout > 5000) // Timeout nach 5 Sekunden
+    if (millis() - timeout > 5000) // Timeout after 5 Seconds
     {
-      res += "<br>>No response from server.";
+      res += "<br>No response from server.";
       server.send(200, "text/html", res);
       return;
     }
   }
 
-  // Antwort vom Server lesen
+  // read answer from server
   String response = "";
   while (client.available())
   {
     response += client.readString();
   }
 
-  // ** Prüfen, ob Authentifizierung erfolgreich war **
-  if (response.indexOf("200") != -1) // Backend sendet JSON {"success": true}
+  // check response code
+  if (response.indexOf("200") != -1) // 
   {
     res += "<br>ID & Token valid.";
   }
@@ -535,7 +545,7 @@ void TestBackendConnection()
   }
   server.send(200, "text/html", res);
 }
-void handleCertUpload()
+void Webserver_HandleCertUpload()
 {
   if (server.hasArg("cert"))
   {
@@ -545,66 +555,60 @@ void handleCertUpload()
     {
       file.println(cert);
       file.close();
-      AddLogEntry(8002);
-      location_href_home();
+      Log_AddEntry(8002);
+      Webserver_LocationHrefHome();
     }
     else
     {
-      AddLogEntry(8003);
-      location_href_home();
-      server.send(500, "text/plain", "Fehler beim Öffnen der Datei!");
+      Log_AddEntry(8003);
+      Webserver_LocationHrefHome();
+      server.send(500, "text/plain", "Cannot Open File!");
     }
   }
   else
   {
-    AddLogEntry(8004);
-    location_href_home();
+    Log_AddEntry(8004);
+    Webserver_LocationHrefHome();
   }
 }
-void loadCertToCharArray()
+void Webclient_loadCertToChar()
 {
 
   File file = SPIFFS.open("/cert.pem", FILE_READ);
-
   if (!file)
   {
-
-    AddLogEntry(8001);
+    Log_AddEntry(8001);
     return;
   }
 
   size_t size = file.size();
 
-  // Lese den Dateiinhalt in das char-Array
-
+  // load file content to char array
   file.readBytes(FullCert, size);
 
-  // Füge das Nullterminierungssymbol hinzu
-
+  // Add terminating mark
   FullCert[size] = '\0';
 
   file.close();
 }
-bool call_backend_V2_successfull = true;
-SemaphoreHandle_t Sema_Backend; // Mutex für synchronisierten Zugriff
-unsigned long last_call_backend_v2 = 0;
 
-void Send_Meter_Values_to_backend_Task(void *pvParameters)
+
+void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
-    send_meter_values();
+    Webclient_send_meter_values_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
   watermark_meter_buffer = uxTaskGetStackHighWaterMark(NULL);
   vTaskDelete(NULL); // Task löschen, wenn fertig
 }
-void Send_Log_to_backend_Task(void *pvParameters)
+void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 {
   b_send_log_to_backend = false;
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
-    send_status_report_function();
+    Webclient_send_log_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
   else
@@ -615,10 +619,78 @@ void Send_Log_to_backend_Task(void *pvParameters)
   vTaskDelete(NULL); // Task löschen, wenn fertig
 }
 
+void Webserver_UrlConfig()
+{
+  // -- Set up required URL handlers on the web server.
+  server.on("/", Webserver_HandleRoot);
+  server.on("/showTelegram", Webserver_ShowTelegram);
+  server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
+  server.on("/showTemperature", Webserver_ShowTermperature);
+  server.on("/showCert", Webserver_ShowCert);
+  server.on("/setCert", Webserver_SetCert);
+  server.on("/testBackendConnection", Webserver_TestBackendConnection);
+  server.on("/showMeterValues", Webserver_ShowMeterValues);
+  server.on("/showLogBuffer", Webserver_ShowLogBuffer);
+
+  server.on("/upload", []
+            {
+                Webserver_HandleCertUpload();
+                Webclient_loadCertToChar(); 
+            });
+
+  server.on("/config", []
+            { iotWebConf.handleConfig(); });
+  server.on("/restart", []
+            { 
+                Webserver_LocationHrefHome(5);
+                delay(100);
+                ESP.restart(); 
+            });
+  server.on("/resetLogBuffer", []
+            { 
+                Webserver_LocationHrefHome();
+                LogBuffer_reset(); 
+            });
+  server.on("/StoreMeterValue", []
+            { Webserver_LocationHrefHome();
+              Log_AddEntry(1006);
+              MeterValue_store();
+            });
+  server.on("/MeterValue_init_Buffer", []
+            { MeterValue_init_Buffer();
+              Webserver_LocationHrefHome(); 
+            });
+  server.on("/sendboth_Task", []
+            { 
+              Webserver_LocationHrefHome(2);
+              Webclient_Send_Meter_Values_to_backend_wrapper();
+              Webclient_Send_Log_to_backend_wrapper(); 
+            });
+  server.on("/sendStatus_Task", []
+            { 
+              Webserver_LocationHrefHome(2);
+              Webclient_Send_Log_to_backend_wrapper(); 
+            });
+
+  server.on("/sendMeterValues_Task", []
+            { 
+              Webserver_LocationHrefHome(2);
+              Webclient_Send_Meter_Values_to_backend_wrapper(); 
+            });
+
+  server.on("/setOffline", []
+            { wifi_connected = false;
+              Webserver_LocationHrefHome(); 
+            });
+
+  server.onNotFound([]()
+                    { iotWebConf.handleNotFound(); });
+}
+
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
-  AddLogEntry(1001);
+  Log_AddEntry(1001);
   Serial.begin(115200);
 
 #if defined(ESP32)
@@ -630,6 +702,24 @@ void setup()
   Serial.println();
   Serial.println("Starting up...HELLAU!");
 
+  Param_setup();
+  Led_update_Blink();
+  Webserver_UrlConfig();
+  OTA_setup();
+
+  if (!SPIFFS.begin(true))
+  {
+    Log_AddEntry(8000);
+  }
+  Webclient_loadCertToChar();
+  Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
+
+  MeterValue_init_Buffer();
+
+  configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
+}
+void Param_setup()
+{
   groupTelegram.addItem(&telegram_offset_object);
   groupTelegram.addItem(&telegram_length_object);
   groupTelegram.addItem(&telegram_prefix_object);
@@ -654,84 +744,16 @@ void setup()
   iotWebConf.addParameterGroup(&groupBackend);
   iotWebConf.addParameterGroup(&groupAdditionalMeter);
 
-  iotWebConf.setConfigSavedCallback(&configSaved);
+  iotWebConf.setConfigSavedCallback(&Param_configSaved);
   // iotWebConf.setFormValidator(&formValidator);
   iotWebConf.getApTimeoutParameter()->visible = true;
 
   // -- Initializing the configuration.
   iotWebConf.skipApStartup();
   iotWebConf.init();
-
-  if (led_blink_object.isChecked())
-    iotWebConf.enableBlink();
-  else
-  {
-    iotWebConf.disableBlink();
-    digitalWrite(LED_BUILTIN, LOW);
-  }
-
-  // -- Set up required URL handlers on the web server.
-  server.on("/", handleRoot);
-  server.on("/showTelegram", showTelegram);
-  server.on("/showMeterValue", showMeterValue);
-  server.on("/showTemperature", showTemperature);
-  server.on("/showCert", showCert);
-  server.on("/setCert", SetSslCert);
-  server.on("/testBackendConnection", TestBackendConnection);
-  server.on("/showMeterValues", print_MeterValues_via_webserver);
-  server.on("/showLogBuffer", print_LogBuffer_via_webserver);
-  
-
-  server.on("/upload", []
-            {
-              handleCertUpload();
-              loadCertToCharArray(); });
-
-  server.on("/config", []
-            { iotWebConf.handleConfig(); });
-  // server.on("/malloc", []
-  // { malloc(300*sizeof(unsigned long)); });
-  server.on("/restart", []
-            { 
-              location_href_home(5);
-              ESP.restart(); });
-  server.on("/resetLog", []
-            { 
-              location_href_home();
-              resetLogBuffer(); });
-  server.on("/StoreMeterValue", []
-            { location_href_home();
-            AddLogEntry(1006);
-            store_meter_value(); });
-  server.on("/initMeterValueBuffer", []
-            {initMeterValueBuffer();
-            location_href_home(); });
-  server.on("/sendboth_Task", []
-            { 
-            
-            location_href_home(2);
-
-            Send_Meter_Values_to_backend_wrapper();
-            Send_Log_to_backend_wrapper(); });
-  server.on("/sendStatus_Task", []
-            { 
-            location_href_home(2);
-            Send_Log_to_backend_wrapper(); });
-
-  server.on("/sendMeterValues_Task", []
-            { 
-            
-            location_href_home(2);
-            Send_Meter_Values_to_backend_wrapper(); });
-
-  server.on("/setOffline", []
-            { wifi_connected = false;
-            location_href_home(); });
-
-  server.onNotFound([]()
-                    { iotWebConf.handleNotFound(); });
-
-  Serial.println("Ready.");
+}
+void OTA_setup()
+{
   ArduinoOTA
       .onStart([]()
                {
@@ -755,41 +777,25 @@ void setup()
       else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
       else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
       else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
-
-  splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
-  // fullKey = String(publicKeyChunk1) + String(publicKeyChunk2) + String(publicKeyChunk3) + String(publicKeyChunk4);
-  // fullKey.replace(" ", "");  // Entfernt alle Leerzeichen
-  // fullKey.replace("\n", ""); // Entfernt alle Zeilenumbrüche
-  // fullKey.trim();
-  // compare_string = compareStrings((formatCertificateWithLineBreaks(fullKey)), rootCACertificate);
-  if (!SPIFFS.begin(true))
-  {
-    AddLogEntry(8000);
-  }
-  loadCertToCharArray();
-
-  initMeterValueBuffer();
-
-  configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
 }
-void Send_Meter_Values_to_backend_wrapper()
+void Webclient_Send_Meter_Values_to_backend_wrapper()
 {
-  xTaskCreate(Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, NULL);
+  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, NULL);
 }
 
-void Send_Log_to_backend_wrapper()
+void Webclient_Send_Log_to_backend_wrapper()
 {
-  xTaskCreate(Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
+  xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
 }
-uint8_t BUFFER[TELEGRAM_LENGTH] = {0};
-bool prefix_suffix_correct()
+
+bool Telegram_prefix_suffix_correct()
 {
   int prefix = atoi(telegram_prefix);
   int suffix = atoi(telegram_suffix);
 
   if (suffix == 0)
   {
-    AddLogEntry(1203);
+    Log_AddEntry(1203);
     Serial.println("Suffix Must not be 0");
     return false;
   }
@@ -798,24 +804,22 @@ bool prefix_suffix_correct()
     return true;
   else
   {
-    AddLogEntry(1204);
+    Log_AddEntry(1204);
     return false;
   }
 }
 
-int32_t get_meter_value_from_primary();
-int32_t get_meter_value_from_telegram()
+int32_t MeterValue_get_from_telegram()
 {
 
-  // return get_meter_value_from_primary();
+  // return MeterValue_get_from_remote();
 
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
   int32_t meter_value = -1;
 
-  if (!prefix_suffix_correct())
+  if (!Telegram_prefix_suffix_correct())
   {
-
     return -2;
   }
 
@@ -827,9 +831,7 @@ int32_t get_meter_value_from_telegram()
   return meter_value;
 }
 
-unsigned long last_serial;
-
-int32_t get_meter_value_PV()
+int32_t myStrom_get_Meter_value()
 {
 
   if (!mystrom_PV_object.isChecked())
@@ -837,18 +839,18 @@ int32_t get_meter_value_PV()
     return 0;
   }
 
-  Serial.println(F("get_meter_value_PV Connecting..."));
+  Serial.println(F("myStrom_get_Meter_value Connecting..."));
 
   // Connect to HTTP server
   WiFiClient client;
   client.setTimeout(1000);
   if (!client.connect(mystrom_PV_IP, 80))
   {
-    Serial.println(F("get_meter_value_PV Connection failed"));
+    Serial.println(F("myStrom_get_Meter_value Connection failed"));
     return -1;
   }
 
-  Serial.println(F("get_meter_value_PV Connected!"));
+  Serial.println(F("myStrom_get_Meter_value Connected!"));
 
   // Send HTTP request
   client.println(F("GET /report HTTP/1.0"));
@@ -868,7 +870,7 @@ int32_t get_meter_value_PV()
   // It should be "HTTP/1.0 200 OK" or "HTTP/1.1 200 OK"
   if (strcmp(status + 9, "200 OK") != 0)
   {
-    Serial.print(F("get_meter_value_PV Unexpected response: "));
+    Serial.print(F("myStrom_get_Meter_value Unexpected response: "));
     Serial.println(status);
     client.stop();
     return -3;
@@ -878,7 +880,7 @@ int32_t get_meter_value_PV()
   char endOfHeaders[] = "\r\n\r\n";
   if (!client.find(endOfHeaders))
   {
-    Serial.println(F("get_meter_value_PV Invalid response"));
+    Serial.println(F("myStrom_get_Meter_value Invalid response"));
     client.stop();
     return -4;
   }
@@ -890,7 +892,7 @@ int32_t get_meter_value_PV()
   DeserializationError error = deserializeJson(doc, client);
   if (error)
   {
-    Serial.print(F("get_meter_value_PV deserializeJson() failed: "));
+    Serial.print(F("myStrom_get_Meter_value deserializeJson() failed: "));
     Serial.println(error.f_str());
     client.stop();
     return -5;
@@ -903,31 +905,30 @@ int32_t get_meter_value_PV()
   // Disconnect
   client.stop();
 }
-String meter_value;
-String lastLine;
-int32_t get_meter_value_from_primary()
-{
 
-  // Serial.println(F("Connecting..."));
+int32_t MeterValue_get_from_remote()
+{
+  String meter_value;
+  String lastLine;
 
   // Connect to HTTP server
   WiFiClient client;
   client.setTimeout(1000);
   if (!client.connect("192.168.0.2", 80))
   {
-    Serial.println(F("get_meter_value_from_primary Connection failed"));
+    Serial.println(F("MeterValue_get_from_remote Connection failed"));
     return -1;
   }
   // Serial.println(F("Connected!"));
 
   // Send HTTP request
-  client.println(F("GET /showMeterValue HTTP/1.0"));
+  client.println(F("GET /showLastMeterValue HTTP/1.0"));
   client.print(F("Host: "));
   client.println("192.168.0.2");
   client.println(F("Connection: close"));
   if (client.println() == 0)
   {
-    Serial.println(F("get_meter_value_from_primary Failed to send request"));
+    Serial.println(F("MeterValue_get_from_remote Failed to send request"));
     client.stop();
     return -2;
   }
@@ -936,199 +937,106 @@ int32_t get_meter_value_from_primary()
 
   int lastNewlineIndex = meter_value.lastIndexOf('\n');
 
-  // Extrahiere den Teil des Strings nach dem letzten Zeilenumbruch
+  // extract part of string after newline
   lastLine = meter_value.substring(lastNewlineIndex + 1);
 
-  // Entferne mögliche Leerzeichen (falls vorhanden)
+  // delete spaces
   lastLine.trim();
 
-  // Konvertiere die letzte Zeile in eine Zahl
+  
   int32_t meter_value_i32 = lastLine.toInt();
 
-  return meter_value_i32;
   client.stop();
+  return meter_value_i32;
 }
 
 // Funktion zum Speichern eines vollständigen Telegramms
-void saveCompleteTelegram()
+void Telegram_saveCompleteTelegram()
 {
-  size_t telegramLength = telegram_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
-  if (telegramLength > TELEGRAM_SIZE)
+  size_t telegramLength = telegram_receive_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
+  if (telegramLength > TELEGRAM_LENGTH)
   {
-    // Serial.println("Fehler: Telegramm zu groß für Speicher!");
-    AddLogEntry(3003);
+    Log_AddEntry(3003);
     return;
   }
 
   // Telegramm in TELEGRAM-Array kopieren
-  memcpy(TELEGRAM, telegram_buffer, telegram_bufferIndex); // Kopiere Hauptdaten
-  memcpy(TELEGRAM + telegram_bufferIndex, extraBytes, 3);  // Kopiere zusätzliche Bytes
-  TELEGRAM_SIZE_USED = telegramLength;
-  timestamp_telegram = timeClient_getEpochTime(); // last_serial;
+  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
+  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // Kopiere zusätzliche Bytes
+  TelegramSizeUsed = telegramLength;
+  timestamp_telegram = Time_getEpochTime();
 }
 
 // Funktion zum Zurücksetzen des Eingabepuffers
-void resetBuffer()
+void Telegram_ResetReceiveBuffer()
 {
-  telegram_bufferIndex = 0;
+  telegram_receive_bufferIndex = 0;
   readingExtraBytes = false;
   extraIndex = 0;
 }
 
-// Beispiel-Funktion zur Verarbeitung des Telegramms
-void processTelegram()
+void Telegram_handle()
 {
-  Serial.println("Verarbeitung des Telegramms...");
-
-  // Ausgabe der Nutzdaten (ohne Start- und Endsignatur)
-  size_t dataStart = sizeof(SIGNATURE_START);
-  size_t dataEnd = TELEGRAM_SIZE_USED - sizeof(SIGNATURE_END) - 3;
-
-  Serial.println("Nutzdaten:");
-  for (size_t i = dataStart; i < dataEnd; i++)
-  {
-    Serial.printf("Byte %zu: 0x%02X\n", i, TELEGRAM[i]);
-  }
-
-  // Zusätzliche Bytes ausgeben
-  Serial.println("Zusätzliche Bytes:");
-  for (size_t i = TELEGRAM_SIZE_USED - 3; i < TELEGRAM_SIZE_USED; i++)
-  {
-    Serial.printf("Byte %zu: 0x%02X\n", i, TELEGRAM[i]);
-  }
-}
-
-void handle_telegram2()
-{
-  // Prüfen, ob Daten verfügbar sind
   while (mySerial.available() > 0)
   {
     uint8_t incomingByte = mySerial.read();
-    lastByteTime = millis(); // Zeitstempel aktualisieren
-
-    // Prüfen, ob zusätzliche Bytes gelesen werden müssen
+    lastByteTime = millis(); // update time of last byte
+    // check if additional bytes must be read
     if (readingExtraBytes)
     {
       extraBytes[extraIndex++] = incomingByte;
 
-      // Wenn alle zusätzlichen Bytes gelesen wurden
       if (extraIndex == 3)
       {
-        saveCompleteTelegram(); // Telegramm speichern
-        resetBuffer();          // Eingabepuffer zurücksetzen
-        // AddLogEntry(3000);
+        Telegram_saveCompleteTelegram(); 
+        Telegram_ResetReceiveBuffer();   
       }
       continue;
     }
 
-    // Byte im Eingabepuffer speichern
-    if (telegram_bufferIndex < BUFFER_SIZE)
+    // Save Byte in Buffer
+    if (telegram_receive_bufferIndex < TELEGRAM_LENGTH)
     {
-      telegram_buffer[telegram_bufferIndex++] = incomingByte;
+      telegram_receive_buffer[telegram_receive_bufferIndex++] = incomingByte;
     }
     else
     {
-      // Fehler: Pufferüberlauf
-      // Serial.println("Fehler: Pufferüberlauf! Eingabepuffer zurückgesetzt.");
-      // AddLogEntry(3001);
-      resetBuffer();
+      // Serial.println("Error: Buffer Overflow!");
+      // Log_AddEntry(3001);
+      Telegram_ResetReceiveBuffer();
       continue;
     }
 
-    // Prüfen, ob die Startsignatur erkannt wurde
-    if (telegram_bufferIndex >= sizeof(SIGNATURE_START) &&
-        memcmp(telegram_buffer, SIGNATURE_START, sizeof(SIGNATURE_START)) == 0)
+    // Check for start signature
+    if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) &&
+        memcmp(telegram_receive_buffer, SML_SIGNATURE_START, sizeof(SML_SIGNATURE_START)) == 0)
     {
 
-      // Prüfen, ob die Endsignatur erkannt wurde
-      if (telegram_bufferIndex >= sizeof(SIGNATURE_START) + sizeof(SIGNATURE_END))
+      // Check for end signature
+      if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) + sizeof(SML_SIGNATURE_END))
       {
-        if (memcmp(&telegram_buffer[telegram_bufferIndex - sizeof(SIGNATURE_END)], SIGNATURE_END, sizeof(SIGNATURE_END)) == 0)
+        if (memcmp(&telegram_receive_buffer[telegram_receive_bufferIndex - sizeof(SML_SIGNATURE_END)], SML_SIGNATURE_END, sizeof(SML_SIGNATURE_END)) == 0)
         {
-          // Endsignatur erkannt, auf zusätzliche Bytes warten
+          // signatur check positive, wait for additional bytes
           readingExtraBytes = true;
         }
       }
     }
   }
 
-  // Prüfen, ob ein Timeout aufgetreten ist
-  if (telegram_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
+  // check for timeout
+  if (telegram_receive_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {
-    // Serial.println("Fehler: Timeout! Eingabepuffer zurückgesetzt.");
-    // AddLogEntry(3002);
-    resetBuffer(); // Eingabepuffer zurücksetzen
+    // Serial.println("Error: Timeout!");
+    // Log_AddEntry(3002);
+    Telegram_ResetReceiveBuffer(); 
   }
 }
 
-void receive_telegram()
-{
-  while (mySerial.available())
-  {
-    BUFFER[m_i] = mySerial.read();
-    // Serial.print(TELEGRAM[m_i], HEX);
-    // Serial.println(millis());
-
-    if (/*m_i == atoi(telegram_suffix) + 7*/
-        m_i > 8 && BUFFER[m_i - 7] == 0x1b && BUFFER[m_i - 6] == 0x1b && BUFFER[m_i - 5] == 0x1b && BUFFER[m_i - 4] == 0x1b && BUFFER[m_i - 3] == 0x1a)
-    {
-      // AddLogEntry(1234);
-      reset_telegram();
-      return;
-    }
-
-    m_i++;
-
-    m_i_max = max(m_i_max, m_i);
-
-    if (m_i >= TELEGRAM_LENGTH)
-    {
-      m_i = 0;
-      Serial.println("ERROR Buffer Size exceeded");
-      AddLogEntry(1205);
-    }
-
-    last_serial = millis();
-  }
-  // else Serial.print("nix empfangen\n");
-}
-
-void reset_telegram()
-{
-
-  bool transfer = false;
-  if (BUFFER[0] != 0x00 && BUFFER[1] != 0x00 && BUFFER[2] != 0x00)
-  {
-    transfer = true;
-  }
-
-  for (int q = 0; q < TELEGRAM_LENGTH; q++)
-  {
-    // Serial.println(q + " " + BUFFER[q]);
-    if (transfer)
-    {
-      TELEGRAM[q] = BUFFER[q]; // cpoy received message, so that only a complete telegram is processed
-    }
-    BUFFER[q] = 0;
-  }
-
-  m_i = 0;
-  m_i_max = 0;
-  timestamp_telegram = timeClient_getEpochTime(); // last_serial;
-  last_serial = millis();
-}
-
-void handle_telegram()
-{
-  receive_telegram();
-  if (millis() - last_serial > 30)
-    reset_telegram();
-}
-
-void send_status_report_function()
+void Webclient_send_log_to_backend()
 {
   Serial.println("send_status_report");
-  AddLogEntry(1019);
+  Log_AddEntry(1019);
   WiFiClientSecure client;
 
   if (UseSslCert_object.isChecked())
@@ -1144,11 +1052,11 @@ void send_status_report_function()
   {
     Serial.println("Connection to server failed");
     // b_send_log_to_backend = true;
-    AddLogEntry(4000);
+    Log_AddEntry(4000);
     return;
   }
 
-  // Binärdaten des LogBuffers in Puffer schreiben
+  // write binary data from LogBuffer into temporary buffer
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
   if (!logDataBuffer)
@@ -1158,7 +1066,7 @@ void send_status_report_function()
   }
   memcpy(logDataBuffer, logBuffer, logBufferSize);
 
-  // HTTP POST-Anfrage für den Log-Buffer erstellen
+
   String logHeader = "POST ";
   logHeader += backend_path;
   logHeader += "log.php HTTP/1.1\r\n";
@@ -1169,13 +1077,12 @@ void send_status_report_function()
   logHeader += "Content-Length: " + String(logBufferSize) + "\r\n";
   logHeader += "Connection: close\r\n\r\n";
   Serial.println(logHeader);
-  // Header und Log-Daten senden
+
   client.print(logHeader);
   client.write(logDataBuffer, logBufferSize);
 
-  free(logDataBuffer); // Speicher freigeben
+  free(logDataBuffer); 
 
-  // Antwort des Servers lesen
   while (client.connected() || client.available())
   {
     if (client.available())
@@ -1187,7 +1094,7 @@ void send_status_report_function()
       {
         Serial.println("Log successfully sent");
 
-        AddLogEntry(1020);
+        Log_AddEntry(1020);
         b_send_log_to_backend = false;
         break;
       }
@@ -1196,29 +1103,28 @@ void send_status_report_function()
         b_send_log_to_backend = true;
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(10)); // Wartet genau 10 ms, egal wie CONFIG_FREERTOS_HZ gesetzt ist
+    vTaskDelay(pdMS_TO_TICKS(10)); // Wait for 10ms, no matter how CONFIG_FREERTOS_HZ is set
   }
   client.stop();
 }
 
-void send_meter_values()
+void Webclient_send_meter_values_to_backend()
 {
-  AddLogEntry(1005);
-  AddLogEntry(meter_value_i);
+  Log_AddEntry(1005);
+  Log_AddEntry(meter_value_i);
   Serial.println("call_backend_V2");
-  last_call_backend_v2 = millis();
+  last_call_backend = millis();
   if (meter_value_i == 0)
   {
 
     Serial.println("Zero Values to transmit");
-    AddLogEntry(0);
-    call_backend_V2_successfull = true;
+    Log_AddEntry(0);
+    call_backend_successfull = true;
     return;
   }
 
-  call_backend_V2_successfull = false;
+  call_backend_successfull = false;
 
-  // Verbindung zum Server herstellen
   WiFiClientSecure client;
 
   if (UseSslCert_object.isChecked())
@@ -1233,13 +1139,13 @@ void send_meter_values()
   if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
-    AddLogEntry(4000);
+    Log_AddEntry(4000);
     return;
   }
 
-  // Binärdaten in Puffer schreiben
+  
   size_t bufferSize = Meter_Value_Buffer_Size * sizeof(MeterValue);
-  // size_t bufferSize = (meter_value_i+1) * 3 * sizeof(unsigned long);
+  
   uint8_t *buffer = (uint8_t *)malloc(bufferSize);
   if (!buffer)
   {
@@ -1248,7 +1154,7 @@ void send_meter_values()
   }
   memcpy(buffer, MeterValues, bufferSize);
 
-  // HTTP POST-Anfrage manuell erstellen
+  
   String header = "POST ";
   header += backend_path;
   header += "?ID=";
@@ -1258,7 +1164,7 @@ void send_meter_values()
   header += "&uptime=";
   header += String(millis() / 60000);
   header += "&time=";
-  header += String(timeClient_getFormattedTime());
+  header += String(Time_getFormattedTime());
   header += "&heap=";
   header += String(ESP.getFreeHeap());
   header += "&meter_value_i=";
@@ -1275,15 +1181,12 @@ void send_meter_values()
   header += "Content-Length: " + String(bufferSize) + "\r\n";
   header += "Connection: close\r\n\r\n";
 
-  // Header senden
+  
   client.print(header);
-
-  // Binärdaten senden
   client.write(buffer, bufferSize);
 
-  free(buffer); // Speicher freigeben
+  free(buffer);
 
-  // Antwort des Servers lesen
   while (client.connected() || client.available())
   {
     if (client.available())
@@ -1294,53 +1197,50 @@ void send_meter_values()
       if (line.startsWith("HTTP/1.1 200"))
       {
         Serial.println("MeterValues successfully sent");
-        call_backend_V2_successfull = true;
-        clear_MeterValues_array();
-        last_call_backend_v2 = millis();
-        AddLogEntry(1021);
+        call_backend_successfull = true;
+        MeterValues_clear_Buffer();
+        last_call_backend = millis();
+        Log_AddEntry(1021);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(10)); // Wartet genau 10 ms, egal wie CONFIG_FREERTOS_HZ gesetzt ist
+    vTaskDelay(pdMS_TO_TICKS(10)); // Wait for 10ms, no matter how CONFIG_FREERTOS_HZ is set
   }
 
   client.stop();
 }
 
-unsigned long last_meter_value = 0;
-int32_t previous_meter_value = 0;
-void store_meter_value()
+void MeterValue_store()
 {
 
   last_meter_value = millis();
   if (ESP.getFreeHeap() < 1000)
   {
-    AddLogEntry(1015);
+    Log_AddEntry(1015);
     Serial.println("Not enough free heap to store another value");
     return;
   }
 
-  int32_t meter_value = get_meter_value_from_telegram();
+  int32_t meter_value = MeterValue_get_from_telegram();
   if (meter_value <= 0)
   {
-    AddLogEntry(1200);
+    Log_AddEntry(1200);
     return;
   }
 
   if (meter_value == previous_meter_value)
   {
-    AddLogEntry(1201);
+    Log_AddEntry(1201);
     return;
   }
   previous_meter_value = meter_value;
 
   Serial.println("buffer i: " + String(meter_value_i));
 
-  MeterValues[meter_value_i].timestamp = timestamp_telegram; // timeClient_getEpochTime();
+  MeterValues[meter_value_i].timestamp = timestamp_telegram; 
   MeterValues[meter_value_i].meter_value = meter_value;
 
   if (temperature_object.isChecked())
   {
-
     MeterValues[meter_value_i].temperature = temperature;
   }
 
@@ -1354,69 +1254,14 @@ void store_meter_value()
     meter_value_buffer_overflow++;
   }
 }
-void print_MeterValues_buffer()
-{
-  for (int m = 0; m < Meter_Value_Buffer_Size; m++)
-  {
-    if (MeterValues[m].timestamp != 0)
-    {
-      Serial.print(MeterValues[m].timestamp);
-      Serial.print(" - ");
-      Serial.print(MeterValues[m].meter_value);
-      Serial.print(" - ");
-      Serial.println(MeterValues[m].temperature);
-    }
-  }
-}
-unsigned long last_wifi_check;
-int read_meter_intervall_int = 0;
 
-void handle_call_backend()
-{
-}
-void handle_store_meter_value()
-{
-}
 void handle_check_wifi_connection()
 {
-}
-
-unsigned long last_temp = 0;
-bool read_temp = false;
-
-void handle_temperature()
-{
-  if (temperature_object.isChecked())
-  {
-    if (read_temp == true && millis() - last_temp > 20000)
-    {
-      last_temp = millis();
-      Temp_sensors.requestTemperatures();
-      read_temp = false;
-    }
-    else if (read_temp == false && millis() - last_temp > 1000)
-    {
-      last_temp = millis();
-      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
-      read_temp = true;
-    }
-  }
-}
-void loop()
-{
-
-  iotWebConf.doLoop();
-  ArduinoOTA.handle();
-  handle_temperature();
-  handle_telegram2();
-
   if (restart_wifi && millis() - last_wifi_retry > 5000)
   {
-    Serial.println("7001A");
     restart_wifi = false;
     iotWebConf.goOnLine(false);
-    AddLogEntry(7001);
-    Serial.println("7001B");
+    Log_AddEntry(7001);
   }
 
   if (millis() - last_wifi_check > 500)
@@ -1429,12 +1274,12 @@ void loop()
     }
     else if (WiFi.status() == WL_CONNECTED && !wifi_connected)
     {
-      AddLogEntry(1008);
+      Log_AddEntry(1008);
       Serial.println("Connection has returned: Resetting Backend Timer, starting OTA");
       ArduinoOTA.begin();
       wifi_connected = true;
       wifi_reconnection_time = millis();
-      call_backend_V2_successfull = false;
+      call_backend_successfull = false;
 
       if (firstTime == true)
       {
@@ -1448,7 +1293,7 @@ void loop()
     else if (WiFi.status() != WL_CONNECTED && wifi_connected)
     {
       // Wifi lost
-      AddLogEntry(1009);
+      Log_AddEntry(1009);
       wifi_connected = false;
     }
     else
@@ -1456,38 +1301,73 @@ void loop()
       // Still offline
     }
   }
+}
 
-  if (!wifi_connected &&
-      (timeClient_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
-  {
-    AddLogEntry(1010);
-    store_meter_value();
-  }
-  if (!wifi_connected && millis() - last_meter_value > 900000)
-  {
-    AddLogEntry(1014);
-    store_meter_value();
-  }
-  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(read_meter_intervall)))
-  {
-    AddLogEntry(1011);
-    store_meter_value();
-  }
 
+
+void handle_temperature()
+{
+  if (temperature_object.isChecked())
+  {
+    if (read_temperature == true && millis() - last_temperature > 20000)
+    {
+      last_temperature = millis();
+      Temp_sensors.requestTemperatures();
+      read_temperature = false;
+    }
+    else if (read_temperature == false && millis() - last_temperature > 1000)
+    {
+      last_temperature = millis();
+      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
+      read_temperature = true;
+    }
+  }
+}
+void handle_call_backend()
+{
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if ((!call_backend_V2_successfull && millis() - last_call_backend_v2 > 30000) || (timeClient_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend_v2 > 60000))
+    if ((!call_backend_successfull && millis() - last_call_backend > 30000) || (Time_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend > 60000))
     {
-      Send_Meter_Values_to_backend_wrapper();
+      Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true)
       {
-        Send_Log_to_backend_wrapper();
+        Webclient_Send_Log_to_backend_wrapper();
       }
     }
   }
 }
+void handle_MeterValue_store()
+{
+  if (!wifi_connected &&
+      (Time_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
+  {
+    Log_AddEntry(1010);
+    MeterValue_store();
+  }
+  if (!wifi_connected && millis() - last_meter_value > 900000)
+  {
+    Log_AddEntry(1014);
+    MeterValue_store();
+  }
+  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(read_meter_intervall)))
+  {
+    Log_AddEntry(1011);
+    MeterValue_store();
+  }
+}
+void loop()
+{
+  iotWebConf.doLoop();
+  ArduinoOTA.handle();
+  handle_temperature();
+  Telegram_handle();
+  handle_check_wifi_connection();
+  handle_MeterValue_store();
+  handle_call_backend();
+}
 #if defined(ESP32)
-String esp_reset_reason_string()
+String Log_get_reset_reason()
 {
   switch (esp_reset_reason())
   {
@@ -1518,16 +1398,14 @@ String esp_reset_reason_string()
   }
 }
 #endif
-/**
- * Handle web requests to "/" path.
- */
-String formatUptime()
-{
-  int64_t uptimeMicros = esp_timer_get_time(); // Zeit in Mikrosekunden
-  int64_t uptimeMillis = uptimeMicros / 1000;  // In Millisekunden umrechnen
-  int64_t uptimeSeconds = uptimeMillis / 1000; // In Sekunden umrechnen
 
-  // Berechnung der Tage, Stunden, Minuten, Sekunden
+String Time_formatUptime()
+{
+  int64_t uptimeMicros = esp_timer_get_time(); // time in microsends
+  int64_t uptimeMillis = uptimeMicros / 1000;  // transform to milli seconds
+  int64_t uptimeSeconds = uptimeMillis / 1000; // transform to seconds
+
+  // calculating days, hours, minutes and seconds
   int days = uptimeSeconds / 86400;
   uptimeSeconds %= 86400;
   int hours = uptimeSeconds / 3600;
@@ -1535,12 +1413,12 @@ String formatUptime()
   int minutes = uptimeSeconds / 60;
   int seconds = uptimeSeconds % 60;
 
-  // Formatierte Ausgabe "dd hh-mm-ss"
+  // formatting 
   char buffer[20];
   sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
   return String(buffer);
 }
-void handleRoot()
+void Webserver_HandleRoot()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
@@ -1561,7 +1439,7 @@ void handleRoot()
   s += atoi(telegram_prefix);
   s += "<li><i>Suffix Begin: </i>";
   s += atoi(telegram_suffix);
-  s += "<li>Detected Meter Value: " + String(get_meter_value_from_telegram());
+  s += "<li>Detected Meter Value [1/10 Wh]: " + String(MeterValue_get_from_telegram());
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
   s += "<li><a href='showTelegram'>Show Telegram</a>";
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
@@ -1578,7 +1456,7 @@ void handleRoot()
   {
     s += "<li><font>";
   }
-  s += "<a href='initMeterValueBuffer'>Re-Init Meter Array</a></font>";
+  s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Array</a></font>";
   s += "</ul>";
   s += "Backend Config";
   s += "<ul>";
@@ -1614,7 +1492,7 @@ void handleRoot()
   s += "<li>Meter Value Buffer used: ";
   s += String(meter_value_i + meter_value_buffer_overflow * Meter_Value_Buffer_Size) + " / " + String(Meter_Value_Buffer_Size);
   s += "<li>Last Backend Call ago (min): ";
-  s += String((millis() - last_call_backend_v2) / 60000);
+  s += String((millis() - last_call_backend) / 60000);
   s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
   s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
   s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
@@ -1633,7 +1511,7 @@ void handleRoot()
 
   s += "<li><i>MyStrom PV IP: </i>";
   s += mystrom_PV_IP;
-  s += "<li><b>Detected Meter Value PV</b>: " + String(get_meter_value_PV());
+  s += "<li><b>Detected Meter Value PV</b>: " + String(myStrom_get_Meter_value());
   s += "</ul>";
   s += "Additional Meter";
   s += "<ul>";
@@ -1644,7 +1522,7 @@ void handleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>temperatur: ";
+  s += "<li>Temperatur [1/100 C]: ";
   s += String(temperature);
 
   s += "</ul>";
@@ -1663,12 +1541,12 @@ void handleRoot()
   s += "<li>Water Mark Logs: ";
   s += String(watermark_log_buffer);
   s += "<li>Uptime (min): ";
-  s += formatUptime();
+  s += Time_formatUptime();
 
 #if defined(ESP32)
 
   s += "<li>Reset Reason: ";
-  s += esp_reset_reason_string();
+  s += Log_get_reset_reason();
 #elif defined(ESP8266)
 
   s += "<li>Reset Reason: ";
@@ -1678,35 +1556,35 @@ void handleRoot()
 #endif
 
   s += "<li>Systemzeit: ";
-  s += String(timeClient_getFormattedTime());
+  s += String(Time_getFormattedTime());
   s += " / ";
-  s += String(timeClient_getEpochTime());
+  s += String(Time_getEpochTime());
+  s += "<li>Build Time: "+String(BUILD_TIMESTAMP);
   s += "<li>Free Heap: ";
   s += String(ESP.getFreeHeap());
   s += "<li>Log Buffer Length (max): " + String(LOG_BUFFER_SIZE);
   s += "<br><a href='showLogBuffer'>Show entire Logbuffer</a>";
-  s += "<br><a href='resetLog'>Reset Log</a>";
+  s += "<br><a href='resetLogBuffer'>Reset Log</a>";
   s += "<br><a href='restart'>Restart</a>";
   s += "</ul>";
 
-  s += "<br><br>Log Buffer (last 5 entries / index " + String(logIndex) + ")<br>";
-  s += LogBufferToString(5);
+  s += "<br><br>Log Buffer (last 10 entries / current buffer index " + String(logIndex) + ")<br>";
+  s += Log_BufferToString(10);
 
   s += "<br></body></html>\n";
 
   server.send(200, "text/html", s);
 }
-void showCert()
+void Webserver_ShowCert()
 {
   server.send(200, "text/html", String(FullCert));
 }
 
-void showTemperature()
+void Webserver_ShowTermperature()
 {
-  Temp_sensors.requestTemperatures();
   server.send(200, "text/html", String(temperature));
 }
-void showTelegram()
+void Webserver_ShowTelegram()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
@@ -1716,9 +1594,9 @@ void showTelegram()
   }
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
 
-  s += "<br>Received Telegram from mMe via SML<br><table border=1>";
-  // receive_telegram(); // Wait for complete Telegram
-  if (!prefix_suffix_correct())
+  s += "<br>Received Telegram @ "+String(timestamp_telegram) + " = " +Time_formatTimestamp(timestamp_telegram) + ": "+String(Time_getEpochTime()-timestamp_telegram)+"s old<br><table border=1>";
+  
+  if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
 
   String color;
@@ -1752,7 +1630,7 @@ void showTelegram()
   server.send(200, "text/html", s);
 }
 
-void showMeterValue()
+void Webserver_ShowLastMeterValue()
 {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
@@ -1761,12 +1639,20 @@ void showMeterValue()
     return;
   }
 
-  server.send(200, "text/html", String(get_meter_value_from_telegram()));
+  server.send(200, "text/html", String(MeterValue_get_from_telegram()));
 }
 
-void configSaved()
+void Param_configSaved()
 {
   Serial.println("Configuration was updated.");
+
+  Led_update_Blink();
+  Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
+  Log_AddEntry(1003);
+}
+
+void Led_update_Blink()
+{
   if (led_blink_object.isChecked())
     iotWebConf.enableBlink();
   else
@@ -1774,6 +1660,4 @@ void configSaved()
     iotWebConf.disableBlink();
     digitalWrite(LED_BUILTIN, LOW);
   }
-  splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
-  AddLogEntry(1003);
 }
