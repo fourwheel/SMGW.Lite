@@ -20,6 +20,8 @@
 #include <DallasTemperature.h>
 #include "Arduino.h"
 
+const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
+
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 const char thingName[] = "SMGW.Lite";
 
@@ -1557,6 +1559,7 @@ void Webserver_HandleRoot()
   s += String(Time_getFormattedTime());
   s += " / ";
   s += String(Time_getEpochTime());
+  s += "<li>Build Time: "+String(BUILD_TIMESTAMP);
   s += "<li>Free Heap: ";
   s += String(ESP.getFreeHeap());
   s += "<li>Log Buffer Length (max): " + String(LOG_BUFFER_SIZE);
