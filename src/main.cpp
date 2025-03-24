@@ -1,3 +1,26 @@
+/* MIT License
+
+Copyright (c) [2025] Laurin Vierrath
+
+Permission is hereby granted, free of charge, to any person obtaining a copy 
+of this software and associated documentation files (the "Software"), to deal 
+in the Software without restriction, including without limitation the rights 
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is provided to 
+do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
 #include <SPIFFS.h>
@@ -189,7 +212,6 @@ IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend",
 IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupAdditionalMeter", "Additional Meters & Sensors");
 IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
 
-// IotWebConfParameterGroup groupSslCert = IotWebConfParameterGroup("groupSslCert", "SSL Cert");
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
@@ -244,7 +266,7 @@ void LogBuffer_reset()
 void Log_AddEntry(int statusCode)
 {
   // Increase Log Index
-  // Rmember, it is a ringbuffer and overwrites oldest entries
+  // Remember, it is a ringbuffer and overwrites oldest entries
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
 
   unsigned long uptimeSeconds = millis() / 60000; // Uptime in seconds
@@ -256,14 +278,14 @@ void Log_AddEntry(int statusCode)
 void MeterValue_init_Buffer()
 {
   Meter_Value_Buffer_Size = atoi(Meter_Value_Buffer_Size_Char);
-  // Alten Speicher freigeben, falls bereits allokiert
+  // free memory if already allocated
   if (MeterValues)
   {
     delete[] MeterValues;
-    MeterValues = nullptr; // Setze auf nullptr, um sicherzustellen, dass kein Wildpointer entsteht
+    MeterValues = nullptr; // initialize as nullpointer to prevent lost pointer
   }
 
-  // Speicher reservieren
+  // allocate memory
   MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
   if (!MeterValues)
   {
@@ -284,9 +306,9 @@ String Log_StatusCodeToString(int statusCode)
   case 1001:
     return "setup()";
   case 1002:
-    return "Speicherzuweisung fehlgeschlagen!";
+    return "Memory Allocation failed";
   case 1003:
-    return "Config gespeichert";
+    return "Config saved";
   case 1005:
     return "call_backend()";
   case 1006:
@@ -326,11 +348,11 @@ String Log_StatusCodeToString(int statusCode)
   case 3000:
     return "Complete Telegram received";
   case 3001:
-    return "Telegram Pufferueberlauf";
+    return "Telegram Buffer overflow";
   case 3002:
     return "Telegram timeout";
   case 3003:
-    return "Telegramm zu groß für Speicher";
+    return "Telegram too big for buffer";
   case 4000:
     return "Connection to server failed (Cert!?)";
   case 7000:
@@ -340,13 +362,13 @@ String Log_StatusCodeToString(int statusCode)
   case 8000:
     return "Spiffs not mounted";
   case 8001:
-    return "Fehler beim Öffnen der Zertifikatsdatei!";
+    return "Error reading cert file";
   case 8002:
-    return "Zertifikat gespeichert";
+    return "Cert saved";
   case 8003:
-    return "Fehler beim Öffnen der Cert Datei";
+    return "Error reading cert file";
   case 8004:
-    return "Kein Zertifikat erhalten!";
+    return "No Cert received";
   }
   if (statusCode < 200)
   {
@@ -601,7 +623,7 @@ void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
     xSemaphoreGive(Sema_Backend);
   }
   watermark_meter_buffer = uxTaskGetStackHighWaterMark(NULL);
-  vTaskDelete(NULL); // Task löschen, wenn fertig
+  vTaskDelete(NULL); // delete task when finished
 }
 void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 {
@@ -611,12 +633,9 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
     Webclient_send_log_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
-  else
-  {
-    // b_send_log_to_backend = true;
-  }
+
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
-  vTaskDelete(NULL); // Task löschen, wenn fertig
+  vTaskDelete(NULL);  // delete task when finished
 }
 
 void Webserver_UrlConfig()
@@ -812,8 +831,6 @@ bool Telegram_prefix_suffix_correct()
 int32_t MeterValue_get_from_telegram()
 {
 
-  // return MeterValue_get_from_remote();
-
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
   int32_t meter_value = -1;
@@ -950,24 +967,23 @@ int32_t MeterValue_get_from_remote()
   return meter_value_i32;
 }
 
-// Funktion zum Speichern eines vollständigen Telegramms
 void Telegram_saveCompleteTelegram()
 {
-  size_t telegramLength = telegram_receive_bufferIndex + 3; // Telegrammlänge inkl. zusätzlicher Bytes
+  size_t telegramLength = telegram_receive_bufferIndex + 3; // length + additional bytes
   if (telegramLength > TELEGRAM_LENGTH)
   {
     Log_AddEntry(3003);
     return;
   }
 
-  // Telegramm in TELEGRAM-Array kopieren
-  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // Kopiere Hauptdaten
-  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // Kopiere zusätzliche Bytes
+  // copy telegram
+  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // copy main data
+  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
 }
 
-// Funktion zum Zurücksetzen des Eingabepuffers
+
 void Telegram_ResetReceiveBuffer()
 {
   telegram_receive_bufferIndex = 0;
@@ -1051,7 +1067,6 @@ void Webclient_send_log_to_backend()
   if (!client.connect(backend_host.c_str(), 443))
   {
     Serial.println("Connection to server failed");
-    // b_send_log_to_backend = true;
     Log_AddEntry(4000);
     return;
   }
@@ -1490,8 +1505,8 @@ void Webserver_HandleRoot()
   s += "<li><i>Backend call Minute:</i> ";
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
-  s += String(meter_value_i + meter_value_buffer_overflow * Meter_Value_Buffer_Size) + " / " + String(Meter_Value_Buffer_Size);
-  s += "<li>Last Backend Call ago (min): ";
+  s += String(meter_value_i + meter_value_buffer_overflow * Meter_Value_Buffer_Size) + " / <i>" + String(Meter_Value_Buffer_Size);
+  s += "</i><li>Last Backend Call ago (min): ";
   s += String((millis() - last_call_backend) / 60000);
   s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
   s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
@@ -1522,7 +1537,7 @@ void Webserver_HandleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>Temperatur [1/100 C]: ";
+  s += "<li>Temperature [1/100 C]: ";
   s += String(temperature);
 
   s += "</ul>";
@@ -1555,7 +1570,7 @@ void Webserver_HandleRoot()
   s += String(/*esp_reset_reason()*/ ESP.getResetInfo());
 #endif
 
-  s += "<li>Systemzeit: ";
+  s += "<li>System time (UTC): ";
   s += String(Time_getFormattedTime());
   s += " / ";
   s += String(Time_getEpochTime());
