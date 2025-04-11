@@ -1,12 +1,14 @@
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
-#include <SPIFFS.h>
+
 #if defined(ESP32)
+#include <SPIFFS.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <HardwareSerial.h>
 #include <HTTPClient.h>
 #elif defined(ESP8266)
+#include <FS.h>           // Basis-Dateisystem
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <SoftwareSerial.h>
@@ -82,7 +84,10 @@ int Meter_Value_Buffer_Size = 234;
 
 // Backend Vars
 bool call_backend_successfull = true;
-SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
+
+#ifdef ESP32
+  SemaphoreHandle_t Sema_Backend;
+#endif
 unsigned long last_call_backend = 0;
 
 
@@ -264,7 +269,11 @@ void MeterValue_init_Buffer()
   }
 
   // Speicher reservieren
+  #ifdef ESP32
   MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
+  #else
+  MeterValue MeterValues[Meter_Value_Buffer_Size];
+  #endif
   if (!MeterValues)
   {
     Serial.println("Speicherzuweisung fehlgeschlagen!");
@@ -486,7 +495,9 @@ void Webserver_SetCert()
 void Webserver_TestBackendConnection()
 {
   WiFiClientSecure client;
+  #if defined(ESP32)
   client.setCACert(FullCert);
+  #endif
 
   String res;
 
@@ -550,7 +561,9 @@ void Webserver_HandleCertUpload()
   if (server.hasArg("cert"))
   {
     String cert = server.arg("cert");
+    #ifdef ESP32
     File file = SPIFFS.open("/cert.pem", FILE_WRITE);
+    
     if (file)
     {
       file.println(cert);
@@ -564,6 +577,7 @@ void Webserver_HandleCertUpload()
       Webserver_LocationHrefHome();
       server.send(500, "text/plain", "Cannot Open File!");
     }
+    #endif
   }
   else
   {
@@ -573,8 +587,9 @@ void Webserver_HandleCertUpload()
 }
 void Webclient_loadCertToChar()
 {
-
+  #ifdef ESP32
   File file = SPIFFS.open("/cert.pem", FILE_READ);
+  
   if (!file)
   {
     Log_AddEntry(8001);
@@ -590,9 +605,10 @@ void Webclient_loadCertToChar()
   FullCert[size] = '\0';
 
   file.close();
+  #endif
 }
 
-
+#ifdef ESP32
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
@@ -618,7 +634,7 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
   vTaskDelete(NULL); // Task löschen, wenn fertig
 }
-
+#endif
 void Webserver_UrlConfig()
 {
   // -- Set up required URL handlers on the web server.
@@ -689,11 +705,12 @@ void Webserver_UrlConfig()
 
 void setup()
 {
-  Sema_Backend = xSemaphoreCreateMutex();
+  
   Log_AddEntry(1001);
   Serial.begin(115200);
 
-#if defined(ESP32)
+#ifdef ESP32
+  Sema_Backend = xSemaphoreCreateMutex();
   mySerial.begin(9600, SERIAL_8N1, 15, 16);
 #elif defined(ESP8266)
   mySerial.begin(9600);
@@ -706,11 +723,19 @@ void setup()
   Led_update_Blink();
   Webserver_UrlConfig();
   OTA_setup();
-
+  #ifdef ESP32
   if (!SPIFFS.begin(true))
   {
     Log_AddEntry(8000);
   }
+#else
+  if(!SPIFFS.begin()){
+    Serial.println("SPIFFS Mount Failed");
+    Log_AddEntry(8000);
+  }
+#endif
+
+
   Webclient_loadCertToChar();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
 
@@ -754,6 +779,7 @@ void Param_setup()
 }
 void OTA_setup()
 {
+#ifdef ESP32
   ArduinoOTA
       .onStart([]()
                {
@@ -777,15 +803,24 @@ void OTA_setup()
       else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
       else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
       else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
+#endif
 }
 void Webclient_Send_Meter_Values_to_backend_wrapper()
 {
-  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, NULL);
+  #ifdef ESP32
+  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
+  #else
+  Webclient_send_meter_values_to_backend();
+  #endif
 }
 
 void Webclient_Send_Log_to_backend_wrapper()
 {
+  #ifdef ESP32
   xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
+  #else
+  Webclient_send_log_to_backend();
+  #endif
 }
 
 bool Telegram_prefix_suffix_correct()
@@ -1041,7 +1076,9 @@ void Webclient_send_log_to_backend()
 
   if (UseSslCert_object.isChecked())
   {
+    #if defined(ESP32)
     client.setCACert(FullCert);
+    #endif
   }
   else
   {
@@ -1103,7 +1140,11 @@ void Webclient_send_log_to_backend()
         b_send_log_to_backend = true;
       }
     }
+    #if defined(ESP32)
     vTaskDelay(pdMS_TO_TICKS(10)); // Wait for 10ms, no matter how CONFIG_FREERTOS_HZ is set
+    else
+    delay(10);
+    #endif
   }
   client.stop();
 }
@@ -1126,12 +1167,13 @@ void Webclient_send_meter_values_to_backend()
   call_backend_successfull = false;
 
   WiFiClientSecure client;
-
+  #ifdef ESP32
   if (UseSslCert_object.isChecked())
   {
     client.setCACert(FullCert);
   }
   else
+  #endif
   {
     client.setInsecure();
   }
@@ -1203,7 +1245,11 @@ void Webclient_send_meter_values_to_backend()
         Log_AddEntry(1021);
       }
     }
+    #if defined(ESP32)
     vTaskDelay(pdMS_TO_TICKS(10)); // Wait for 10ms, no matter how CONFIG_FREERTOS_HZ is set
+    else
+    delay(10);
+    #endif
   }
 
   client.stop();
@@ -1401,8 +1447,12 @@ String Log_get_reset_reason()
 
 String Time_formatUptime()
 {
+  #if defined(ESP32)
   int64_t uptimeMicros = esp_timer_get_time(); // time in microsends
   int64_t uptimeMillis = uptimeMicros / 1000;  // transform to milli seconds
+  #else
+  int64_t uptimeMillis = millis();
+  #endif
   int64_t uptimeSeconds = uptimeMillis / 1000; // transform to seconds
 
   // calculating days, hours, minutes and seconds
