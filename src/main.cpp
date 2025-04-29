@@ -99,6 +99,8 @@ struct MeterValue
 };
 MeterValue *MeterValues = nullptr; // initiaize with nullptr
 unsigned long last_meter_value = 0;
+long last_taf7_meter_value = -100000;
+long last_taf14_meter_value = -100000;
 unsigned long previous_meter_value = 0;
 int meter_value_buffer_overflow = 0;
 int Meter_Value_Buffer_Size = 234;
@@ -1366,9 +1368,13 @@ void handle_call_backend()
 }
 void handle_MeterValue_store()
 {
-  if (!wifi_connected &&
-      (Time_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
+  if (
+    taf7_b_object.isChecked() &&
+    ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
+    (millis() - last_taf7_meter_value > 45000)
+  )
   {
+    last_taf7_meter_value = millis();
     Log_AddEntry(1010);
     MeterValue_store();
   }
@@ -1377,7 +1383,9 @@ void handle_MeterValue_store()
     Log_AddEntry(1014);
     MeterValue_store();
   }
-  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
+  if (wifi_connected &&
+    taf14_b_object.isChecked() && 
+    millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
   {
     Log_AddEntry(1011);
     MeterValue_store();
