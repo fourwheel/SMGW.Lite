@@ -195,7 +195,10 @@ char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
 char backend_token[STRING_LEN];
-char read_meter_intervall[NUMBER_LEN];
+char b_taf7[STRING_LEN];
+char taf7_param[NUMBER_LEN];
+char b_taf14[STRING_LEN];
+char taf14_param[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char telegram_offset[NUMBER_LEN];
@@ -209,6 +212,7 @@ IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CON
 
 IotWebConfParameterGroup groupTelegram = IotWebConfParameterGroup("groupTelegram", "Telegram Param");
 IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend", "Backend Config");
+IotWebConfParameterGroup groupTaf = IotWebConfParameterGroup("groupTaf", "Taf config");
 IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupAdditionalMeter", "Additional Meters & Sensors");
 IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
 
@@ -221,7 +225,11 @@ IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backe
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
-IotWebConfNumberParameter read_meter_intervall_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "read_meter_intervall", read_meter_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+
+IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
+IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
+IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
+IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
 IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
@@ -746,7 +754,10 @@ void Param_setup()
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
-  groupAdditionalMeter.addItem(&read_meter_intervall_object);
+  groupTaf.addItem(&taf7_b_object);
+  groupTaf.addItem(&taf7_param_object);
+  groupTaf.addItem(&taf14_b_object);
+  groupTaf.addItem(&taf14_param_object);
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
@@ -761,6 +772,7 @@ void Param_setup()
   iotWebConf.addParameterGroup(&groupSys);
   iotWebConf.addParameterGroup(&groupTelegram);
   iotWebConf.addParameterGroup(&groupBackend);
+  iotWebConf.addParameterGroup(&groupTaf);
   iotWebConf.addParameterGroup(&groupAdditionalMeter);
 
   iotWebConf.setConfigSavedCallback(&Param_configSaved);
@@ -1365,7 +1377,7 @@ void handle_MeterValue_store()
     Log_AddEntry(1014);
     MeterValue_store();
   }
-  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(read_meter_intervall)))
+  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
   {
     Log_AddEntry(1011);
     MeterValue_store();
@@ -1500,8 +1512,24 @@ void Webserver_HandleRoot()
   s += "</ul>";
   s += "Meter Values";
   s += "<ul>";
+  s += "<li><i>Taf 7:</i> ";
+  if (taf7_b_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "no activated";
+  }
+  s += "<li><i>Taf7 minute param: </i>";
+  s += atoi(taf7_param);
+  s += "<li><i>Taf 14:</i> ";
+  if (taf14_b_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "no activated";
+  }
   s += "<li><i>Taf14 Read Meter Intervall: </i>";
-  s += atoi(read_meter_intervall);
+  s += atoi(taf14_param);
   s += "<li><i>Backend call Minute:</i> ";
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
