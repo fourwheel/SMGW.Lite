@@ -127,26 +127,29 @@ foreach ($data["values"] as $item) {
 	if(!isset($item['meter_value_PV'])) $item['meter_value_PV'] = 0;
 	
 	$sql4 = "INSERT INTO `sml_v1` (
-	`i`, 
-	`id`, 
-	`timestamp_server`, 
-	`timestamp_client`, 
-	`meter_value`, 
-	`meter_value_PV`, 
-	`power_back`, 
-	`power_back_PV`, 
-	`temperature`) 
-	VALUES (
-	NULL, 
-	'".$data['ID']."', 
-	'".date('Y-m-d H:i:s', time())."', 
-	'".$item["timestamp"]."', 
-	'".($item['meter'])."', 
-	'".($item['meter_value_PV'])."',
-	'".$item["power"]."',
-	'".$item['P_PV']."', 
-	'".$item['temperature']."')";
-	#echo $sql4."\n";
+		`i`, 
+		`id`, 
+		`timestamp_server`, 
+		`timestamp_server2`,
+		`timestamp_client`, 
+		`meter_value`, 
+		`meter_value_PV`, 
+		`power_back`, 
+		`power_back_PV`, 
+		`temperature`) 
+		VALUES (
+		NULL, 
+		'".$data['ID']."', 
+		'".date('Y-m-d H:i:s', time())."', 
+		".time().",
+		'".$item["timestamp"]."', 
+		'".($item['meter'])."', 
+		'".($item['meter_value_PV'])."',
+		'".$item["power"]."',
+		'".$item['P_PV']."', 
+		'".$item['temperature']."')";
+		#echo $sql4."\n";
+	
 
 	$result4 = mysqli_query($_link, $sql4);
 	
