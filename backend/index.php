@@ -114,11 +114,15 @@ $r = 0;
 foreach ($data["values"] as $item) {
 	
 	if(($item["timestamp"] - $prev["timestamp"]) == 0) continue;
-	
+	if($prev["meter"] > $item['meter'])
+	{
+		$prev["meter"] = $item["meter"];
+		continue;
+	}
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     $item["power"] = round($item["power"], 0);
 	echo $item["timestamp"]." ".$item["meter"]." ".$item["power"]."\n";
-	if($item["power"] == 0 || $item["power"] > 16000) continue;
+	if($item["power"] == 0 || $item["power"] > 300000) continue;
 	if($item['meter'] < 0 ) $item['meter'] = 0;
 	if(!isset($item['temperature'])) $item['temperature'] = 0;
 	$item['temperature'] = $item['temperature']/100;
@@ -127,29 +131,28 @@ foreach ($data["values"] as $item) {
 	if(!isset($item['meter_value_PV'])) $item['meter_value_PV'] = 0;
 	
 	$sql4 = "INSERT INTO `sml_v1` (
-		`i`, 
-		`id`, 
-		`timestamp_server`, 
-		`timestamp_server2`,
-		`timestamp_client`, 
-		`meter_value`, 
-		`meter_value_PV`, 
-		`power_back`, 
-		`power_back_PV`, 
-		`temperature`) 
-		VALUES (
-		NULL, 
-		'".$data['ID']."', 
-		'".date('Y-m-d H:i:s', time())."', 
-		".time().",
-		'".$item["timestamp"]."', 
-		'".($item['meter'])."', 
-		'".($item['meter_value_PV'])."',
-		'".$item["power"]."',
-		'".$item['P_PV']."', 
-		'".$item['temperature']."')";
-		#echo $sql4."\n";
-	
+	`i`, 
+	`id`, 
+	`timestamp_server`, 
+	`timestamp_server2`,
+	`timestamp_client`, 
+	`meter_value`, 
+	`meter_value_PV`, 
+	`power_back`, 
+	`power_back_PV`, 
+	`temperature`) 
+	VALUES (
+	NULL, 
+	'".$data['ID']."', 
+	'".date('Y-m-d H:i:s', time())."', 
+	".time().",
+	'".$item["timestamp"]."', 
+	'".($item['meter'])."', 
+	'".($item['meter_value_PV'])."',
+	'".$item["power"]."',
+	'".$item['P_PV']."', 
+	'".$item['temperature']."')";
+	#echo $sql4."\n";
 
 	$result4 = mysqli_query($_link, $sql4);
 	
