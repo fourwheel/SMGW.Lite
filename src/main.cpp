@@ -102,9 +102,10 @@ unsigned long last_meter_value = 0;
 long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
 unsigned long previous_meter_value = 0;
-int meter_value_buffer_overflow = 0;
-int Meter_Value_Buffer_Size = 234;
 
+int Meter_Value_Buffer_Size = 234;
+bool meter_value_buffer_overflow = false;
+bool meter_value_buffer_full = false;
 int meter_value_override_i = 0;
 int meter_value_NON_override_i = Meter_Value_Buffer_Size-1;
 
@@ -151,6 +152,7 @@ String Log_get_reset_reason();
 #endif
 void MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
+int MeterValue_get_Num();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -470,19 +472,49 @@ void MeterValues_clear_Buffer()
   }
   meter_value_override_i = 0;
   meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
-  meter_value_buffer_overflow = 0;
+  meter_value_buffer_overflow = false;
+  meter_value_buffer_full = false;
+}
+int MeterValue_get_Num()
+{
+  if(meter_value_buffer_full == true || meter_value_buffer_overflow == true)
+  {
+    return Meter_Value_Buffer_Size;
+  }
+ return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
+}
+int MeterValue_get_Num2()
+{
+  int count = 0;
+  for (int i = 0; i < Meter_Value_Buffer_Size; i++)
+  {
+    if (MeterValues[i].timestamp != 0)
+    {
+      count++;
+    }
+
+  }
+  return count;
 }
 void Webserver_LocationHrefHome(int delay)
 {
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
+void Webserver_MeterValue_get_Num2()
+{
+  String MeterValueNum = String(MeterValue_get_Num2());
+  server.send(200, "text/html", MeterValueNum);
+}
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
+  int count = 1;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
+    if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
+      continue; // skip empty entries
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -664,7 +696,8 @@ void Webserver_UrlConfig()
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
-
+  server.on("/MeterValue_get_Num", Webserver_MeterValue_get_Num2);
+  
   server.on("/upload", []
             {
                 Webserver_HandleCertUpload();
@@ -1144,10 +1177,10 @@ void Webclient_send_log_to_backend()
 void Webclient_send_meter_values_to_backend()
 {
   Log_AddEntry(1005);
-  Log_AddEntry(meter_value_override_i);
+  Log_AddEntry(MeterValue_get_Num());
   Serial.println("call_backend_V2");
   last_call_backend = millis();
-  if (meter_value_override_i == 0)
+  if (MeterValue_get_Num() == 0)
   {
 
     Serial.println("Zero Values to transmit");
@@ -1278,11 +1311,22 @@ void MeterValue_store(bool override)
   }
   Serial.println("where to write: " + String(write_i));
   bool write_success = false;
+
+  if(MeterValues[write_i].timestamp == 0
+    && MeterValues[write_i].meter_value == 0
+    && MeterValues[write_i].temperature == 0)
+    {
+      // if place where wo want to write is full we assume entire buffer is used
+      meter_value_buffer_full = false;
+    }
+  else 
+  {
+    meter_value_buffer_full = true;
+  }
+  
+
   if(override == true || 
-    (override == false
-  && MeterValues[write_i].timestamp == 0
-  && MeterValues[write_i].meter_value == 0
-  && MeterValues[write_i].temperature == 0))
+    (override == false && meter_value_buffer_full == false))
   {
     MeterValues[write_i].timestamp = timestamp_telegram; 
     MeterValues[write_i].meter_value = meter_value;
@@ -1295,7 +1339,7 @@ void MeterValue_store(bool override)
   }
   else {
     Log_AddEntry(5432);
-    Serial.println("Buffer Overflow, no space to write new value!");
+    Serial.println("Buffer Full, no space to write new value!");
   }
 
 
@@ -1310,7 +1354,7 @@ void MeterValue_store(bool override)
       if (meter_value_override_i >= Meter_Value_Buffer_Size)
       {
         meter_value_override_i = 0;
-        meter_value_buffer_overflow++;
+        meter_value_buffer_overflow = true;
       }
     }
     else
@@ -1319,7 +1363,7 @@ void MeterValue_store(bool override)
       if (meter_value_override_i < 0)
       {
         meter_value_override_i = Meter_Value_Buffer_Size - 1;
-        meter_value_buffer_overflow++;
+        meter_value_buffer_overflow = true;
       }
     }
 }
@@ -1396,7 +1440,7 @@ void handle_call_backend()
 {
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if ((!call_backend_successfull && millis() - last_call_backend > 30000) || (Time_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend > 60000))
+    if ((!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()-1) % atoi(backend_call_minute) == 0 && millis() - last_call_backend > 60000))
     {
       Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true)
@@ -1423,9 +1467,10 @@ void handle_MeterValue_store()
     Log_AddEntry(1014);
     MeterValue_store(true);
   }
-  if (wifi_connected &&
+  if (
     taf14_b_object.isChecked() && 
-    millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
+    millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param))
+  )
   {
     Log_AddEntry(1011);
     MeterValue_store(false);
@@ -1520,10 +1565,10 @@ void Webserver_HandleRoot()
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
   {
     s += "<li><font color=red>Buffer Size changed, please ";
-    if (meter_value_override_i > 0)
+    if (MeterValue_get_Num() > 0)
     {
       s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (";
-      s += String(meter_value_override_i);
+      s += String(MeterValue_get_Num());
       s += ") Meter Values and ";
     }
   }
@@ -1581,7 +1626,19 @@ void Webserver_HandleRoot()
   s += "<li><i>Backend call Minute:</i> ";
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
-  s += String(meter_value_override_i + meter_value_buffer_overflow * Meter_Value_Buffer_Size) + " / <i>" + String(Meter_Value_Buffer_Size);
+  s += String(MeterValue_get_Num());
+  s += " - <a href='MeterValue_get_Num'>Get Meter Value Num2</a>";
+  s += " / ";
+  s += String(Meter_Value_Buffer_Size);
+  s += "<li>i override: ";
+  s += String(meter_value_override_i);
+  s += "<li>i non override: "; 
+  s += String(meter_value_NON_override_i);
+  s += "<li>Meter Value Buffer Overflow: ";
+  s += String(meter_value_buffer_overflow);
+  s += "<li>Meter Value Buffer Full: ";
+  s += String(meter_value_buffer_full);
+  
   s += "</i><li>Last Backend Call ago (min): ";
   s += String((millis() - last_call_backend) / 60000);
   s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
