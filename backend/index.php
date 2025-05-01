@@ -3,7 +3,7 @@
 #ini_set('display_startup_errors', 1);
 #error_reporting(E_ALL);
 
-include("valid_clients.php");
+include("../v3/valid_clients.php");
 
 // Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
@@ -28,7 +28,7 @@ if(isset($_GET['backend_test']) && $_GET['backend_test'] == "true")
 $rawData = file_get_contents('php://input');
 
 // Anzahl der Einträge berechnen
-$entrySize = 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes)
+$entrySize = 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4)
 $dataCount = strlen($rawData) / $entrySize;
 
 if ($dataCount != floor($dataCount)) {
@@ -44,6 +44,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     $timestamp = unpack("L", substr($rawData, $offset, 4))[1];
 	$meter = unpack("L", substr($rawData, $offset + 4, 4))[1];
     $temperature = unpack("L", substr($rawData, $offset + 8, 4))[1];
+	$solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
 	
 	if($meter == 0) continue;
 	#if($temperature > 200) $temperature = -3;
@@ -52,6 +53,7 @@ for ($i = 0; $i < $dataCount; $i++) {
         "timestamp" => $timestamp,
         "meter" => $meter,
         "temperature" => $temperature,
+		"solar" => $solar,		
     ];
 }
 
@@ -81,9 +83,10 @@ if($value_count > 5)
 		$timestamp = $entry["timestamp"];
 		$meter = $entry["meter"];
 		$temperature = $entry["temperature"];
+		$solar = $entry["solar"];
 
 		// Erstelle die Zeile im gewünschten Format
-		$line = "$timestamp;$meter;$temperature\n";
+		$line = "$timestamp;$meter;$temperature;$solar\n";
 
 		// Schreibe die Zeile in die Datei
 		fwrite($file, $line);

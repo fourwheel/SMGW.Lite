@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGW.Lite";
+const char thingName[] = "SMGW.Lite-C3";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
@@ -96,6 +96,7 @@ struct MeterValue
   uint32_t timestamp;   // 4 Bytes
   uint32_t meter_value; // 4 Bytes
   uint32_t temperature; // 4 Bytes
+  uint32_t solar; // 4 Bytes
 };
 MeterValue *MeterValues = nullptr; // initiaize with nullptr
 unsigned long last_meter_value = 0;
@@ -171,10 +172,11 @@ void Webserver_LocationHrefHome(int delay = 0);
 void Webserver_SetCert();
 void Webserver_ShowCert();
 void Webserver_ShowLastMeterValue();
+void Webserver_ShowMeterValueFromRemote();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
 void Webserver_ShowTelegram();
-void Webserver_ShowTermperature();
+void Webserver_ShowTemperature();
 void Webserver_TestBackendConnection();
 void Webserver_UrlConfig();
 
@@ -454,6 +456,7 @@ void MeterValues_clear_Buffer()
     MeterValues[m].timestamp = 0;
     MeterValues[m].meter_value = 0;
     MeterValues[m].temperature = 0;
+    MeterValues[m].solar = 0;
   }
   meter_value_i = 0;
   meter_value_buffer_overflow = 0;
@@ -465,10 +468,10 @@ void Webserver_LocationHrefHome(int delay)
 }
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -644,12 +647,14 @@ void Webserver_UrlConfig()
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
-  server.on("/showTemperature", Webserver_ShowTermperature);
+  server.on("/showTemperature", Webserver_ShowTemperature);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
+  server.on("/ShowMeterValueRemote", Webserver_ShowMeterValueFromRemote);
+  
 
   server.on("/upload", []
             {
@@ -712,8 +717,9 @@ void setup()
   Log_AddEntry(1001);
   Serial.begin(115200);
 
-#if defined(ESP32)
-  mySerial.begin(9600, SERIAL_8N1, 15, 16);
+
+  mySerial.begin(9600, SERIAL_8N1, 5, 4);
+  #if defined(ESP32)
 #elif defined(ESP8266)
   mySerial.begin(9600);
 #endif
@@ -827,9 +833,10 @@ bool Telegram_prefix_suffix_correct()
     return false;
   }
 }
-
+int32_t MeterValue_get_from_remote();
 int32_t MeterValue_get_from_telegram()
 {
+  return MeterValue_get_from_remote();
 
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
@@ -855,7 +862,7 @@ int32_t myStrom_get_Meter_value()
   {
     return 0;
   }
-
+  return 6666;
   Serial.println(F("myStrom_get_Meter_value Connecting..."));
 
   // Connect to HTTP server
@@ -925,47 +932,68 @@ int32_t myStrom_get_Meter_value()
 
 int32_t MeterValue_get_from_remote()
 {
-  String meter_value;
-  String lastLine;
+  Serial.println("MeterValue_get_from_remote Connecting...");
 
-  // Connect to HTTP server
   WiFiClient client;
-  client.setTimeout(1000);
-  if (!client.connect("192.168.0.2", 80))
-  {
-    Serial.println(F("MeterValue_get_from_remote Connection failed"));
+  client.setTimeout(2000);
+
+  if (!client.connect("192.168.0.8", 80)) {
+    Serial.println(F("Connection failed"));
     return -1;
   }
-  // Serial.println(F("Connected!"));
 
-  // Send HTTP request
+  Serial.println(F("Connected!"));
+
+  // HTTP GET Request senden
   client.println(F("GET /showLastMeterValue HTTP/1.0"));
-  client.print(F("Host: "));
-  client.println("192.168.0.2");
+  client.println(F("Host: 192.168.0.8"));
   client.println(F("Connection: close"));
-  if (client.println() == 0)
-  {
-    Serial.println(F("MeterValue_get_from_remote Failed to send request"));
-    client.stop();
+  client.println(); // Leerzeile zum Abschluss des Headers
+
+  Serial.println(F("Request sent"));
+
+  // Gesamte Antwort lesen
+  String fullResponse = "";
+  unsigned long startTime = millis();
+
+  while (client.connected() || client.available()) {
+    if (client.available()) {
+      char c = client.read();
+      fullResponse += c;
+    } else {
+      if (millis() - startTime > 5000) {
+        Serial.println(F("Timeout while reading response"));
+        break;
+      }
+      delay(10);
+    }
+  }
+
+  Serial.println(F("Full Response:"));
+  Serial.println(fullResponse);
+
+  // Header vom Body trennen
+  int bodyIndex = fullResponse.indexOf("\r\n\r\n");
+  if (bodyIndex == -1) {
+    Serial.println(F("No HTTP body found"));
     return -2;
   }
 
-  meter_value = client.readString();
+  String body = fullResponse.substring(bodyIndex + 4); // +4 wegen "\r\n\r\n"
+  body.trim(); // Entferne evtl. Leerzeichen/Zeilenumbrüche
 
-  int lastNewlineIndex = meter_value.lastIndexOf('\n');
+  Serial.println(F("Extracted Body:"));
+  Serial.println(body);
 
-  // extract part of string after newline
-  lastLine = meter_value.substring(lastNewlineIndex + 1);
-
-  // delete spaces
-  lastLine.trim();
-
-  
-  int32_t meter_value_i32 = lastLine.toInt();
+  // In Zahl umwandeln
+  int32_t meter_value_i32 = body.toInt();
+  Serial.println(F("Meter Value:"));
+  Serial.println(meter_value_i32);
 
   client.stop();
   return meter_value_i32;
 }
+
 
 void Telegram_saveCompleteTelegram()
 {
@@ -1257,6 +1285,10 @@ void MeterValue_store()
   if (temperature_object.isChecked())
   {
     MeterValues[meter_value_i].temperature = temperature;
+  }
+  if (mystrom_PV_object.isChecked())
+  {
+    MeterValues[meter_value_i].solar = myStrom_get_Meter_value();
   }
 
   Serial.print("Free Heap: ");
@@ -1594,8 +1626,13 @@ void Webserver_ShowCert()
 {
   server.send(200, "text/html", String(FullCert));
 }
+void Webserver_ShowMeterValueFromRemote()
+{
+  Serial.println("Webserver MeterValue_get_from_remote ");
+  server.send(200, "text/html", String(MeterValue_get_from_remote()));
+}
 
-void Webserver_ShowTermperature()
+void Webserver_ShowTemperature()
 {
   server.send(200, "text/html", String(temperature));
 }
