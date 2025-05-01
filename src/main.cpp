@@ -133,7 +133,7 @@ int watermark_log_buffer = 0;
 // Wifi Vars
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
-bool restart_wifi = false;
+// bool restart_wifi = false;
 unsigned long last_wifi_check;
 bool wifi_connected;
 
@@ -510,10 +510,18 @@ void Webserver_ShowMeterValues()
 {
   String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
   int count = 1;
+  bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
-      continue; // skip empty entries
+      {
+        if(first)
+        {
+          first = false;
+          MeterValues_string += "<tr><td>-----</td></tr>";
+        }
+        continue; // skip empty entries
+      }
     MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
   }
   MeterValues_string += "</table>";
@@ -1370,12 +1378,13 @@ void MeterValue_store(bool override)
 
 void handle_check_wifi_connection()
 {
-  if (restart_wifi && millis() - last_wifi_retry > 5000)
-  {
-    restart_wifi = false;
-    iotWebConf.goOnLine(false);
-    Log_AddEntry(7001);
-  }
+  // // seems to be dead code!?
+  // if (restart_wifi && millis() - last_wifi_retry > 5000)
+  // {
+  //   restart_wifi = false;
+  //   iotWebConf.goOnLine(false);
+  //   Log_AddEntry(7001);
+  // }
 
   if (millis() - last_wifi_check > 500)
   {
@@ -1444,7 +1453,7 @@ void handle_call_backend()
       (!call_backend_successfull && millis() - last_call_backend > 30000) 
     || (
       (Time_getMinutes()) % atoi(backend_call_minute) == 0 
-      && Time_getEpochTime() % 60 > 5
+      && Time_getEpochTime() % 60 > 5 // 5 seconds after minute change to wait for latest metering value
       && millis() - last_call_backend > 60000
      )
     )
