@@ -198,6 +198,7 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
 char UseSslCertValue[STRING_LEN]; 
+char DebugSetOfflineValue[STRING_LEN];
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
@@ -243,6 +244,8 @@ IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyS
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
+
+IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Debug)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
@@ -344,6 +347,8 @@ String Log_StatusCodeToString(int statusCode)
     return "Taf 7-900s meter reading trigger";
   case 1015:
     return "not enough heap to store value";
+  case 1016:
+    return "Buffer full, cannot store non-override value";    
   case 1019:
     return "Sending Log";
   case 1020:
@@ -809,6 +814,7 @@ void Param_setup()
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
   groupSys.addItem(&led_blink_object);
+  groupSys.addItem(&DebugSetOffline_object);
   groupAdditionalMeter.addItem(&mystrom_PV_object);
   groupAdditionalMeter.addItem(&mystrom_PV_IP_object);
   groupAdditionalMeter.addItem(&temperature_object);
@@ -1241,10 +1247,9 @@ void Webclient_send_meter_values_to_backend()
   header += String(Time_getFormattedTime());
   header += "&heap=";
   header += String(ESP.getFreeHeap());
-  header += "&meter_value_override_i=";
-  header += String(meter_value_override_i);
-  header += "&meter_value_overflow=";
-  header += String(meter_value_buffer_overflow);
+  header += "&transmittedValues=";
+  header += String(MeterValue_get_Num());
+
 
   header += " HTTP/1.1\r\n";
 
@@ -1369,7 +1374,7 @@ void MeterValue_store(bool override)
 
   }
   else {
-    Log_AddEntry(5432);
+    Log_AddEntry(1016);
     Serial.println("Buffer Full, no space to write new value!");
   }
 
@@ -1385,16 +1390,22 @@ void handle_check_wifi_connection()
   //   iotWebConf.goOnLine(false);
   //   Log_AddEntry(7001);
   // }
+  wl_status_t current_wifi_status = WiFi.status();
+  if(DebugSetOffline_object.isChecked())
+  {
+    current_wifi_status = WL_CONNECTION_LOST;
+  }
+
 
   if (millis() - last_wifi_check > 500)
   {
     last_wifi_check = millis();
 
-    if (WiFi.status() == WL_CONNECTED && wifi_connected)
+    if (current_wifi_status == WL_CONNECTED && wifi_connected)
     {
       // Still wifi_connected
     }
-    else if (WiFi.status() == WL_CONNECTED && !wifi_connected)
+    else if (current_wifi_status == WL_CONNECTED && !wifi_connected)
     {
       Log_AddEntry(1008);
       Serial.println("Connection has returned: Resetting Backend Timer, starting OTA");
@@ -1412,7 +1423,7 @@ void handle_check_wifi_connection()
         b_send_log_to_backend = true;
       }
     }
-    else if (WiFi.status() != WL_CONNECTED && wifi_connected)
+    else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
       // Wifi lost
       Log_AddEntry(1009);

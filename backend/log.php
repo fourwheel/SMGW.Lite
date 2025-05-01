@@ -23,6 +23,7 @@ function getStatusDescription($statusCode) {
         case 1002: return "Taf 6 meter reading trigger";
         case 1014: return "Taf 7-900s meter reading trigger";
         case 1015: return "not enough heap to store value";
+        case 1016: return "Buffer full, cannot store non-override value";    
         case 1011: return "Taf 14 meter reading trigger";
         case 1012: return "call backend trigger";
         case 1019: return "Sending Log";
