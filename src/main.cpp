@@ -1300,6 +1300,7 @@ void MeterValue_store(bool override)
   }
   previous_meter_value = meter_value;
 
+  // var where to write
   int write_i = 0;
   if(override)
   {
@@ -1310,7 +1311,7 @@ void MeterValue_store(bool override)
     write_i = meter_value_NON_override_i;
   }
   Serial.println("where to write: " + String(write_i));
-  bool write_success = false;
+  
 
   if(MeterValues[write_i].timestamp == 0
     && MeterValues[write_i].meter_value == 0
@@ -1324,9 +1325,9 @@ void MeterValue_store(bool override)
     meter_value_buffer_full = true;
   }
   
-
-  if(override == true || 
-    (override == false && meter_value_buffer_full == false))
+  // if I shall override, go ahead.
+  // If I must not override, I need to be sure that buffer not full yet
+  if(override == true || meter_value_buffer_full == false)
   {
     MeterValues[write_i].timestamp = timestamp_telegram; 
     MeterValues[write_i].meter_value = meter_value;
@@ -1335,21 +1336,11 @@ void MeterValue_store(bool override)
     {
       MeterValues[write_i].temperature = temperature;
     }
-    write_success = true;
-  }
-  else {
-    Log_AddEntry(5432);
-    Serial.println("Buffer Full, no space to write new value!");
-  }
-
-
-
-  Serial.print("Free Heap: ");
-  Serial.println(ESP.getFreeHeap());
-
-  if(write_success == true)
+    
+    // calculate next writing location
     if(override == true)
     {
+      // increase counter as we are writing ascending
       meter_value_override_i++;
       if (meter_value_override_i >= Meter_Value_Buffer_Size)
       {
@@ -1359,6 +1350,7 @@ void MeterValue_store(bool override)
     }
     else
     {
+      // decrease counter as we are writing descending
       meter_value_NON_override_i--;
       if (meter_value_override_i < 0)
       {
@@ -1366,6 +1358,14 @@ void MeterValue_store(bool override)
         meter_value_buffer_overflow = true;
       }
     }
+
+  }
+  else {
+    Log_AddEntry(5432);
+    Serial.println("Buffer Full, no space to write new value!");
+  }
+
+
 }
 
 void handle_check_wifi_connection()
@@ -1440,7 +1440,14 @@ void handle_call_backend()
 {
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if ((!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()-1) % atoi(backend_call_minute) == 0 && millis() - last_call_backend > 60000))
+    if (
+      (!call_backend_successfull && millis() - last_call_backend > 30000) 
+    || (
+      (Time_getMinutes()) % atoi(backend_call_minute) == 0 
+      && Time_getEpochTime() % 60 > 5
+      && millis() - last_call_backend > 60000
+     )
+    )
     {
       Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true)
