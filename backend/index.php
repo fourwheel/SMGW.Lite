@@ -117,7 +117,7 @@ foreach ($data["values"] as $item) {
 	if($prev["meter"] > $item['meter'])
 	{
 		$prev["meter"] = $item["meter"];
-		continue;
+		break; // dismiss all values if the meter is smaller than the previous one
 	}
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     $item["power"] = round($item["power"], 0);
