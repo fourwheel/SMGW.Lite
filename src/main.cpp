@@ -133,7 +133,6 @@ int watermark_log_buffer = 0;
 // Wifi Vars
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
-// bool restart_wifi = false;
 unsigned long last_wifi_check;
 bool wifi_connected;
 
@@ -153,6 +152,7 @@ String Log_get_reset_reason();
 void MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
 int MeterValue_get_Num();
+int MeterValue_get_Num2();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -245,7 +245,7 @@ IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom 
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
-IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Debug)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
+IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Pretend no Wifi)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
@@ -709,7 +709,7 @@ void Webserver_UrlConfig()
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
-  server.on("/MeterValue_get_Num", Webserver_MeterValue_get_Num2);
+  server.on("/MeterValue_get_Num2", Webserver_MeterValue_get_Num2);
   
   server.on("/upload", []
             {
@@ -1383,13 +1383,6 @@ void MeterValue_store(bool override)
 
 void handle_check_wifi_connection()
 {
-  // // seems to be dead code!?
-  // if (restart_wifi && millis() - last_wifi_retry > 5000)
-  // {
-  //   restart_wifi = false;
-  //   iotWebConf.goOnLine(false);
-  //   Log_AddEntry(7001);
-  // }
   wl_status_t current_wifi_status = WiFi.status();
   if(DebugSetOffline_object.isChecked())
   {
@@ -1464,7 +1457,7 @@ void handle_call_backend()
       (!call_backend_successfull && millis() - last_call_backend > 30000) 
     || (
       (Time_getMinutes()) % atoi(backend_call_minute) == 0 
-      && Time_getEpochTime() % 60 > 5 // 5 seconds after minute change to wait for latest metering value
+      && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
       && millis() - last_call_backend > 60000
      )
     )
@@ -1654,7 +1647,7 @@ void Webserver_HandleRoot()
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
   s += String(MeterValue_get_Num());
-  s += " - <a href='MeterValue_get_Num'>Get Meter Value Num2</a>";
+  s += " - <a href='MeterValue_get_Num2'>Get Meter Value Num2</a>";
   s += " / ";
   s += String(Meter_Value_Buffer_Size);
   s += "<li>i override: ";
