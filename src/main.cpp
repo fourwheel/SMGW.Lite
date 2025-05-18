@@ -90,7 +90,7 @@ uint8_t TELEGRAM[TELEGRAM_LENGTH]; // buffer for entire telegram
 
 
 // Meter Value Vsrs 
-int meter_value_i = 0;
+
 struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes
@@ -99,9 +99,15 @@ struct MeterValue
 };
 MeterValue *MeterValues = nullptr; // initiaize with nullptr
 unsigned long last_meter_value = 0;
+long last_taf7_meter_value = -100000;
+long last_taf14_meter_value = -100000;
 unsigned long previous_meter_value = 0;
-int meter_value_buffer_overflow = 0;
+
 int Meter_Value_Buffer_Size = 234;
+bool meter_value_buffer_overflow = false;
+bool meter_value_buffer_full = false;
+int meter_value_override_i = 0;
+int meter_value_NON_override_i = Meter_Value_Buffer_Size-1;
 
 // Backend Vars
 bool call_backend_successfull = true;
@@ -127,7 +133,6 @@ int watermark_log_buffer = 0;
 // Wifi Vars
 unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
-bool restart_wifi = false;
 unsigned long last_wifi_check;
 bool wifi_connected;
 
@@ -144,8 +149,10 @@ String Log_StatusCodeToString(int statusCode);
 #if defined(ESP32)
 String Log_get_reset_reason();
 #endif
-void MeterValue_store();
+void MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
+int MeterValue_get_Num();
+int MeterValue_get_Num2();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -191,11 +198,15 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
 char UseSslCertValue[STRING_LEN]; 
+char DebugSetOfflineValue[STRING_LEN];
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
 char backend_token[STRING_LEN];
-char read_meter_intervall[NUMBER_LEN];
+char b_taf7[STRING_LEN];
+char taf7_param[NUMBER_LEN];
+char b_taf14[STRING_LEN];
+char taf14_param[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char telegram_offset[NUMBER_LEN];
@@ -209,6 +220,7 @@ IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CON
 
 IotWebConfParameterGroup groupTelegram = IotWebConfParameterGroup("groupTelegram", "Telegram Param");
 IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend", "Backend Config");
+IotWebConfParameterGroup groupTaf = IotWebConfParameterGroup("groupTaf", "Taf config");
 IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupAdditionalMeter", "Additional Meters & Sensors");
 IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
 
@@ -221,13 +233,19 @@ IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backe
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
-IotWebConfNumberParameter read_meter_intervall_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "read_meter_intervall", read_meter_intervall, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+
+IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
+IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
+IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
+IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
 IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
 IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
+
+IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Pretend no Wifi)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
@@ -329,6 +347,8 @@ String Log_StatusCodeToString(int statusCode)
     return "Taf 7-900s meter reading trigger";
   case 1015:
     return "not enough heap to store value";
+  case 1016:
+    return "Buffer full, cannot store non-override value";    
   case 1019:
     return "Sending Log";
   case 1020:
@@ -455,20 +475,59 @@ void MeterValues_clear_Buffer()
     MeterValues[m].meter_value = 0;
     MeterValues[m].temperature = 0;
   }
-  meter_value_i = 0;
-  meter_value_buffer_overflow = 0;
+  meter_value_override_i = 0;
+  meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
+  meter_value_buffer_overflow = false;
+  meter_value_buffer_full = false;
+}
+int MeterValue_get_Num()
+{
+  if(meter_value_buffer_full == true || meter_value_buffer_overflow == true)
+  {
+    return Meter_Value_Buffer_Size;
+  }
+ return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
+}
+int MeterValue_get_Num2()
+{
+  int count = 0;
+  for (int i = 0; i < Meter_Value_Buffer_Size; i++)
+  {
+    if (MeterValues[i].timestamp != 0)
+    {
+      count++;
+    }
+
+  }
+  return count;
 }
 void Webserver_LocationHrefHome(int delay)
 {
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
+void Webserver_MeterValue_get_Num2()
+{
+  String MeterValueNum = String(MeterValue_get_Num2());
+  server.send(200, "text/html", MeterValueNum);
+}
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
+  int count = 1;
+  bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
+    if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
+      {
+        if(first)
+        {
+          first = false;
+          MeterValues_string += "<tr><td>-----</td></tr>";
+        }
+        continue; // skip empty entries
+      }
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -650,7 +709,8 @@ void Webserver_UrlConfig()
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
-
+  server.on("/MeterValue_get_Num2", Webserver_MeterValue_get_Num2);
+  
   server.on("/upload", []
             {
                 Webserver_HandleCertUpload();
@@ -673,7 +733,7 @@ void Webserver_UrlConfig()
   server.on("/StoreMeterValue", []
             { Webserver_LocationHrefHome();
               Log_AddEntry(1006);
-              MeterValue_store();
+              MeterValue_store(true);
             });
   server.on("/MeterValue_init_Buffer", []
             { MeterValue_init_Buffer();
@@ -746,11 +806,15 @@ void Param_setup()
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
-  groupAdditionalMeter.addItem(&read_meter_intervall_object);
+  groupTaf.addItem(&taf7_b_object);
+  groupTaf.addItem(&taf7_param_object);
+  groupTaf.addItem(&taf14_b_object);
+  groupTaf.addItem(&taf14_param_object);
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
   groupSys.addItem(&led_blink_object);
+  groupSys.addItem(&DebugSetOffline_object);
   groupAdditionalMeter.addItem(&mystrom_PV_object);
   groupAdditionalMeter.addItem(&mystrom_PV_IP_object);
   groupAdditionalMeter.addItem(&temperature_object);
@@ -761,6 +825,7 @@ void Param_setup()
   iotWebConf.addParameterGroup(&groupSys);
   iotWebConf.addParameterGroup(&groupTelegram);
   iotWebConf.addParameterGroup(&groupBackend);
+  iotWebConf.addParameterGroup(&groupTaf);
   iotWebConf.addParameterGroup(&groupAdditionalMeter);
 
   iotWebConf.setConfigSavedCallback(&Param_configSaved);
@@ -1126,10 +1191,10 @@ void Webclient_send_log_to_backend()
 void Webclient_send_meter_values_to_backend()
 {
   Log_AddEntry(1005);
-  Log_AddEntry(meter_value_i);
+  Log_AddEntry(MeterValue_get_Num());
   Serial.println("call_backend_V2");
   last_call_backend = millis();
-  if (meter_value_i == 0)
+  if (MeterValue_get_Num() == 0)
   {
 
     Serial.println("Zero Values to transmit");
@@ -1182,10 +1247,9 @@ void Webclient_send_meter_values_to_backend()
   header += String(Time_getFormattedTime());
   header += "&heap=";
   header += String(ESP.getFreeHeap());
-  header += "&meter_value_i=";
-  header += String(meter_value_i);
-  header += "&meter_value_overflow=";
-  header += String(meter_value_buffer_overflow);
+  header += "&transmittedValues=";
+  header += String(MeterValue_get_Num());
+
 
   header += " HTTP/1.1\r\n";
 
@@ -1224,7 +1288,7 @@ void Webclient_send_meter_values_to_backend()
   client.stop();
 }
 
-void MeterValue_store()
+void MeterValue_store(bool override)
 {
 
   last_meter_value = millis();
@@ -1249,45 +1313,92 @@ void MeterValue_store()
   }
   previous_meter_value = meter_value;
 
-  Serial.println("buffer i: " + String(meter_value_i));
-
-  MeterValues[meter_value_i].timestamp = timestamp_telegram; 
-  MeterValues[meter_value_i].meter_value = meter_value;
-
-  if (temperature_object.isChecked())
+  // var where to write
+  int write_i = 0;
+  if(override)
   {
-    MeterValues[meter_value_i].temperature = temperature;
+    write_i = meter_value_override_i;
+  }
+  else
+  {
+    write_i = meter_value_NON_override_i;
+  }
+  Serial.println("where to write: " + String(write_i));
+  
+
+  if(MeterValues[write_i].timestamp == 0
+    && MeterValues[write_i].meter_value == 0
+    && MeterValues[write_i].temperature == 0)
+    {
+      // if place where wo want to write is full we assume entire buffer is used
+      meter_value_buffer_full = false;
+    }
+  else 
+  {
+    meter_value_buffer_full = true;
+  }
+  
+  // if I shall override, go ahead.
+  // If I must not override, I need to be sure that buffer not full yet
+  if(override == true || meter_value_buffer_full == false)
+  {
+    MeterValues[write_i].timestamp = timestamp_telegram; 
+    MeterValues[write_i].meter_value = meter_value;
+  
+    if (temperature_object.isChecked())
+    {
+      MeterValues[write_i].temperature = temperature;
+    }
+    
+    // calculate next writing location
+    if(override == true)
+    {
+      // increase counter as we are writing ascending
+      meter_value_override_i++;
+      if (meter_value_override_i >= Meter_Value_Buffer_Size)
+      {
+        meter_value_override_i = 0;
+        meter_value_buffer_overflow = true;
+      }
+    }
+    else
+    {
+      // decrease counter as we are writing descending
+      meter_value_NON_override_i--;
+      if (meter_value_override_i < 0)
+      {
+        meter_value_override_i = Meter_Value_Buffer_Size - 1;
+        meter_value_buffer_overflow = true;
+      }
+    }
+
+  }
+  else {
+    Log_AddEntry(1016);
+    Serial.println("Buffer Full, no space to write new value!");
   }
 
-  Serial.print("Free Heap: ");
-  Serial.println(ESP.getFreeHeap());
 
-  meter_value_i++;
-  if (meter_value_i >= Meter_Value_Buffer_Size)
-  {
-    meter_value_i = 0;
-    meter_value_buffer_overflow++;
-  }
 }
 
 void handle_check_wifi_connection()
 {
-  if (restart_wifi && millis() - last_wifi_retry > 5000)
+  wl_status_t current_wifi_status = WiFi.status();
+  if(DebugSetOffline_object.isChecked())
   {
-    restart_wifi = false;
-    iotWebConf.goOnLine(false);
-    Log_AddEntry(7001);
+    current_wifi_status = WL_CONNECTION_LOST;
   }
+
 
   if (millis() - last_wifi_check > 500)
   {
     last_wifi_check = millis();
 
-    if (WiFi.status() == WL_CONNECTED && wifi_connected)
+    if (current_wifi_status == WL_CONNECTED && wifi_connected)
     {
       // Still wifi_connected
     }
-    else if (WiFi.status() == WL_CONNECTED && !wifi_connected)
+    else if (current_wifi_status == WL_CONNECTED && !wifi_connected)
     {
       Log_AddEntry(1008);
       Serial.println("Connection has returned: Resetting Backend Timer, starting OTA");
@@ -1305,7 +1416,7 @@ void handle_check_wifi_connection()
         b_send_log_to_backend = true;
       }
     }
-    else if (WiFi.status() != WL_CONNECTED && wifi_connected)
+    else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
       // Wifi lost
       Log_AddEntry(1009);
@@ -1342,7 +1453,14 @@ void handle_call_backend()
 {
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
-    if ((!call_backend_successfull && millis() - last_call_backend > 30000) || (Time_getMinutes() % atoi(backend_call_minute) == 0 && millis() - last_call_backend > 60000))
+    if (
+      (!call_backend_successfull && millis() - last_call_backend > 30000) 
+    || (
+      (Time_getMinutes()) % atoi(backend_call_minute) == 0 
+      && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
+      && millis() - last_call_backend > 60000
+     )
+    )
     {
       Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true)
@@ -1354,21 +1472,28 @@ void handle_call_backend()
 }
 void handle_MeterValue_store()
 {
-  if (!wifi_connected &&
-      (Time_getEpochTime() - 1) % 900 < 60 && millis() - last_meter_value > 60000)
+  if (
+    taf7_b_object.isChecked() &&
+    ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
+    (millis() - last_taf7_meter_value > 45000)
+  )
   {
+    last_taf7_meter_value = millis();
     Log_AddEntry(1010);
-    MeterValue_store();
+    MeterValue_store(true);
   }
   if (!wifi_connected && millis() - last_meter_value > 900000)
   {
     Log_AddEntry(1014);
-    MeterValue_store();
+    MeterValue_store(true);
   }
-  if (wifi_connected && millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(read_meter_intervall)))
+  if (
+    taf14_b_object.isChecked() && 
+    millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param))
+  )
   {
     Log_AddEntry(1011);
-    MeterValue_store();
+    MeterValue_store(false);
   }
 }
 void loop()
@@ -1460,10 +1585,10 @@ void Webserver_HandleRoot()
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
   {
     s += "<li><font color=red>Buffer Size changed, please ";
-    if (meter_value_i > 0)
+    if (MeterValue_get_Num() > 0)
     {
       s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (";
-      s += String(meter_value_i);
+      s += String(MeterValue_get_Num());
       s += ") Meter Values and ";
     }
   }
@@ -1500,12 +1625,40 @@ void Webserver_HandleRoot()
   s += "</ul>";
   s += "Meter Values";
   s += "<ul>";
+  s += "<li><i>Taf 7:</i> ";
+  if (taf7_b_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "no activated";
+  }
+  s += "<li><i>Taf7 minute param: </i>";
+  s += atoi(taf7_param);
+  s += "<li><i>Taf 14:</i> ";
+  if (taf14_b_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "no activated";
+  }
   s += "<li><i>Taf14 Read Meter Intervall: </i>";
-  s += atoi(read_meter_intervall);
+  s += atoi(taf14_param);
   s += "<li><i>Backend call Minute:</i> ";
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
-  s += String(meter_value_i + meter_value_buffer_overflow * Meter_Value_Buffer_Size) + " / <i>" + String(Meter_Value_Buffer_Size);
+  s += String(MeterValue_get_Num());
+  s += " - <a href='MeterValue_get_Num2'>Get Meter Value Num2</a>";
+  s += " / ";
+  s += String(Meter_Value_Buffer_Size);
+  s += "<li>i override: ";
+  s += String(meter_value_override_i);
+  s += "<li>i non override: "; 
+  s += String(meter_value_NON_override_i);
+  s += "<li>Meter Value Buffer Overflow: ";
+  s += String(meter_value_buffer_overflow);
+  s += "<li>Meter Value Buffer Full: ";
+  s += String(meter_value_buffer_full);
+  
   s += "</i><li>Last Backend Call ago (min): ";
   s += String((millis() - last_call_backend) / 60000);
   s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
