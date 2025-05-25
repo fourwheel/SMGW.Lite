@@ -67,7 +67,7 @@ echo "Data received and processed successfully.";
 if($value_count > 5) 
 {
 	// Erzeuge den Dateinamen basierend auf der aktuellen Zeit
-	$filename = date("y-m-d-H-i-s") . ".txt";
+	$filename = date("y-m-d-H-i-s") . "-".$data["ID"].".txt";
 
 	// Öffne die Datei zum Schreiben
 	$file = fopen("log/".$filename, "w");
@@ -110,14 +110,14 @@ while($row = mysqli_fetch_array($result))
 	$prev["timestamp"] = $row['timestamp_client'];
 }
 $r = 0;
-
+$current_time = time();
 foreach ($data["values"] as $item) {
 	
 	if(($item["timestamp"] - $prev["timestamp"]) == 0) continue;
 	if($prev["meter"] > $item['meter'])
 	{
 		$prev["meter"] = $item["meter"];
-		break; // dismiss all values if the meter is smaller than the previous one
+		break; // dismiss all values if one was lower than the previous one.
 	}
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     $item["power"] = round($item["power"], 0);
@@ -130,6 +130,8 @@ foreach ($data["values"] as $item) {
 	//if(!$item['power']) $item['power'] = 0;
 	if(!isset($item['meter_value_PV'])) $item['meter_value_PV'] = 0;
 	
+	
+
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
 	`id`, 
@@ -144,8 +146,8 @@ foreach ($data["values"] as $item) {
 	VALUES (
 	NULL, 
 	'".$data['ID']."', 
-	'".date('Y-m-d H:i:s', time())."', 
-	".time().",
+	'".date('Y-m-d H:i:s', $current_time)."', 
+	".$current_time.",
 	'".$item["timestamp"]."', 
 	'".($item['meter'])."', 
 	'".($item['meter_value_PV'])."',
