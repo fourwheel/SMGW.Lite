@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGW.Lite-v2-B";
+const char thingName[] = "SMGWLite-v2-B";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
