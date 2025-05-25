@@ -477,6 +477,7 @@ void MeterValues_clear_Buffer()
     MeterValues[m].meter_value = 0;
     MeterValues[m].temperature = 0;
     MeterValues[m].solar = 0;
+    MeterValues[m].solar = 0;
   }
   meter_value_override_i = 0;
   meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
@@ -516,9 +517,7 @@ void Webserver_MeterValue_get_Num2()
 }
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th></tr>";
-  int count = 1;
-  bool first = true;
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
@@ -706,6 +705,7 @@ void Webserver_UrlConfig()
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
+  server.on("/showTemperature", Webserver_ShowTemperature);
   server.on("/showTemperature", Webserver_ShowTemperature);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);

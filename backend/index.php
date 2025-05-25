@@ -4,6 +4,7 @@
 #error_reporting(E_ALL);
 
 include("../v3/valid_clients.php");
+include("../v3/valid_clients.php");
 
 // Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
@@ -120,16 +121,9 @@ $r = 0;
 $current_time = time();
 foreach ($data["values"] as $item) {
 	
-	if(($item["timestamp"] - $prev["timestamp"]) == 0) continue;
-	if($prev["meter"] > $item['meter'])
-	{
-		$prev["meter"] = $item["meter"];
-		break; // dismiss all values if one was lower than the previous one.
-	}
-	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
-    $item["power"] = round($item["power"], 0);
-	echo $item["timestamp"]." ".$item["meter"]." ".$item["power"]."\n";
-	if($item["power"] == 0 || $item["power"] > 300000) continue;
+
+	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
+	
 	if($item['meter'] < 0 ) $item['meter'] = 0;
 	if(!isset($item['temperature'])) $item['temperature'] = 0;
 	$item['temperature'] = $item['temperature']/100;
@@ -139,8 +133,8 @@ foreach ($data["values"] as $item) {
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
 	`id`, 
-	`timestamp_server`, 
-	`timestamp_server2`,
+	`timestamp_server`,
+	`timestamp_server2`, 
 	`timestamp_client`, 
 	`meter_value`, 
 	`meter_value_PV`, 
@@ -148,8 +142,6 @@ foreach ($data["values"] as $item) {
 	VALUES (
 	NULL, 
 	'".$data['ID']."', 
-	'".date('Y-m-d H:i:s', $current_time)."', 
-	".$current_time.",
 	'".date('Y-m-d H:i:s', $current_time)."', 
 	".$current_time.",
 	'".$item["timestamp"]."', 
