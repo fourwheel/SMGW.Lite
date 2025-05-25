@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGW.Lite-C3";
+const char thingName[] = "SMGWLite-PV";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
@@ -306,7 +306,7 @@ void MeterValue_init_Buffer()
   }
 
   // allocate memory
-  MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
+  MeterValues = new /*(std::nothrow)*/ MeterValue[Meter_Value_Buffer_Size];
   if (!MeterValues)
   {
     Serial.println("Speicherzuweisung fehlgeschlagen!");
@@ -901,6 +901,8 @@ bool Telegram_prefix_suffix_correct()
 int32_t MeterValue_get_from_remote();
 int32_t MeterValue_get_from_telegram()
 {
+  /* REMOVE BEFORE MERGE */
+  
   return MeterValue_get_from_remote();
 
   int offset = atoi(telegram_offset);
@@ -927,7 +929,7 @@ int32_t myStrom_get_Meter_value()
   {
     return 0;
   }
-  return 6666;
+  return Time_getMinutes()*1000;
   Serial.println(F("myStrom_get_Meter_value Connecting..."));
 
   // Connect to HTTP server
@@ -1056,6 +1058,7 @@ int32_t MeterValue_get_from_remote()
   Serial.println(meter_value_i32);
 
   client.stop();
+  timestamp_telegram = Time_getEpochTime();
   return meter_value_i32;
 }
 
@@ -1273,6 +1276,7 @@ void Webclient_send_meter_values_to_backend()
   header += String(millis() / 60000);
   header += "&time=";
   header += String(Time_getFormattedTime());
+  header += "&PV_included=true";
   header += "&heap=";
   header += String(ESP.getFreeHeap());
   header += "&transmittedValues=";
