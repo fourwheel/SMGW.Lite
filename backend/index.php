@@ -4,7 +4,6 @@
 #error_reporting(E_ALL);
 
 include("../v3/valid_clients.php");
-include("../v3/valid_clients.php");
 
 // Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
@@ -52,7 +51,7 @@ $meter_solar = 0;
 for ($i = 0; $i < $dataCount; $i++) {
     $offset = $i * $entrySize;
     $timestamp = unpack("L", substr($rawData, $offset, 4))[1];
-	$meter = unpack("L", substr($rawData, $offset + 4, 4))[1];
+    $meter = unpack("L", substr($rawData, $offset + 4, 4))[1];
     $temperature = unpack("L", substr($rawData, $offset + 8, 4))[1];
 	
 	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
@@ -94,7 +93,7 @@ if($value_count > 5)
 		$timestamp = $entry["timestamp"];
 		$meter = $entry["meter"];
 		$temperature = $entry["temperature"];
-		$meter_solar = $entry["meter_solar"];
+        $meter_solar = $entry["meter_solar"];
 
 		// Erstelle die Zeile im gewünschten Format
 		$line = "$timestamp;$meter;$temperature;$meter_solar\n";
