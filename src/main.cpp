@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGW.Lite";
+const char thingName[] = "SMGW.Lite-v2-B";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
@@ -103,7 +103,7 @@ long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
 unsigned long previous_meter_value = 0;
 
-int Meter_Value_Buffer_Size = 234;
+int Meter_Value_Buffer_Size = 10;
 bool meter_value_buffer_overflow = false;
 bool meter_value_buffer_full = false;
 int meter_value_override_i = 0;
@@ -304,7 +304,7 @@ void MeterValue_init_Buffer()
   }
 
   // allocate memory
-  MeterValues = new (std::nothrow) MeterValue[Meter_Value_Buffer_Size];
+  MeterValues = new /*(std::nothrow)*/ MeterValue[Meter_Value_Buffer_Size];
   if (!MeterValues)
   {
     Serial.println("Speicherzuweisung fehlgeschlagen!");
@@ -773,7 +773,7 @@ void setup()
   Serial.begin(115200);
 
 #if defined(ESP32)
-  mySerial.begin(9600, SERIAL_8N1, 15, 16);
+  mySerial.begin(9600, SERIAL_8N1, 3, 1);
 #elif defined(ESP8266)
   mySerial.begin(9600);
 #endif
