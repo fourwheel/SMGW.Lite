@@ -3,7 +3,7 @@
 #ini_set('display_startup_errors', 1);
 #error_reporting(E_ALL);
 
-include("../v3/valid_clients.php");
+include("valid_clients.php");
 
 // Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
