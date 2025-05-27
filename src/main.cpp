@@ -517,7 +517,9 @@ void Webserver_MeterValue_get_Num2()
 }
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
+  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
+  int count = 1;
+  bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
@@ -929,7 +931,7 @@ int32_t myStrom_get_Meter_value()
   {
     return 0;
   }
-  return Time_getMinutes()*1000;
+  
   Serial.println(F("myStrom_get_Meter_value Connecting..."));
 
   // Connect to HTTP server
