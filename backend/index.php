@@ -5,11 +5,10 @@
 
 include("valid_clients.php");
 
-// Eingangsdaten aus GET oder POST
 $id = $_GET['ID'] ?? '';
 $token = $_GET['token'] ?? '';
 
-// Sicherheitsprüfung
+// check if client is valid
 if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
     http_response_code(403);
     echo "Zugriff verweigert.";
@@ -30,10 +29,10 @@ if(isset($_GET['PV_included']) && $_GET['PV_included'] == "true")
 	$PV_included = true;
 } 
 
-// Binärdaten auslesen
+// read binary data from the request body
 $rawData = file_get_contents('php://input');
 
-// Anzahl der Einträge berechnen
+// calculate entry size
 $entrySize = 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes)
 if($PV_included) $entrySize = 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4)
 
@@ -45,7 +44,7 @@ if ($dataCount != floor($dataCount)) {
     exit;
 }
 
-// Binärdaten in Einträge zerlegen
+
 $value_count = 0;
 $meter_solar = 0;
 for ($i = 0; $i < $dataCount; $i++) {
@@ -67,7 +66,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     ];
 }
 
-// Sortieren
+// sort array by timestamp
 usort($data["values"], function ($a, $b) {
     return $a["timestamp"] <=> $b["timestamp"];
 });
@@ -78,43 +77,45 @@ echo "Data received and processed successfully.";
 
 if($value_count > 5) 
 {
-	// Erzeuge den Dateinamen basierend auf der aktuellen Zeit
+	// create log filename with date and ID
 	$filename = date("y-m-d-H-i-s") . "-".$data["ID"].".txt";
 
-	// Öffne die Datei zum Schreiben
 	$file = fopen("log/".$filename, "w");
 	if ($file === false) {
 		die("Fehler beim Öffnen der Datei");
 	}
 
-	// Durchlaufe die Werte und schreibe sie zeilenweise in die Datei
+	
 	foreach ($data["values"] as $entry) {
-		// Extrahiere die Werte
+		
 		$timestamp = $entry["timestamp"];
 		$meter = $entry["meter"];
 		$temperature = $entry["temperature"];
         $meter_solar = $entry["meter_solar"];
 
-		// Erstelle die Zeile im gewünschten Format
+		
 		$line = "$timestamp;$meter;$temperature;$meter_solar\n";
 
-		// Schreibe die Zeile in die Datei
+		
 		fwrite($file, $line);
 	}
 
-	// Schließe die Datei
+	
 	fclose($file);
 }
 
 
-#exit;
-
-$prev["timestamp"] = 0;
 $prev["meter"] = 0;
 
-#print_r($data);
+
 include("../config.php");
 
+$sql = "SELECT `meter_value`, `id` FROM `sml_v1` WHERE `id` = '".$data["ID"]."' order by `timestamp_client` DESC LIMIT 1";
+$result = mysqli_query($_link, $sql);
+while($row = mysqli_fetch_array($result))
+{
+	$prev["meter"] = $row['meter_value'];
+}
 
 $r = 0;
 $current_time = time();
@@ -123,6 +124,12 @@ foreach ($data["values"] as $item) {
 
 	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
 	
+	if($prev["meter"] > $item['meter'])
+	{
+		continue; // dismiss this values if lower than the previous one.
+	}
+	$prev["meter"] = $item["meter"];
+
 	if($item['meter'] < 0 ) $item['meter'] = 0;
 	if(!isset($item['temperature'])) $item['temperature'] = 0;
 	$item['temperature'] = $item['temperature']/100;
@@ -147,13 +154,11 @@ foreach ($data["values"] as $item) {
 	'".($item['meter'])."', 
 	'".($item["meter_solar"])."',
 	'".$item['temperature']."')";
-	#echo $sql4."\n";
+
 
 	$result4 = mysqli_query($_link, $sql4);
 	
 	$r++;
-	$prev["timestamp"] = $item["timestamp"];
-	$prev["meter"] = $item["meter"];
 }
 echo $r." Values received";
 ?>
