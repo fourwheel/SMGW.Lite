@@ -110,11 +110,12 @@ $prev["meter"] = 0;
 
 include("../config.php");
 
-$sql = "SELECT `meter_value`, `id` FROM `sml_v1` WHERE `id` = '".$data["ID"]."' order by `timestamp_client` DESC LIMIT 1";
+$sql = "SELECT `meter_value`, `timestamp_client`, `id` FROM `sml_v1` WHERE `id` = '".$data["ID"]."' order by `timestamp_client` DESC LIMIT 1";
 $result = mysqli_query($_link, $sql);
 while($row = mysqli_fetch_array($result))
 {
 	$prev["meter"] = $row['meter_value'];
+	$prev["timestamp"] = $row['timestamp_client'];
 }
 
 $r = 0;
@@ -124,7 +125,12 @@ foreach ($data["values"] as $item) {
 
 	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
 	
-	if($prev["meter"] > $item['meter'])
+	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
+    
+	echo $item["timestamp"]." ".$item["meter"]." ".$item["power"]."\n";
+
+	if($item["power"] == 0 || $item["power"] > 40000) continue;
+	if($prev["meter"] > $item['meter']) 
 	{
 		continue; // dismiss this values if lower than the previous one.
 	}
