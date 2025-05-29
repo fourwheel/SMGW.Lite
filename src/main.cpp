@@ -485,7 +485,6 @@ void MeterValues_clear_Buffer()
     MeterValues[m].meter_value = 0;
     MeterValues[m].temperature = 0;
     MeterValues[m].solar = 0;
-    MeterValues[m].solar = 0;
   }
   meter_value_override_i = 0;
   meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
