@@ -1017,6 +1017,8 @@ int32_t myStrom_get_Meter_value()
   client.stop();
 }
 
+
+
 int32_t MeterValue_get_from_remote()
 {
   Serial.println("MeterValue_get_from_remote Connecting...");
@@ -1031,12 +1033,11 @@ int32_t MeterValue_get_from_remote()
 
   Serial.println(F("Connected!"));
 
-  // HTTP GET Request senden
   client.println(F("GET /showLastMeterValue HTTP/1.0"));
   client.print(F("Host: "));
   client.println(F(DebugMeterValueFromOtherClientIP));
   client.println(F("Connection: close"));
-  client.println(); // Leerzeile zum Abschluss des Headers
+  client.println();
 
   Serial.println(F("Request sent"));
 
@@ -1067,21 +1068,38 @@ int32_t MeterValue_get_from_remote()
     return -2;
   }
 
-  String body = fullResponse.substring(bodyIndex + 4); // +4 wegen "\r\n\r\n"
-  body.trim(); // Entferne evtl. Leerzeichen/Zeilenumbrüche
+  String body = fullResponse.substring(bodyIndex + 4);
+  body.trim();
 
   Serial.println(F("Extracted Body:"));
   Serial.println(body);
 
-  // In Zahl umwandeln
-  int32_t meter_value_i32 = body.toInt();
-  Serial.println(F("Meter Value:"));
-  Serial.println(meter_value_i32);
+  // JSON parsen
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, body);
 
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return -3;
+  }
+
+  // Werte extrahieren
+  int32_t meter_value_i32 = doc["meter_value"] | -4;
+  int32_t timestamp = doc["timestamp"] | 0;
+
+  Serial.print(F("Meter Value: "));
+  Serial.println(meter_value_i32);
+  Serial.print(F("Timestamp: "));
+  Serial.println(timestamp);
+  PrevMeterValue = LastMeterValue;
+  LastMeterValue.meter_value = meter_value_i32; // save meter value
+  LastMeterValue.timestamp = timestamp; // save timestamp
   client.stop();
-  timestamp_telegram = Time_getEpochTime();
+  timestamp_telegram = timestamp;
   return meter_value_i32;
 }
+
 
 
 void Telegram_saveCompleteTelegram()
