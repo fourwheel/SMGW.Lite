@@ -785,12 +785,7 @@ void setup()
   Log_AddEntry(1001);
   Serial.begin(115200);
 
-
-  mySerial.begin(9600, SERIAL_8N1, 15, 4);
-  #if defined(ESP32)
-#elif defined(ESP8266)
-  mySerial.begin(9600);
-#endif
+  mySerial.begin(9600, SERIAL_8N1, 3, 1);
 
   Serial.println();
   Serial.println("Starting up...HELLAU!");
@@ -1883,13 +1878,25 @@ void Webserver_ShowTelegram()
 void Webserver_ShowLastMeterValue()
 {
   // -- Let IotWebConf test and handle captive portal requests.
-  if (iotWebConf.handleCaptivePortal())
-  {
-    // -- Captive portal request were already served.
-    return;
-  }
+  // if (iotWebConf.handleCaptivePortal())
+  // {
+  //   // -- Captive portal request were already served.
+  //   return;
+  // }
 
-  server.send(200, "text/html", String(MeterValue_get()));
+  // server.send(200, "text/html", String(MeterValue_get()));
+
+    StaticJsonDocument<200> jsonDoc;
+
+  // Beispiel-Daten
+  jsonDoc["temperatur"] = 24.5;
+  jsonDoc["luftfeuchtigkeit"] = 60;
+  jsonDoc["status"] = "ok";
+
+  String jsonResponse;
+  serializeJson(jsonDoc, jsonResponse);
+
+  server.send(200, "application/json", jsonResponse);
 }
 
 void Param_configSaved()
