@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGWLite-PV";
+const char thingName[] = "SMGWLite";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
@@ -56,7 +56,7 @@ const char wifiInitialApPassword[] = "password";
 #define NUMBER_LEN 5
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "1015"
+#define CONFIG_VERSION "2905"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
@@ -117,7 +117,7 @@ unsigned long last_call_backend = 0;
 
 
 // Temperature Vars
-#define ONE_WIRE_BUS 4
+#define ONE_WIRE_BUS 2
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 unsigned long last_temperature = 0;
@@ -716,7 +716,6 @@ void Webserver_UrlConfig()
   server.on("/showTelegram", Webserver_ShowTelegram);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
   server.on("/showTemperature", Webserver_ShowTemperature);
-  server.on("/showTemperature", Webserver_ShowTemperature);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
@@ -788,7 +787,7 @@ void setup()
   Serial.begin(115200);
 
 
-  mySerial.begin(9600, SERIAL_8N1, 5, 4);
+  mySerial.begin(9600, SERIAL_8N1, 15, 4);
   #if defined(ESP32)
 #elif defined(ESP8266)
   mySerial.begin(9600);
@@ -812,6 +811,9 @@ void setup()
   MeterValue_init_Buffer();
 
   configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
+  Temp_sensors.begin();
+  Serial.print("Temp sensors found: ");
+  Serial.println(Temp_sensors.getDeviceCount());
 }
 void Param_setup()
 {
@@ -1778,6 +1780,8 @@ void Webserver_HandleRoot()
   {
     s += "deactivated";
   }
+  s += "<li>Water Mark Main Task: ";
+  s += String(uxTaskGetStackHighWaterMark(NULL));
   s += "<li>Water Mark meter Values: ";
   s += String(watermark_meter_buffer);
   s += "<li>Water Mark Logs: ";

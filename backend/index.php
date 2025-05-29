@@ -104,7 +104,7 @@ if($value_count > 5)
 	fclose($file);
 }
 
-
+$prev["timestamp"] = 0;
 $prev["meter"] = 0;
 
 
@@ -127,13 +127,13 @@ foreach ($data["values"] as $item) {
 	
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     
-	echo $item["timestamp"]." ".$item["meter"]." ".$item["power"]."\n";
 
 	if($item["power"] == 0 || $item["power"] > 40000) continue;
 	if($prev["meter"] > $item['meter']) 
 	{
 		continue; // dismiss this values if lower than the previous one.
 	}
+	$prev["timestamp"] = $item["timestamp"];
 	$prev["meter"] = $item["meter"];
 
 	if($item['meter'] < 0 ) $item['meter'] = 0;
