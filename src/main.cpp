@@ -99,6 +99,9 @@ struct MeterValue
   uint32_t solar; // 4 Bytes
 };
 MeterValue *MeterValues = nullptr; // initiaize with nullptr
+MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
+MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
+
 unsigned long last_meter_value = 0;
 long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
@@ -320,6 +323,7 @@ void MeterValue_init_Buffer()
     Serial.println("Speicherzuweisung fehlgeschlagen!");
     Log_AddEntry(1002);
   }
+
 
   MeterValues_clear_Buffer();
 }
@@ -785,7 +789,7 @@ void setup()
   Log_AddEntry(1001);
   Serial.begin(115200);
 
-  mySerial.begin(9600, SERIAL_8N1, 3, 1);
+  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
 
   Serial.println();
   Serial.println("Starting up...HELLAU!");
@@ -1094,6 +1098,11 @@ void Telegram_saveCompleteTelegram()
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
+
+  PrevMeterValue = LastMeterValue; // save last meter value
+  LastMeterValue.meter_value = MeterValue_get_from_telegram(); // get meter value from telegram
+  LastMeterValue.timestamp = timestamp_telegram; // save timestamp
+
 }
 
 
@@ -1620,6 +1629,11 @@ void Webserver_HandleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
   s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
+  
+  s += "<br>Last Meter Value: "+ String(LastMeterValue.meter_value) + " [1/10 Wh] at ";
+  s += (LastMeterValue.timestamp);
+  s += "<br>Prev Meter Value: "+ String(PrevMeterValue.meter_value) + " [1/10 Wh] at ";
+  s += (PrevMeterValue.timestamp);
   s += "<br>Telegram Parse config<ul>";
   s += "<li><i>Meter Value Offset:</i> ";
   s += atoi(telegram_offset);
@@ -1889,9 +1903,8 @@ void Webserver_ShowLastMeterValue()
     StaticJsonDocument<200> jsonDoc;
 
   // Beispiel-Daten
-  jsonDoc["temperatur"] = 24.5;
-  jsonDoc["luftfeuchtigkeit"] = 60;
-  jsonDoc["status"] = "ok";
+  jsonDoc["meter_value"] = LastMeterValue.meter_value;
+  jsonDoc["timestamp"] = LastMeterValue.timestamp;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);
