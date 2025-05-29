@@ -122,7 +122,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 unsigned long last_temperature = 0;
 bool read_temperature = false;
-int temperature;
+int temperature = 123;
 
 // Log Vars
 const int LOG_BUFFER_SIZE = 100;
@@ -152,8 +152,11 @@ String Log_get_reset_reason();
 #endif
 void MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
-int MeterValue_get_Num();
-int MeterValue_get_Num2();
+int MeterValue_Num();
+int MeterValue_Num2();
+int32_t MeterValue_get_from_remote();
+int32_t MeterValue_get();
+int32_t MeterValue_get_from_telegram();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -201,6 +204,8 @@ char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
 char UseSslCertValue[STRING_LEN]; 
 char DebugSetOfflineValue[STRING_LEN];
+char DebugMeterValueFromOtherClient[STRING_LEN];
+char DebugMeterValueFromOtherClientIP[STRING_LEN];
 char mystrom_PV[STRING_LEN];
 char mystrom_PV_IP[STRING_LEN];
 char temperature_checkbock[STRING_LEN];
@@ -225,6 +230,7 @@ IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend",
 IotWebConfParameterGroup groupTaf = IotWebConfParameterGroup("groupTaf", "Taf config");
 IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupAdditionalMeter", "Additional Meters & Sensors");
 IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
+IotWebConfParameterGroup groupDebug = IotWebConfParameterGroup("groupDebug", "Debug Helpers");
 
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
@@ -248,6 +254,8 @@ IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Te
 IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
 
 IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Pretend no Wifi)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
+IotWebConfCheckboxParameter DebugFromOtherClient_object = IotWebConfCheckboxParameter("Get Meter Value from other SMGWLite Client", "DebugFromOtherClient", DebugMeterValueFromOtherClient, STRING_LEN, false);
+IotWebConfTextParameter DebugMeterValueFromOtherClientIP_object = IotWebConfTextParameter("IP to get Meter Values From", "DebugMeterValueFromOtherClientIP", DebugMeterValueFromOtherClientIP, STRING_LEN);
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
@@ -484,7 +492,7 @@ void MeterValues_clear_Buffer()
   meter_value_buffer_overflow = false;
   meter_value_buffer_full = false;
 }
-int MeterValue_get_Num()
+int MeterValue_Num()
 {
   if(meter_value_buffer_full == true || meter_value_buffer_overflow == true)
   {
@@ -492,7 +500,7 @@ int MeterValue_get_Num()
   }
  return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
 }
-int MeterValue_get_Num2()
+int MeterValue_Num2()
 {
   int count = 0;
   for (int i = 0; i < Meter_Value_Buffer_Size; i++)
@@ -510,9 +518,9 @@ void Webserver_LocationHrefHome(int delay)
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
-void Webserver_MeterValue_get_Num2()
+void Webserver_MeterValue_Num2()
 {
-  String MeterValueNum = String(MeterValue_get_Num2());
+  String MeterValueNum = String(MeterValue_Num2());
   server.send(200, "text/html", MeterValueNum);
 }
 void Webserver_ShowMeterValues()
@@ -714,7 +722,7 @@ void Webserver_UrlConfig()
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
-  server.on("/MeterValue_get_Num2", Webserver_MeterValue_get_Num2);
+  server.on("/MeterValue_Num2", Webserver_MeterValue_Num2);
   server.on("/ShowMeterValueRemote", Webserver_ShowMeterValueFromRemote);
   
 
@@ -822,7 +830,9 @@ void Param_setup()
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
   groupSys.addItem(&led_blink_object);
-  groupSys.addItem(&DebugSetOffline_object);
+  groupDebug.addItem(&DebugSetOffline_object);
+  groupDebug.addItem(&DebugFromOtherClient_object);
+  groupDebug.addItem(&DebugMeterValueFromOtherClientIP_object);
   groupAdditionalMeter.addItem(&mystrom_PV_object);
   groupAdditionalMeter.addItem(&mystrom_PV_IP_object);
   groupAdditionalMeter.addItem(&temperature_object);
@@ -835,6 +845,7 @@ void Param_setup()
   iotWebConf.addParameterGroup(&groupBackend);
   iotWebConf.addParameterGroup(&groupTaf);
   iotWebConf.addParameterGroup(&groupAdditionalMeter);
+  iotWebConf.addParameterGroup(&groupDebug);
 
   iotWebConf.setConfigSavedCallback(&Param_configSaved);
   // iotWebConf.setFormValidator(&formValidator);
@@ -900,13 +911,20 @@ bool Telegram_prefix_suffix_correct()
     return false;
   }
 }
-int32_t MeterValue_get_from_remote();
+int32_t MeterValue_get()
+{
+  if(DebugFromOtherClient_object.isChecked())
+  {
+    return MeterValue_get_from_remote();
+  }
+  else
+  {
+    return MeterValue_get_from_telegram();
+  }
+}
+
 int32_t MeterValue_get_from_telegram()
 {
-  /* REMOVE BEFORE MERGE */
-  
-  return MeterValue_get_from_remote();
-
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
   int32_t meter_value = -1;
@@ -992,7 +1010,7 @@ int32_t myStrom_get_Meter_value()
   }
 
   // Extract values
-
+  temperature = doc["temperature"].as<float>()*100;
   return (doc["energy_since_boot"].as<int>());
 
   // Disconnect
@@ -1006,7 +1024,7 @@ int32_t MeterValue_get_from_remote()
   WiFiClient client;
   client.setTimeout(2000);
 
-  if (!client.connect("192.168.0.8", 80)) {
+  if (!client.connect(DebugMeterValueFromOtherClientIP, 80)) {
     Serial.println(F("Connection failed"));
     return -1;
   }
@@ -1015,7 +1033,8 @@ int32_t MeterValue_get_from_remote()
 
   // HTTP GET Request senden
   client.println(F("GET /showLastMeterValue HTTP/1.0"));
-  client.println(F("Host: 192.168.0.8"));
+  client.print(F("Host: "));
+  client.println(F(DebugMeterValueFromOtherClientIP));
   client.println(F("Connection: close"));
   client.println(); // Leerzeile zum Abschluss des Headers
 
@@ -1224,10 +1243,10 @@ void Webclient_send_log_to_backend()
 void Webclient_send_meter_values_to_backend()
 {
   Log_AddEntry(1005);
-  Log_AddEntry(MeterValue_get_Num());
+  Log_AddEntry(MeterValue_Num());
   Serial.println("call_backend_V2");
   last_call_backend = millis();
-  if (MeterValue_get_Num() == 0)
+  if (MeterValue_Num() == 0)
   {
 
     Serial.println("Zero Values to transmit");
@@ -1282,7 +1301,7 @@ void Webclient_send_meter_values_to_backend()
   header += "&heap=";
   header += String(ESP.getFreeHeap());
   header += "&transmittedValues=";
-  header += String(MeterValue_get_Num());
+  header += String(MeterValue_Num());
 
 
   header += " HTTP/1.1\r\n";
@@ -1333,7 +1352,7 @@ void MeterValue_store(bool override)
     return;
   }
 
-  int32_t meter_value = MeterValue_get_from_telegram();
+  int32_t meter_value = MeterValue_get();
   if (meter_value <= 0)
   {
     Log_AddEntry(1200);
@@ -1378,11 +1397,8 @@ void MeterValue_store(bool override)
   {
     MeterValues[write_i].timestamp = timestamp_telegram; 
     MeterValues[write_i].meter_value = meter_value;
-  
-    if (temperature_object.isChecked())
-    {
-      MeterValues[write_i].temperature = temperature;
-    }
+    MeterValues[write_i].temperature = temperature;
+    
     if (mystrom_PV_object.isChecked())
     {
       MeterValues[write_i].solar = myStrom_get_Meter_value();
@@ -1617,16 +1633,16 @@ void Webserver_HandleRoot()
   s += atoi(telegram_prefix);
   s += "<li><i>Suffix Begin: </i>";
   s += atoi(telegram_suffix);
-  s += "<li>Detected Meter Value [1/10 Wh]: " + String(MeterValue_get_from_telegram());
+  s += "<li>Detected Meter Value [1/10 Wh]: " + String(MeterValue_get());
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
   s += "<li><a href='showTelegram'>Show Telegram</a>";
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
   {
     s += "<li><font color=red>Buffer Size changed, please ";
-    if (MeterValue_get_Num() > 0)
+    if (MeterValue_Num() > 0)
     {
       s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (";
-      s += String(MeterValue_get_Num());
+      s += String(MeterValue_Num());
       s += ") Meter Values and ";
     }
   }
@@ -1684,8 +1700,8 @@ void Webserver_HandleRoot()
   s += "<li><i>Backend call Minute:</i> ";
   s += atoi(backend_call_minute);
   s += "<li>Meter Value Buffer used: ";
-  s += String(MeterValue_get_Num());
-  s += " - <a href='MeterValue_get_Num2'>Get Meter Value Num2</a>";
+  s += String(MeterValue_Num());
+  s += " - <a href='MeterValue_Num2'>Get Meter Value Num2</a>";
   s += " / ";
   s += String(Meter_Value_Buffer_Size);
   s += "<li>i override: ";
@@ -1730,6 +1746,26 @@ void Webserver_HandleRoot()
   }
   s += "<li>Temperature [1/100 C]: ";
   s += String(temperature);
+
+  s += "</ul>";
+  s += "Debug Helper";
+  s += "<ul>";
+  s += "<li><i>Set Device Offline:</i> ";
+  if (DebugSetOffline_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
+  s += "<li><i>Get Meter Values from other SMGWLite:</i> ";
+  if (DebugFromOtherClient_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
+  s += "<li><i>Remote Client IP</i>: ";
+  s += String(DebugMeterValueFromOtherClientIP);
 
   s += "</ul>";
 
@@ -1850,7 +1886,7 @@ void Webserver_ShowLastMeterValue()
     return;
   }
 
-  server.send(200, "text/html", String(MeterValue_get_from_telegram()));
+  server.send(200, "text/html", String(MeterValue_get()));
 }
 
 void Param_configSaved()
