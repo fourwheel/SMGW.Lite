@@ -1922,7 +1922,9 @@ void Webserver_ShowLastMeterValue()
 
   // Beispiel-Daten
   jsonDoc["meter_value"] = LastMeterValue.meter_value;
-  jsonDoc["timestamp"] = LastMeterValue.timestamp;
+  jsonDoc["timestamp"]   = LastMeterValue.timestamp;
+  jsonDoc["temperature"] = temperature; //LastMeterValue.temperature;
+  jsonDoc["solar"]       = LastMeterValue.solar;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);
