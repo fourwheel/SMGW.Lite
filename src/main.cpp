@@ -125,7 +125,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 unsigned long last_temperature = 0;
 bool read_temperature = false;
-int temperature = 123;
+int current_temperature = 123;
 
 // Log Vars
 const int LOG_BUFFER_SIZE = 100;
@@ -140,6 +140,7 @@ unsigned long last_wifi_retry = 0;
 unsigned long last_wifi_check;
 bool wifi_connected;
 
+unsigned long last_remote_meter_value = 0;
 
 // -- Forward declarations.
 void handle_call_backend();
@@ -155,10 +156,10 @@ String Log_get_reset_reason();
 #endif
 void MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
+void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-int32_t MeterValue_get();
 int32_t MeterValue_get_from_telegram();
 void OTA_setup();
 void Param_configSaved();
@@ -171,7 +172,7 @@ int Time_getMinutes();
 bool Telegram_prefix_suffix_correct();
 void Telegram_saveCompleteTelegram();
 void Telegram_ResetReceiveBuffer();
-void Telegram_handle();
+void handle_MeterValue_receive();
 void Webclient_send_log_to_backend();
 void Webclient_Send_Log_to_backend_Task(void *pvParameters);
 void Webclient_Send_Log_to_backend_wrapper();
@@ -185,11 +186,9 @@ void Webserver_LocationHrefHome(int delay = 0);
 void Webserver_SetCert();
 void Webserver_ShowCert();
 void Webserver_ShowLastMeterValue();
-void Webserver_ShowMeterValueFromRemote();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
 void Webserver_ShowTelegram();
-void Webserver_ShowTemperature();
 void Webserver_TestBackendConnection();
 void Webserver_UrlConfig();
 
@@ -480,7 +479,9 @@ String Log_BufferToString(int showNumber)
 
   return logString + "</table>";
 }
-
+void resetMeterValue(MeterValue &val) {
+  val = MeterValue{};  // unset all fields to zero
+}
 void MeterValues_clear_Buffer()
 {
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -718,14 +719,12 @@ void Webserver_UrlConfig()
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
-  server.on("/showTemperature", Webserver_ShowTemperature);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
   server.on("/MeterValue_Num2", Webserver_MeterValue_Num2);
-  server.on("/ShowMeterValueRemote", Webserver_ShowMeterValueFromRemote);
   
 
   server.on("/upload", []
@@ -911,17 +910,7 @@ bool Telegram_prefix_suffix_correct()
     return false;
   }
 }
-int32_t MeterValue_get()
-{
-  if(DebugFromOtherClient_object.isChecked())
-  {
-    return MeterValue_get_from_remote();
-  }
-  else
-  {
-    return MeterValue_get_from_telegram();
-  }
-}
+
 
 int32_t MeterValue_get_from_telegram()
 {
@@ -942,12 +931,13 @@ int32_t MeterValue_get_from_telegram()
   return meter_value;
 }
 
-int32_t myStrom_get_Meter_value()
+void myStrom_get_Meter_value()
 {
 
   if (!mystrom_PV_object.isChecked())
   {
-    return 0;
+    LastMeterValue.solar = 0;
+    return;
   }
   
   Serial.println(F("myStrom_get_Meter_value Connecting..."));
@@ -958,7 +948,8 @@ int32_t myStrom_get_Meter_value()
   if (!client.connect(mystrom_PV_IP, 80))
   {
     Serial.println(F("myStrom_get_Meter_value Connection failed"));
-    return -1;
+    LastMeterValue.solar = -1;
+    return;
   }
 
   Serial.println(F("myStrom_get_Meter_value Connected!"));
@@ -972,7 +963,8 @@ int32_t myStrom_get_Meter_value()
   {
     Serial.println(F("Failed to send request"));
     client.stop();
-    return -2;
+    LastMeterValue.solar = -2;
+    return;
   }
 
   // Check HTTP status
@@ -984,7 +976,8 @@ int32_t myStrom_get_Meter_value()
     Serial.print(F("myStrom_get_Meter_value Unexpected response: "));
     Serial.println(status);
     client.stop();
-    return -3;
+    LastMeterValue.solar = -3;
+    return;
   }
 
   // Skip HTTP headers
@@ -993,7 +986,8 @@ int32_t myStrom_get_Meter_value()
   {
     Serial.println(F("myStrom_get_Meter_value Invalid response"));
     client.stop();
-    return -4;
+    LastMeterValue.solar = -4;
+    return;
   }
 
   // Allocate the JSON document
@@ -1006,12 +1000,13 @@ int32_t myStrom_get_Meter_value()
     Serial.print(F("myStrom_get_Meter_value deserializeJson() failed: "));
     Serial.println(error.f_str());
     client.stop();
-    return -5;
+    LastMeterValue.solar = -5;
+    return;
   }
 
   // Extract values
-  temperature = doc["temperature"].as<float>()*100;
-  return (doc["energy_since_boot"].as<int>());
+  LastMeterValue.temperature = doc["temperature"].as<float>()*100;
+  LastMeterValue.solar = doc["energy_since_boot"].as<int>();
 
   // Disconnect
   client.stop();
@@ -1037,7 +1032,7 @@ int32_t MeterValue_get_from_remote()
   client.print(F("Host: "));
   client.println(F(DebugMeterValueFromOtherClientIP));
   client.println(F("Connection: close"));
-  client.println();
+  client.println(); // empty line at end of headers
 
   Serial.println(F("Request sent"));
 
@@ -1068,8 +1063,8 @@ int32_t MeterValue_get_from_remote()
     return -2;
   }
 
-  String body = fullResponse.substring(bodyIndex + 4);
-  body.trim();
+  String body = fullResponse.substring(bodyIndex + 4);  // +"4"because of  "\r\n\r\n"
+  body.trim();  // remove leading/trailing whitespace
 
   Serial.println(F("Extracted Body:"));
   Serial.println(body);
@@ -1092,9 +1087,15 @@ int32_t MeterValue_get_from_remote()
   Serial.println(meter_value_i32);
   Serial.print(F("Timestamp: "));
   Serial.println(timestamp);
-  PrevMeterValue = LastMeterValue;
-  LastMeterValue.meter_value = meter_value_i32; // save meter value
-  LastMeterValue.timestamp = timestamp; // save timestamp
+  if(timestamp >= PrevMeterValue.timestamp + 5 && meter_value_i32 != PrevMeterValue.meter_value)
+  {
+    PrevMeterValue = LastMeterValue;
+  }
+  resetMeterValue(LastMeterValue); // reset LastMeterValue
+  LastMeterValue.meter_value = doc["meter_value"]; // save meter value
+  LastMeterValue.timestamp = doc["timestamp"]; // save timestamp
+  LastMeterValue.temperature = doc["temperature"]; // save temperature
+  LastMeterValue.solar = doc["solar"]; // no solar value from remote
   client.stop();
   timestamp_telegram = timestamp;
   return meter_value_i32;
@@ -1116,10 +1117,18 @@ void Telegram_saveCompleteTelegram()
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
-
-  PrevMeterValue = LastMeterValue; // save last meter value
-  LastMeterValue.meter_value = MeterValue_get_from_telegram(); // get meter value from telegram
+  int32_t meter_value = MeterValue_get_from_telegram();
+  if(timestamp_telegram >= PrevMeterValue.timestamp + 5 && meter_value != PrevMeterValue.meter_value)
+  {
+    PrevMeterValue = LastMeterValue;
+  }
+  resetMeterValue(LastMeterValue); // reset LastMeterValue
+  LastMeterValue.meter_value = meter_value; // get meter value from telegram
   LastMeterValue.timestamp = timestamp_telegram; // save timestamp
+  if(temperature_object.isChecked())
+  {
+    LastMeterValue.temperature = current_temperature;
+  }  
 
 }
 
@@ -1131,8 +1140,17 @@ void Telegram_ResetReceiveBuffer()
   extraIndex = 0;
 }
 
-void Telegram_handle()
+void handle_MeterValue_receive()
 {
+  if(DebugFromOtherClient_object.isChecked())
+  {
+    if(last_remote_meter_value + 5000 < millis())
+    {
+      last_remote_meter_value = millis();
+      MeterValue_get_from_remote();
+    }
+    return;
+  }
   while (mySerial.available() > 0)
   {
     uint8_t incomingByte = mySerial.read();
@@ -1375,7 +1393,7 @@ void MeterValue_store(bool override)
     return;
   }
 
-  int32_t meter_value = MeterValue_get();
+  int32_t meter_value = LastMeterValue.meter_value;
   if (meter_value <= 0)
   {
     Log_AddEntry(1200);
@@ -1418,15 +1436,12 @@ void MeterValue_store(bool override)
   // If I must not override, I need to be sure that buffer not full yet
   if(override == true || meter_value_buffer_full == false)
   {
-    MeterValues[write_i].timestamp = timestamp_telegram; 
-    MeterValues[write_i].meter_value = meter_value;
-    MeterValues[write_i].temperature = temperature;
-    
     if (mystrom_PV_object.isChecked())
     {
-      MeterValues[write_i].solar = myStrom_get_Meter_value();
+      myStrom_get_Meter_value();
     }
-    
+    MeterValues[write_i] = LastMeterValue; // copy last meter value to buffer
+     
     // calculate next writing location
     if(override == true)
     {
@@ -1521,7 +1536,7 @@ void handle_temperature()
     else if (read_temperature == false && millis() - last_temperature > 1000)
     {
       last_temperature = millis();
-      temperature = (Temp_sensors.getTempCByIndex(0) * 100);
+      current_temperature = (Temp_sensors.getTempCByIndex(0) * 100);
       read_temperature = true;
     }
   }
@@ -1578,11 +1593,13 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   handle_temperature();
-  Telegram_handle();
+  handle_MeterValue_receive();
   handle_check_wifi_connection();
   handle_MeterValue_store();
   handle_call_backend();
 }
+
+
 #if defined(ESP32)
 String Log_get_reset_reason()
 {
@@ -1647,11 +1664,11 @@ void Webserver_HandleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
   s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
-  
-  s += "<br>Last Meter Value: "+ String(LastMeterValue.meter_value) + " [1/10 Wh] at ";
-  s += (LastMeterValue.timestamp);
-  s += "<br>Prev Meter Value: "+ String(PrevMeterValue.meter_value) + " [1/10 Wh] at ";
-  s += (PrevMeterValue.timestamp);
+  s += "<table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
+  s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + " Wh</td></tr>";
+  s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
+  s += "</table>";
+
   s += "<br>Telegram Parse config<ul>";
   s += "<li><i>Meter Value Offset:</i> ";
   s += atoi(telegram_offset);
@@ -1661,7 +1678,7 @@ void Webserver_HandleRoot()
   s += atoi(telegram_prefix);
   s += "<li><i>Suffix Begin: </i>";
   s += atoi(telegram_suffix);
-  s += "<li>Detected Meter Value [1/10 Wh]: " + String(MeterValue_get());
+
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
   s += "<li><a href='showTelegram'>Show Telegram</a>";
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
@@ -1748,21 +1765,7 @@ void Webserver_HandleRoot()
   s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
   s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
   s += "</ul>";
-
-  s += "MyStrom config";
-  s += "<ul>";
-  s += "<li><i>MyStrom:</i> ";
-  if (mystrom_PV_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
-
-  s += "<li><i>MyStrom PV IP: </i>";
-  s += mystrom_PV_IP;
-  s += "<li><b>Detected Meter Value PV</b>: " + String(myStrom_get_Meter_value());
-  s += "</ul>";
+ 
   s += "Additional Meter";
   s += "<ul>";
   s += "<li><i>Temperature Sensor:</i> ";
@@ -1772,9 +1775,17 @@ void Webserver_HandleRoot()
   {
     s += "deactivated";
   }
-  s += "<li>Temperature [1/100 C]: ";
-  s += String(temperature);
+  
+  s += "<li><i>MyStrom:</i> ";
+  if (mystrom_PV_object.isChecked())
+    s += "activated";
+  else
+  {
+    s += "deactivated";
+  }
 
+  s += "<li><i>MyStrom IP: </i>";
+  s += mystrom_PV_IP;
   s += "</ul>";
   s += "Debug Helper";
   s += "<ul>";
@@ -1851,16 +1862,9 @@ void Webserver_ShowCert()
 {
   server.send(200, "text/html", String(FullCert));
 }
-void Webserver_ShowMeterValueFromRemote()
-{
-  Serial.println("Webserver MeterValue_get_from_remote ");
-  server.send(200, "text/html", String(MeterValue_get_from_remote()));
-}
 
-void Webserver_ShowTemperature()
-{
-  server.send(200, "text/html", String(temperature));
-}
+
+
 void Webserver_ShowTelegram()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -1916,14 +1920,14 @@ void Webserver_ShowLastMeterValue()
   //   return;
   // }
 
-  // server.send(200, "text/html", String(MeterValue_get()));
+  
 
     StaticJsonDocument<200> jsonDoc;
 
   // Beispiel-Daten
   jsonDoc["meter_value"] = LastMeterValue.meter_value;
   jsonDoc["timestamp"]   = LastMeterValue.timestamp;
-  jsonDoc["temperature"] = temperature; //LastMeterValue.temperature;
+  jsonDoc["temperature"] = LastMeterValue.temperature;
   jsonDoc["solar"]       = LastMeterValue.solar;
 
   String jsonResponse;
