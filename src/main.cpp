@@ -113,6 +113,8 @@ bool meter_value_buffer_full = false;
 int meter_value_override_i = 0;
 int meter_value_NON_override_i = Meter_Value_Buffer_Size-1;
 
+float currentPower, LastPower = 0.0;
+
 // Backend Vars
 bool call_backend_successfull = true;
 SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
@@ -216,6 +218,9 @@ char b_taf7[STRING_LEN];
 char taf7_param[NUMBER_LEN];
 char b_taf14[STRING_LEN];
 char taf14_param[NUMBER_LEN];
+char b_tafdyn[STRING_LEN];
+char tafdyn_absolute[NUMBER_LEN];
+char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char telegram_offset[NUMBER_LEN];
@@ -248,6 +253,9 @@ IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 a
 IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
 IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
 IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+IotWebConfCheckboxParameter tafdyn_b_object = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
+IotWebConfNumberParameter tafdyn_absolute_object = IotWebConfNumberParameter("Dyn Taf absolute Delta", "tafdyn_absolute", tafdyn_absolute, NUMBER_LEN, "100", "Power Delta in Watts", "min='10' max='10000' step='1'");
+IotWebConfNumberParameter tafdyn_multiplicator_object = IotWebConfNumberParameter("Dyn Taf multiplicator ", "tafdyn_multiplicator", tafdyn_multiplicator, NUMBER_LEN, "2", "Power n bigger or 1/n smaller", "min='1' max='10' step='0.1'");
 IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
@@ -361,7 +369,9 @@ String Log_StatusCodeToString(int statusCode)
   case 1015:
     return "not enough heap to store value";
   case 1016:
-    return "Buffer full, cannot store non-override value";    
+    return "Buffer full, cannot store non-override value";  
+  case 1018:
+    return "dynamic Taf trigger";  
   case 1019:
     return "Sending Log";
   case 1020:
@@ -825,6 +835,9 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
+  groupTaf.addItem(&tafdyn_b_object);
+  groupTaf.addItem(&tafdyn_absolute_object);
+  groupTaf.addItem(&tafdyn_multiplicator_object);
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
@@ -1087,7 +1100,7 @@ int32_t MeterValue_get_from_remote()
   Serial.println(meter_value_i32);
   Serial.print(F("Timestamp: "));
   Serial.println(timestamp);
-  if(timestamp >= PrevMeterValue.timestamp + 5 && meter_value_i32 != PrevMeterValue.meter_value)
+  if(timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
   {
     PrevMeterValue = LastMeterValue;
   }
@@ -1118,7 +1131,7 @@ void Telegram_saveCompleteTelegram()
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
   int32_t meter_value = MeterValue_get_from_telegram();
-  if(timestamp_telegram >= PrevMeterValue.timestamp + 5 && meter_value != PrevMeterValue.meter_value)
+  if(timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
   {
     PrevMeterValue = LastMeterValue;
   }
@@ -1562,6 +1575,22 @@ void handle_call_backend()
     }
   }
 }
+void dynTaf()
+{
+  int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;;
+  if (dT > 0 && LastMeterValue.meter_value > PrevMeterValue.meter_value)
+  {
+    currentPower = (float)(360 * (LastMeterValue.meter_value - PrevMeterValue.meter_value)) / (dT);
+    if(currentPower > LastPower * int(tafdyn_multiplicator) || currentPower < LastPower / int(tafdyn_multiplicator) || abs(currentPower-LastPower) >= int(tafdyn_absolute))
+    {
+      MeterValue_store(false);
+      Log_AddEntry(1018);
+    }
+    LastPower = currentPower;
+  }
+  
+
+}
 void handle_MeterValue_store()
 {
   if (
@@ -1586,6 +1615,10 @@ void handle_MeterValue_store()
   {
     Log_AddEntry(1011);
     MeterValue_store(false);
+  }
+  if(tafdyn_b_object.isChecked())
+  {
+    dynTaf();
   }
 }
 void loop()
@@ -1668,8 +1701,16 @@ void Webserver_HandleRoot()
   s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + " Wh</td></tr>";
   s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
   s += "</table>";
-
-  s += "<br>Telegram Parse config<ul>";
+  s += "<br>Dynamic Taf<ul>";
+  s += "<li>Current Power: ";
+  s += String(currentPower);
+  s += "<li>Last Power: ";
+ s += String(LastPower);
+  s += "<li>taf dyn multiplicator: ";
+  s += String(tafdyn_multiplicator);
+  s += "<li> tafdyn absolute: ";
+  s += String(tafdyn_absolute);
+  s += "</ul><br>Telegram Parse config<ul>";
   s += "<li><i>Meter Value Offset:</i> ";
   s += atoi(telegram_offset);
   s += "<li><i>Meter Value length:</i> ";
