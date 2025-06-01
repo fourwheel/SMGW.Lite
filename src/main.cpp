@@ -1695,10 +1695,11 @@ void Webserver_HandleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
   s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
-  s += "<br><br>LastMeterValue<br><table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
+  s += "<br><br><b>LastMeterValue</b><br><table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
   s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + "</td></tr>";
   // s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
   s += "</table>";
+  s += "<<a href='StoreMeterValue'>Store Meter Value Now (Taf6)</a><br>";
 //   s += "<br>Dynamic Taf<ul>";
 //   s += "<li>Current Power: ";
 //   s += String(currentPower);
@@ -1708,18 +1709,22 @@ void Webserver_HandleRoot()
 //   s += String(tafdyn_multiplicator);
 //   s += "<li> tafdyn absolute: ";
 //   s += String(tafdyn_absolute);
-  s += "</ul><br>Telegram Parse config<ul>";
-  s += "<li><i>Meter Value Offset:</i> ";
-  s += atoi(telegram_offset);
-  s += "<li><i>Meter Value length:</i> ";
-  s += atoi(telegram_length);
-  s += "<li><i>Prefix Begin (usualy 0):</i> ";
-  s += atoi(telegram_prefix);
-  s += "<li><i>Suffix Begin: </i>";
-  s += atoi(telegram_suffix);
-
+  s += "<br>Meter Value Buffer";
+  s += "<ul>";
+   s += "<li>Used / Size: ";
+  s += String(MeterValue_Num());
+  s += " / ";
+  s += String(Meter_Value_Buffer_Size);
+  s += "<li>i override: ";
+  s += String(meter_value_override_i);
+  s += "<li>i non override: "; 
+  s += String(meter_value_NON_override_i);
+  s += "<li>Meter Value Buffer Overflow: ";
+  s += String(meter_value_buffer_overflow);
+  s += "<li>Meter Value Buffer Full: ";
+  s += String(meter_value_buffer_full);
+  s += "<li><a href='MeterValue_Num2'>Calculate # Meter Values (alternativ way)</a>";
   s += "<li><a href='showMeterValues'>Show Meter Values</a>";
-  s += "<li><a href='showTelegram'>Show Telegram</a>";
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
   {
     s += "<li><font color=red>Buffer Size changed, please ";
@@ -1734,18 +1739,34 @@ void Webserver_HandleRoot()
   {
     s += "<li><font>";
   }
-  s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Array</a></font>";
+  s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></font>";
+  s +="<li><a href=showLastMeterValue>Show Last Meter Value (JSON)</a>";
+
+  s += "</ul><br>Telegram Parse config<ul>";
+  s += "<li><i>Prefix Begin (usualy 0):</i> ";
+  s += atoi(telegram_prefix);
+  s += "<li><i>Meter Value Offset:</i> ";
+  s += atoi(telegram_offset);
+  s += "<li><i>Meter Value length:</i> ";
+  s += atoi(telegram_length);
+  s += "<li><i>Suffix Begin: </i>";
+  s += atoi(telegram_suffix);
+  s += "<li><a href='showTelegram'>Show Telegram</a>";
+
   s += "</ul>";
   s += "Backend Config";
   s += "<ul>";
 
   s += "<li><i>Backend Endpoint:</i> ";
   s += backend_endpoint;
-
   s += "<li>Backend Host: ";
   s += backend_host;
   s += "<li>Backend Path: ";
   s += backend_path;
+    s += "<li><i>Backend call Minute:</i> ";
+  s += atoi(backend_call_minute);
+   
+  
   s += "<li><i>Backend ID:</i> ";
   s += backend_ID;
   s += "<li><i>Backend Token:</i> ";
@@ -1760,8 +1781,13 @@ void Webserver_HandleRoot()
   s += "<li><a href='showCert'>Show Cert</a>";
   s += "<li><a href='setCert'>Set Cert</a>";
   s += "<li><a href='testBackendConnection'>Test Backend Connection</a>";
+  s += "</i><li>Last Backend Call ago (min): ";
+  s += String((millis() - last_call_backend) / 60000);
+  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
+  s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
+  s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
   s += "</ul>";
-  s += "Taf and Meter Value Buffer Config";
+  s += "Taf Config";
   s += "<ul>";
   s += "<li><i>Taf 7:</i> ";
   if (taf7_b_object.isChecked())
@@ -1780,31 +1806,8 @@ void Webserver_HandleRoot()
     s += "no activated";
   }
   s += "<li><i>Taf14 Read Meter Intervall: </i>";
-  s += atoi(taf14_param);
-  s += "<li><i>Backend call Minute:</i> ";
-  s += atoi(backend_call_minute);
-  s += "<li>Meter Value Buffer used: ";
-  s += String(MeterValue_Num());
-  s += " - <a href='MeterValue_Num2'>Get Meter Value Num2</a>";
-  s += " / ";
-  s += String(Meter_Value_Buffer_Size);
-  s += "<li>i override: ";
-  s += String(meter_value_override_i);
-  s += "<li>i non override: "; 
-  s += String(meter_value_NON_override_i);
-  s += "<li>Meter Value Buffer Overflow: ";
-  s += String(meter_value_buffer_overflow);
-  s += "<li>Meter Value Buffer Full: ";
-  s += String(meter_value_buffer_full);
-  
-  s += "</i><li>Last Backend Call ago (min): ";
-  s += String((millis() - last_call_backend) / 60000);
-  s += "<br><a href='StoreMeterValue'>Store Meter Value (Taf6)</a>";
-  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
-  s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
-  s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
-  s += "</ul>";
- 
+  s += atoi(taf14_param);  
+  s += "</ul>"; 
   s += "Additional Meter";
   s += "<ul>";
   s += "<li><i>Temperature Sensor:</i> ";
