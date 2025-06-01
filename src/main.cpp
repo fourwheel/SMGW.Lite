@@ -835,9 +835,9 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
-  groupTaf.addItem(&tafdyn_b_object);
-  groupTaf.addItem(&tafdyn_absolute_object);
-  groupTaf.addItem(&tafdyn_multiplicator_object);
+  // groupTaf.addItem(&tafdyn_b_object);
+  // groupTaf.addItem(&tafdyn_absolute_object);
+  // groupTaf.addItem(&tafdyn_multiplicator_object);
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
 
@@ -1575,22 +1575,20 @@ void handle_call_backend()
     }
   }
 }
-void dynTaf()
-{
-  int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;;
-  if (dT > 0 && LastMeterValue.meter_value > PrevMeterValue.meter_value)
-  {
-    currentPower = (float)(360 * (LastMeterValue.meter_value - PrevMeterValue.meter_value)) / (dT);
-    if(currentPower > LastPower * int(tafdyn_multiplicator) || currentPower < LastPower / int(tafdyn_multiplicator) || abs(currentPower-LastPower) >= int(tafdyn_absolute))
-    {
-      MeterValue_store(false);
-      Log_AddEntry(1018);
-    }
-    LastPower = currentPower;
-  }
-  
-
-}
+// void dynTaf()
+// {
+//   int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;;
+//   if (dT > 0 && LastMeterValue.meter_value > PrevMeterValue.meter_value)
+//   {
+//     currentPower = (float)(360 * (LastMeterValue.meter_value - PrevMeterValue.meter_value)) / (dT);
+//     if(currentPower > LastPower * int(tafdyn_multiplicator) || currentPower < LastPower / int(tafdyn_multiplicator) || abs(currentPower-LastPower) >= int(tafdyn_absolute))
+//     {
+//       MeterValue_store(false);
+//       Log_AddEntry(1018);
+//     }
+//     LastPower = currentPower;
+//   }
+// }
 void handle_MeterValue_store()
 {
   if (
@@ -1616,10 +1614,10 @@ void handle_MeterValue_store()
     Log_AddEntry(1011);
     MeterValue_store(false);
   }
-  if(tafdyn_b_object.isChecked())
-  {
-    dynTaf();
-  }
+  // if(tafdyn_b_object.isChecked())
+  // {
+  //   dynTaf();
+  // }
 }
 void loop()
 {
@@ -1697,19 +1695,19 @@ void Webserver_HandleRoot()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>" + String(thingName) + "</title></head><body>";
   s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
-  s += "<table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
-  s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + " Wh</td></tr>";
-  s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
+  s += "<br><br>LastMeterValue<br><table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
+  s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + "</td></tr>";
+  // s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
   s += "</table>";
-  s += "<br>Dynamic Taf<ul>";
-  s += "<li>Current Power: ";
-  s += String(currentPower);
-  s += "<li>Last Power: ";
- s += String(LastPower);
-  s += "<li>taf dyn multiplicator: ";
-  s += String(tafdyn_multiplicator);
-  s += "<li> tafdyn absolute: ";
-  s += String(tafdyn_absolute);
+//   s += "<br>Dynamic Taf<ul>";
+//   s += "<li>Current Power: ";
+//   s += String(currentPower);
+//   s += "<li>Last Power: ";
+//  s += String(LastPower);
+//   s += "<li>taf dyn multiplicator: ";
+//   s += String(tafdyn_multiplicator);
+//   s += "<li> tafdyn absolute: ";
+//   s += String(tafdyn_absolute);
   s += "</ul><br>Telegram Parse config<ul>";
   s += "<li><i>Meter Value Offset:</i> ";
   s += atoi(telegram_offset);
@@ -1763,7 +1761,7 @@ void Webserver_HandleRoot()
   s += "<li><a href='setCert'>Set Cert</a>";
   s += "<li><a href='testBackendConnection'>Test Backend Connection</a>";
   s += "</ul>";
-  s += "Meter Values";
+  s += "Taf and Meter Value Buffer Config";
   s += "<ul>";
   s += "<li><i>Taf 7:</i> ";
   if (taf7_b_object.isChecked())
