@@ -1083,7 +1083,7 @@ int32_t MeterValue_get_from_remote()
   Serial.println(body);
 
   // JSON parsen
-  StaticJsonDocument<256> doc;
+  JsonDocument doc;
   DeserializationError error = deserializeJson(doc, body);
 
   if (error) {
@@ -1952,18 +1952,9 @@ void Webserver_ShowTelegram()
 
 void Webserver_ShowLastMeterValue()
 {
-  // -- Let IotWebConf test and handle captive portal requests.
-  // if (iotWebConf.handleCaptivePortal())
-  // {
-  //   // -- Captive portal request were already served.
-  //   return;
-  // }
 
-  
+  JsonDocument jsonDoc;  // Heap-basiert
 
-    StaticJsonDocument<200> jsonDoc;
-
-  // Beispiel-Daten
   jsonDoc["meter_value"] = LastMeterValue.meter_value;
   jsonDoc["timestamp"]   = LastMeterValue.timestamp;
   jsonDoc["temperature"] = LastMeterValue.temperature;
