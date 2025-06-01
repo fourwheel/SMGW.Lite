@@ -2,24 +2,23 @@
 
 Copyright (c) [2025] Laurin Vierrath
 
-Permission is hereby granted, free of charge, to any person obtaining a copy 
-of this software and associated documentation files (the "Software"), to deal 
-in the Software without restriction, including without limitation the rights 
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is provided to 
+of the Software, and to permit persons to whom the Software is provided to
 do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all 
+The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-
 
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
@@ -72,13 +71,12 @@ const char wifiInitialApPassword[] = "password";
 
 #define STATUS_PIN LED_BUILTIN
 
-
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 #define TELEGRAM_LENGTH 512
-#define TELEGRAM_TIMEOUT_MS 30 // timeout for telegramm in ms
-size_t TelegramSizeUsed = 0;  // actual size of stored telegram
+#define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
+size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
 size_t telegram_receive_bufferIndex = 0;          // positoin in serial data butter
 bool readingExtraBytes = false;                   // reading additional bytes?
@@ -86,19 +84,18 @@ uint8_t extraBytes[3];                            // additional bytes after end 
 size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
-uint8_t TELEGRAM[TELEGRAM_LENGTH]; // buffer for entire telegram
+uint8_t TELEGRAM[TELEGRAM_LENGTH];                // buffer for entire telegram
 
-
-// Meter Value Vsrs 
+// Meter Value Vsrs
 
 struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes
   uint32_t meter_value; // 4 Bytes
   uint32_t temperature; // 4 Bytes
-  uint32_t solar; // 4 Bytes
+  uint32_t solar;       // 4 Bytes
 };
-MeterValue *MeterValues = nullptr; // initiaize with nullptr
+MeterValue *MeterValues = nullptr;        // initiaize with nullptr
 MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
 MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 
@@ -111,7 +108,7 @@ int Meter_Value_Buffer_Size = 234;
 bool meter_value_buffer_overflow = false;
 bool meter_value_buffer_full = false;
 int meter_value_override_i = 0;
-int meter_value_NON_override_i = Meter_Value_Buffer_Size-1;
+int meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
 
 float currentPower, LastPower = 0.0;
 
@@ -119,7 +116,6 @@ float currentPower, LastPower = 0.0;
 bool call_backend_successfull = true;
 SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
 unsigned long last_call_backend = 0;
-
 
 // Temperature Vars
 #define ONE_WIRE_BUS 2
@@ -206,7 +202,7 @@ SoftwareSerial mySerial(D5, D6); // RX, TX
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
 char led_blink[STRING_LEN];
-char UseSslCertValue[STRING_LEN]; 
+char UseSslCertValue[STRING_LEN];
 char DebugSetOfflineValue[STRING_LEN];
 char DebugMeterValueFromOtherClient[STRING_LEN];
 char DebugMeterValueFromOtherClientIP[STRING_LEN];
@@ -278,7 +274,7 @@ int Time_getMinutes()
 {
   time_t now = time(nullptr);
   struct tm timeinfo;
-  localtime_r(&now, &timeinfo); 
+  localtime_r(&now, &timeinfo);
 
   return timeinfo.tm_min; // Extract minutes (0–59)
 }
@@ -286,11 +282,11 @@ int Time_getMinutes()
 struct LogEntry
 {
   unsigned long timestamp; // unix timestamp
-  unsigned long uptime;    
-  int statusCode;          
+  unsigned long uptime;
+  int statusCode;
 };
 LogEntry logBuffer[LOG_BUFFER_SIZE];
-int logIndex = -1; 
+int logIndex = -1;
 void LogBuffer_reset()
 {
   for (int i = 0; i < LOG_BUFFER_SIZE; ++i)
@@ -331,7 +327,6 @@ void MeterValue_init_Buffer()
     Log_AddEntry(1002);
   }
 
-
   MeterValues_clear_Buffer();
 }
 
@@ -369,9 +364,9 @@ String Log_StatusCodeToString(int statusCode)
   case 1015:
     return "not enough heap to store value";
   case 1016:
-    return "Buffer full, cannot store non-override value";  
+    return "Buffer full, cannot store non-override value";
   case 1018:
-    return "dynamic Taf trigger";  
+    return "dynamic Taf trigger";
   case 1019:
     return "Sending Log";
   case 1020:
@@ -489,8 +484,9 @@ String Log_BufferToString(int showNumber)
 
   return logString + "</table>";
 }
-void resetMeterValue(MeterValue &val) {
-  val = MeterValue{};  // unset all fields to zero
+void resetMeterValue(MeterValue &val)
+{
+  val = MeterValue{}; // unset all fields to zero
 }
 void MeterValues_clear_Buffer()
 {
@@ -508,11 +504,11 @@ void MeterValues_clear_Buffer()
 }
 int MeterValue_Num()
 {
-  if(meter_value_buffer_full == true || meter_value_buffer_overflow == true)
+  if (meter_value_buffer_full == true || meter_value_buffer_overflow == true)
   {
     return Meter_Value_Buffer_Size;
   }
- return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
+  return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
 }
 int MeterValue_Num2()
 {
@@ -523,7 +519,6 @@ int MeterValue_Num2()
     {
       count++;
     }
-
   }
   return count;
 }
@@ -544,15 +539,15 @@ void Webserver_ShowMeterValues()
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    if(MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
+    if (MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
+    {
+      if (first)
       {
-        if(first)
-        {
-          first = false;
-          MeterValues_string += "<tr><td>-----</td></tr>";
-        }
-        continue; // skip empty entries
+        first = false;
+        MeterValues_string += "<tr><td>-----</td></tr>";
       }
+      continue; // skip empty entries
+    }
     MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
   }
   MeterValues_string += "</table>";
@@ -622,7 +617,6 @@ void Webserver_TestBackendConnection()
                "Host: " + backend_host + "\r\n" +
                "Connection: close\r\n\r\n");
 
-
   unsigned long timeout = millis();
   while (client.available() == 0)
   {
@@ -642,7 +636,7 @@ void Webserver_TestBackendConnection()
   }
 
   // check response code
-  if (response.indexOf("200") != -1) // 
+  if (response.indexOf("200") != -1) //
   {
     res += "<br>ID & Token valid.";
   }
@@ -699,7 +693,6 @@ void Webclient_loadCertToChar()
   file.close();
 }
 
-
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
@@ -720,7 +713,7 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
   }
 
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
-  vTaskDelete(NULL);  // delete task when finished
+  vTaskDelete(NULL); // delete task when finished
 }
 
 void Webserver_UrlConfig()
@@ -735,13 +728,11 @@ void Webserver_UrlConfig()
   server.on("/showMeterValues", Webserver_ShowMeterValues);
   server.on("/showLogBuffer", Webserver_ShowLogBuffer);
   server.on("/MeterValue_Num2", Webserver_MeterValue_Num2);
-  
 
   server.on("/upload", []
             {
                 Webserver_HandleCertUpload();
-                Webclient_loadCertToChar(); 
-            });
+                Webclient_loadCertToChar(); });
 
   server.on("/config", []
             { iotWebConf.handleConfig(); });
@@ -749,44 +740,36 @@ void Webserver_UrlConfig()
             { 
                 Webserver_LocationHrefHome(5);
                 delay(100);
-                ESP.restart(); 
-            });
+                ESP.restart(); });
   server.on("/resetLogBuffer", []
             { 
                 Webserver_LocationHrefHome();
-                LogBuffer_reset(); 
-            });
+                LogBuffer_reset(); });
   server.on("/StoreMeterValue", []
             { Webserver_LocationHrefHome();
               Log_AddEntry(1006);
-              MeterValue_store(true);
-            });
+              MeterValue_store(true); });
   server.on("/MeterValue_init_Buffer", []
             { MeterValue_init_Buffer();
-              Webserver_LocationHrefHome(); 
-            });
+              Webserver_LocationHrefHome(); });
   server.on("/sendboth_Task", []
             { 
               Webserver_LocationHrefHome(2);
               Webclient_Send_Meter_Values_to_backend_wrapper();
-              Webclient_Send_Log_to_backend_wrapper(); 
-            });
+              Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendStatus_Task", []
             { 
               Webserver_LocationHrefHome(2);
-              Webclient_Send_Log_to_backend_wrapper(); 
-            });
+              Webclient_Send_Log_to_backend_wrapper(); });
 
   server.on("/sendMeterValues_Task", []
             { 
               Webserver_LocationHrefHome(2);
-              Webclient_Send_Meter_Values_to_backend_wrapper(); 
-            });
+              Webclient_Send_Meter_Values_to_backend_wrapper(); });
 
   server.on("/setOffline", []
             { wifi_connected = false;
-              Webserver_LocationHrefHome(); 
-            });
+              Webserver_LocationHrefHome(); });
 
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
@@ -924,7 +907,6 @@ bool Telegram_prefix_suffix_correct()
   }
 }
 
-
 int32_t MeterValue_get_from_telegram()
 {
   int offset = atoi(telegram_offset);
@@ -952,7 +934,7 @@ void myStrom_get_Meter_value()
     LastMeterValue.solar = 0;
     return;
   }
-  
+
   Serial.println(F("myStrom_get_Meter_value Connecting..."));
 
   // Connect to HTTP server
@@ -1018,14 +1000,12 @@ void myStrom_get_Meter_value()
   }
 
   // Extract values
-  LastMeterValue.temperature = doc["temperature"].as<float>()*100;
+  LastMeterValue.temperature = doc["temperature"].as<float>() * 100;
   LastMeterValue.solar = doc["energy_since_boot"].as<int>();
 
   // Disconnect
   client.stop();
 }
-
-
 
 int32_t MeterValue_get_from_remote()
 {
@@ -1034,7 +1014,8 @@ int32_t MeterValue_get_from_remote()
   WiFiClient client;
   client.setTimeout(2000);
 
-  if (!client.connect(DebugMeterValueFromOtherClientIP, 80)) {
+  if (!client.connect(DebugMeterValueFromOtherClientIP, 80))
+  {
     Serial.println(F("Connection failed"));
     return -1;
   }
@@ -1053,12 +1034,17 @@ int32_t MeterValue_get_from_remote()
   String fullResponse = "";
   unsigned long startTime = millis();
 
-  while (client.connected() || client.available()) {
-    if (client.available()) {
+  while (client.connected() || client.available())
+  {
+    if (client.available())
+    {
       char c = client.read();
       fullResponse += c;
-    } else {
-      if (millis() - startTime > 5000) {
+    }
+    else
+    {
+      if (millis() - startTime > 5000)
+      {
         Serial.println(F("Timeout while reading response"));
         break;
       }
@@ -1071,13 +1057,14 @@ int32_t MeterValue_get_from_remote()
 
   // Header vom Body trennen
   int bodyIndex = fullResponse.indexOf("\r\n\r\n");
-  if (bodyIndex == -1) {
+  if (bodyIndex == -1)
+  {
     Serial.println(F("No HTTP body found"));
     return -2;
   }
 
-  String body = fullResponse.substring(bodyIndex + 4);  // +"4"because of  "\r\n\r\n"
-  body.trim();  // remove leading/trailing whitespace
+  String body = fullResponse.substring(bodyIndex + 4); // +"4"because of  "\r\n\r\n"
+  body.trim();                                         // remove leading/trailing whitespace
 
   Serial.println(F("Extracted Body:"));
   Serial.println(body);
@@ -1086,7 +1073,8 @@ int32_t MeterValue_get_from_remote()
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, body);
 
-  if (error) {
+  if (error)
+  {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
     return -3;
@@ -1100,21 +1088,19 @@ int32_t MeterValue_get_from_remote()
   Serial.println(meter_value_i32);
   Serial.print(F("Timestamp: "));
   Serial.println(timestamp);
-  if(timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
+  if (timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
   {
     PrevMeterValue = LastMeterValue;
   }
-  resetMeterValue(LastMeterValue); // reset LastMeterValue
+  resetMeterValue(LastMeterValue);                 // reset LastMeterValue
   LastMeterValue.meter_value = doc["meter_value"]; // save meter value
-  LastMeterValue.timestamp = doc["timestamp"]; // save timestamp
+  LastMeterValue.timestamp = doc["timestamp"];     // save timestamp
   LastMeterValue.temperature = doc["temperature"]; // save temperature
-  LastMeterValue.solar = doc["solar"]; // no solar value from remote
+  LastMeterValue.solar = doc["solar"];             // no solar value from remote
   client.stop();
   timestamp_telegram = timestamp;
   return meter_value_i32;
 }
-
-
 
 void Telegram_saveCompleteTelegram()
 {
@@ -1131,20 +1117,18 @@ void Telegram_saveCompleteTelegram()
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
   int32_t meter_value = MeterValue_get_from_telegram();
-  if(timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
+  if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
   {
     PrevMeterValue = LastMeterValue;
   }
-  resetMeterValue(LastMeterValue); // reset LastMeterValue
-  LastMeterValue.meter_value = meter_value; // get meter value from telegram
+  resetMeterValue(LastMeterValue);               // reset LastMeterValue
+  LastMeterValue.meter_value = meter_value;      // get meter value from telegram
   LastMeterValue.timestamp = timestamp_telegram; // save timestamp
-  if(temperature_object.isChecked())
+  if (temperature_object.isChecked())
   {
     LastMeterValue.temperature = current_temperature;
-  }  
-
+  }
 }
-
 
 void Telegram_ResetReceiveBuffer()
 {
@@ -1155,9 +1139,9 @@ void Telegram_ResetReceiveBuffer()
 
 void handle_MeterValue_receive()
 {
-  if(DebugFromOtherClient_object.isChecked())
+  if (DebugFromOtherClient_object.isChecked())
   {
-    if(last_remote_meter_value + 5000 < millis())
+    if (last_remote_meter_value + 5000 < millis())
     {
       last_remote_meter_value = millis();
       MeterValue_get_from_remote();
@@ -1175,8 +1159,8 @@ void handle_MeterValue_receive()
 
       if (extraIndex == 3)
       {
-        Telegram_saveCompleteTelegram(); 
-        Telegram_ResetReceiveBuffer();   
+        Telegram_saveCompleteTelegram();
+        Telegram_ResetReceiveBuffer();
       }
       continue;
     }
@@ -1216,7 +1200,7 @@ void handle_MeterValue_receive()
   {
     // Serial.println("Error: Timeout!");
     // Log_AddEntry(3002);
-    Telegram_ResetReceiveBuffer(); 
+    Telegram_ResetReceiveBuffer();
   }
 }
 
@@ -1252,7 +1236,6 @@ void Webclient_send_log_to_backend()
   }
   memcpy(logDataBuffer, logBuffer, logBufferSize);
 
-
   String logHeader = "POST ";
   logHeader += backend_path;
   logHeader += "log.php HTTP/1.1\r\n";
@@ -1267,7 +1250,7 @@ void Webclient_send_log_to_backend()
   client.print(logHeader);
   client.write(logDataBuffer, logBufferSize);
 
-  free(logDataBuffer); 
+  free(logDataBuffer);
 
   while (client.connected() || client.available())
   {
@@ -1329,9 +1312,8 @@ void Webclient_send_meter_values_to_backend()
     return;
   }
 
-  
   size_t bufferSize = Meter_Value_Buffer_Size * sizeof(MeterValue);
-  
+
   uint8_t *buffer = (uint8_t *)malloc(bufferSize);
   if (!buffer)
   {
@@ -1340,7 +1322,6 @@ void Webclient_send_meter_values_to_backend()
   }
   memcpy(buffer, MeterValues, bufferSize);
 
-  
   String header = "POST ";
   header += backend_path;
   header += "?ID=";
@@ -1357,7 +1338,6 @@ void Webclient_send_meter_values_to_backend()
   header += "&transmittedValues=";
   header += String(MeterValue_Num());
 
-
   header += " HTTP/1.1\r\n";
 
   header += "Host: ";
@@ -1367,7 +1347,6 @@ void Webclient_send_meter_values_to_backend()
   header += "Content-Length: " + String(bufferSize) + "\r\n";
   header += "Connection: close\r\n\r\n";
 
-  
   client.print(header);
   client.write(buffer, bufferSize);
 
@@ -1422,7 +1401,7 @@ void MeterValue_store(bool override)
 
   // var where to write
   int write_i = 0;
-  if(override)
+  if (override)
   {
     write_i = meter_value_override_i;
   }
@@ -1431,32 +1410,29 @@ void MeterValue_store(bool override)
     write_i = meter_value_NON_override_i;
   }
   Serial.println("where to write: " + String(write_i));
-  
 
-  if(MeterValues[write_i].timestamp == 0
-    && MeterValues[write_i].meter_value == 0
-    && MeterValues[write_i].temperature == 0)
-    {
-      // if place where wo want to write is full we assume entire buffer is used
-      meter_value_buffer_full = false;
-    }
-  else 
+  if (MeterValues[write_i].timestamp == 0 && MeterValues[write_i].meter_value == 0 && MeterValues[write_i].temperature == 0)
+  {
+    // if place where wo want to write is full we assume entire buffer is used
+    meter_value_buffer_full = false;
+  }
+  else
   {
     meter_value_buffer_full = true;
   }
-  
+
   // if I shall override, go ahead.
   // If I must not override, I need to be sure that buffer not full yet
-  if(override == true || meter_value_buffer_full == false)
+  if (override == true || meter_value_buffer_full == false)
   {
     if (mystrom_PV_object.isChecked())
     {
       myStrom_get_Meter_value();
     }
     MeterValues[write_i] = LastMeterValue; // copy last meter value to buffer
-     
+
     // calculate next writing location
-    if(override == true)
+    if (override == true)
     {
       // increase counter as we are writing ascending
       meter_value_override_i++;
@@ -1476,24 +1452,21 @@ void MeterValue_store(bool override)
         meter_value_buffer_overflow = true;
       }
     }
-
   }
-  else {
+  else
+  {
     Log_AddEntry(1016);
     Serial.println("Buffer Full, no space to write new value!");
   }
-
-
 }
 
 void handle_check_wifi_connection()
 {
   wl_status_t current_wifi_status = WiFi.status();
-  if(DebugSetOffline_object.isChecked())
+  if (DebugSetOffline_object.isChecked())
   {
     current_wifi_status = WL_CONNECTION_LOST;
   }
-
 
   if (millis() - last_wifi_check > 500)
   {
@@ -1534,8 +1507,6 @@ void handle_check_wifi_connection()
   }
 }
 
-
-
 void handle_temperature()
 {
   if (temperature_object.isChecked())
@@ -1559,13 +1530,8 @@ void handle_call_backend()
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
     if (
-      (!call_backend_successfull && millis() - last_call_backend > 30000) 
-    || (
-      (Time_getMinutes()) % atoi(backend_call_minute) == 0 
-      && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
-      && millis() - last_call_backend > 60000
-     )
-    )
+        (!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()) % atoi(backend_call_minute) == 0 && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
+                                                                                && millis() - last_call_backend > 60000))
     {
       Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true)
@@ -1592,10 +1558,9 @@ void handle_call_backend()
 void handle_MeterValue_store()
 {
   if (
-    taf7_b_object.isChecked() &&
-    ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
-    (millis() - last_taf7_meter_value > 45000)
-  )
+      taf7_b_object.isChecked() &&
+      ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
+      (millis() - last_taf7_meter_value > 45000))
   {
     last_taf7_meter_value = millis();
     Log_AddEntry(1010);
@@ -1607,9 +1572,8 @@ void handle_MeterValue_store()
     MeterValue_store(true);
   }
   if (
-    taf14_b_object.isChecked() && 
-    millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param))
-  )
+      taf14_b_object.isChecked() &&
+      millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
   {
     Log_AddEntry(1011);
     MeterValue_store(false);
@@ -1629,7 +1593,6 @@ void loop()
   handle_MeterValue_store();
   handle_call_backend();
 }
-
 
 #if defined(ESP32)
 String Log_get_reset_reason()
@@ -1678,7 +1641,7 @@ String Time_formatUptime()
   int minutes = uptimeSeconds / 60;
   int seconds = uptimeSeconds % 60;
 
-  // formatting 
+  // formatting
   char buffer[20];
   sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
   return String(buffer);
@@ -1691,212 +1654,239 @@ void Webserver_HandleRoot()
     // -- Captive portal request were already served.
     return;
   }
+  String s;
+  s.reserve(8000);
 
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>" + String(thingName) + "</title></head><body>";
-  s += "<br>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.";
-  s += "<br><br><b>LastMeterValue</b><br><table border=1><tr><td>time</td><td>Meter Value</td><td>Temperature</td><td>Solar</td></tr>";
-  s += "<tr><td>"+String(Time_getEpochTime()-LastMeterValue.timestamp) + " s ago</td><td>"+ String(LastMeterValue.meter_value) + "</td><td>"+ String(LastMeterValue.temperature / 100.0) + " C</td><td>"+ String(LastMeterValue.solar) + "</td></tr>";
-  // s += "<tr><td>"+String(Time_getEpochTime()-PrevMeterValue.timestamp) + " s ago</td><td>"+ String(PrevMeterValue.meter_value) + "</td><td>"+ String(PrevMeterValue.temperature / 100.0) + " C</td><td>"+ String(PrevMeterValue.solar) + " Wh</td></tr>";
-  s += "</table>";
-  s += "<<a href='StoreMeterValue'>Store Meter Value Now (Taf6)</a><br>";
-//   s += "<br>Dynamic Taf<ul>";
-//   s += "<li>Current Power: ";
-//   s += String(currentPower);
-//   s += "<li>Last Power: ";
-//  s += String(LastPower);
-//   s += "<li>taf dyn multiplicator: ";
-//   s += String(tafdyn_multiplicator);
-//   s += "<li> tafdyn absolute: ";
-//   s += String(tafdyn_absolute);
-  s += "<br>Meter Value Buffer";
-  s += "<ul>";
-   s += "<li>Used / Size: ";
-  s += String(MeterValue_Num());
-  s += " / ";
-  s += String(Meter_Value_Buffer_Size);
-  s += "<li>i override: ";
-  s += String(meter_value_override_i);
-  s += "<li>i non override: "; 
-  s += String(meter_value_NON_override_i);
-  s += "<li>Meter Value Buffer Overflow: ";
-  s += String(meter_value_buffer_overflow);
-  s += "<li>Meter Value Buffer Full: ";
-  s += String(meter_value_buffer_full);
-  s += "<li><a href='MeterValue_Num2'>Calculate # Meter Values (alternativ way)</a>";
-  s += "<li><a href='showMeterValues'>Show Meter Values</a>";
+  s += R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>)rawliteral";
+  s += thingName;
+  s += R"rawliteral(</title>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    table { border-collapse: collapse; width: 100%; max-width: 700px; }
+    th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+    ul { list-style-type: square; padding-left: 20px; }
+    li { margin-bottom: 0.3em; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    font[color="red"] { color: red; }
+  </style>
+</head>
+<body>
+
+<p>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.</p>
+
+<h2>Last Meter Value</h2>
+<table>
+  <tr><th>Time</th><th>Meter Value</th><th>Temperature</th><th>Solar</th></tr>
+  <tr>
+    <td>)rawliteral";
+  s += String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago";
+  s += R"rawliteral(</td>
+    <td>)rawliteral";
+  s += String(LastMeterValue.meter_value);
+  s += R"rawliteral(</td>
+    <td>)rawliteral";
+  s += String(LastMeterValue.temperature / 100.0) + " °C";
+  s += R"rawliteral(</td>
+    <td>)rawliteral";
+  s += String(LastMeterValue.solar);
+  s += R"rawliteral(</td>
+  </tr>
+</table>
+
+<p><a href='StoreMeterValue'>Store Meter Value Now (Taf6)</a></p>
+
+<h3>Meter Value Buffer</h3>
+<ul>
+  <li>Used / <i>Size</i>: )rawliteral" +
+       String(MeterValue_Num()) + " / " + String(Meter_Value_Buffer_Size) + R"rawliteral(</li>
+  <li>i override: )rawliteral" +
+       String(meter_value_override_i) + R"rawliteral(</li>
+  <li>i non override: )rawliteral" +
+       String(meter_value_NON_override_i) + R"rawliteral(</li>
+  <li>Meter Value Buffer Overflow: )rawliteral" +
+       String(meter_value_buffer_overflow) + R"rawliteral(</li>
+  <li>Meter Value Buffer Full: )rawliteral" +
+       String(meter_value_buffer_full) + R"rawliteral(</li>
+  <li><a href='MeterValue_Num2'>Calculate # Meter Values (alternative way)</a></li>
+  <li><a href='showMeterValues'>Show Meter Values</a></li>
+)rawliteral";
+
   if (Meter_Value_Buffer_Size != atoi(Meter_Value_Buffer_Size_Char))
   {
-    s += "<li><font color=red>Buffer Size changed, please ";
+    s += "<li><font color='red'>Buffer Size changed, please ";
     if (MeterValue_Num() > 0)
     {
-      s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (";
-      s += String(MeterValue_Num());
-      s += ") Meter Values and ";
+      s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (" +
+           String(MeterValue_Num()) + ") Meter Values and ";
     }
+    s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></font></li>\n";
   }
   else
   {
-    s += "<li><font>";
+    s += "<li><a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></li>\n";
   }
-  s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></font>";
-  s +="<li><a href=showLastMeterValue>Show Last Meter Value (JSON)</a>";
 
-  s += "</ul><br>Telegram Parse config<ul>";
-  s += "<li><i>Prefix Begin (usualy 0):</i> ";
-  s += atoi(telegram_prefix);
-  s += "<li><i>Meter Value Offset:</i> ";
-  s += atoi(telegram_offset);
-  s += "<li><i>Meter Value length:</i> ";
-  s += atoi(telegram_length);
-  s += "<li><i>Suffix Begin: </i>";
-  s += atoi(telegram_suffix);
-  s += "<li><a href='showTelegram'>Show Telegram</a>";
+  s += R"rawliteral(
+  <li><a href='showLastMeterValue'>Show Last Meter Value (JSON)</a></li>
+</ul>
 
-  s += "</ul>";
-  s += "Backend Config";
-  s += "<ul>";
+<h3>Telegram Parse Config</h3>
+<ul>
+  <li><i>Prefix Begin (usually 0):</i> )rawliteral";
+  s += String(atoi(telegram_prefix));
+  s += R"rawliteral(</li>
+  <li><i>Meter Value Offset:</i> )rawliteral";
+  s += String(atoi(telegram_offset));
+  s += R"rawliteral(</li>
+  <li><i>Meter Value Length:</i> )rawliteral";
+  s += String(atoi(telegram_length));
+  s += R"rawliteral(</li>
+  <li><i>Suffix Begin:</i> )rawliteral";
+  s += String(atoi(telegram_suffix));
+  s += R"rawliteral(</li>
+  <li><a href='showTelegram'>Show Telegram</a></li>
+</ul>
 
-  s += "<li><i>Backend Endpoint:</i> ";
+<h3>Backend Config</h3>
+<ul>
+  <li><i>Backend Endpoint:</i> )rawliteral";
   s += backend_endpoint;
-  s += "<li>Backend Host: ";
+  s += R"rawliteral(</li>
+  <li>Backend Host: )rawliteral";
   s += backend_host;
-  s += "<li>Backend Path: ";
+  s += R"rawliteral(</li>
+  <li>Backend Path: )rawliteral";
   s += backend_path;
-    s += "<li><i>Backend call Minute:</i> ";
-  s += atoi(backend_call_minute);
-   
-  
-  s += "<li><i>Backend ID:</i> ";
+  s += R"rawliteral(</li>
+  <li><i>Backend Call Minute:</i> )rawliteral";
+  s += String(atoi(backend_call_minute));
+  s += R"rawliteral(</li>
+  <li><i>Backend ID:</i> )rawliteral";
   s += backend_ID;
-  s += "<li><i>Backend Token:</i> ";
+  s += R"rawliteral(</li>
+  <li><i>Backend Token:</i> )rawliteral";
   s += backend_token;
-  s += "<li><i>Wirk-PKI (Use SSL Cert):</i> ";
-  if (UseSslCert_object.isChecked())
-    s += "true";
-  else
-  {
-    s += "false";
-  }
-  s += "<li><a href='showCert'>Show Cert</a>";
-  s += "<li><a href='setCert'>Set Cert</a>";
-  s += "<li><a href='testBackendConnection'>Test Backend Connection</a>";
-  s += "</i><li>Last Backend Call ago (min): ";
+  s += R"rawliteral(</li>
+  <li><i>Use SSL Cert:</i> )rawliteral";
+  s += (UseSslCert_object.isChecked() ? "true" : "false");
+  s += R"rawliteral(</li>
+  <li><a href='showCert'>Show Cert</a></li>
+  <li><a href='setCert'>Set Cert</a></li>
+  <li><a href='testBackendConnection'>Test Backend Connection</a></li>
+  <li>Last Backend Call ago (min): )rawliteral";
   s += String((millis() - last_call_backend) / 60000);
-  s += "<br><a href='sendStatus_Task'>Send Status Report to Backend</a>";
-  s += "<br><a href='sendMeterValues_Task'>Send Meter Values to Backend</a>";
-  s += "<br><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a>";
-  s += "</ul>";
-  s += "Taf Config";
-  s += "<ul>";
-  s += "<li><i>Taf 7:</i> ";
-  if (taf7_b_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "no activated";
-  }
-  s += "<li><i>Taf7 minute param: </i>";
-  s += atoi(taf7_param);
-  s += "<li><i>Taf 14:</i> ";
-  if (taf14_b_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "no activated";
-  }
-  s += "<li><i>Taf14 Read Meter Intervall: </i>";
-  s += atoi(taf14_param);  
-  s += "</ul>"; 
-  s += "Additional Meter";
-  s += "<ul>";
-  s += "<li><i>Temperature Sensor:</i> ";
-  if (temperature_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
-  
-  s += "<li><i>MyStrom:</i> ";
-  if (mystrom_PV_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
+  s += R"rawliteral(</li>
+  <li><a href='sendStatus_Task'>Send Status Report to Backend</a></li>
+  <li><a href='sendMeterValues_Task'>Send Meter Values to Backend</a></li>
+  <li><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a></li>
+</ul>
 
-  s += "<li><i>MyStrom IP: </i>";
+<h3>Taf Config</h3>
+<ul>
+  <li><i>Taf 7:</i> )rawliteral";
+  s += (taf7_b_object.isChecked() ? "activated" : "not activated");
+  s += R"rawliteral(</li>
+  <li><i>Taf7 minute param:</i> )rawliteral";
+  s += String(atoi(taf7_param));
+  s += R"rawliteral(</li>
+  <li><i>Taf 14:</i> )rawliteral";
+  s += (taf14_b_object.isChecked() ? "activated" : "not activated");
+  s += R"rawliteral(</li>
+  <li><i>Taf14 Read Meter Interval:</i> )rawliteral";
+  s += String(atoi(taf14_param));
+  s += R"rawliteral(</li>
+</ul>
+
+<h3>Additional Meter</h3>
+<ul>
+  <li><i>Temperature Sensor:</i> )rawliteral";
+  s += (temperature_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</li>
+  <li><i>MyStrom:</i> )rawliteral";
+  s += (mystrom_PV_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</li>
+  <li><i>MyStrom IP:</i> )rawliteral";
   s += mystrom_PV_IP;
-  s += "</ul>";
-  s += "Debug Helper";
-  s += "<ul>";
-  s += "<li><i>Set Device Offline:</i> ";
-  if (DebugSetOffline_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
-  s += "<li><i>Get Meter Values from other SMGWLite:</i> ";
-  if (DebugFromOtherClient_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
-  s += "<li><i>Remote Client IP</i>: ";
+  s += R"rawliteral(</li>
+</ul>
+
+<h3>Debug Helper</h3>
+<ul>
+  <li><i>Set Device Offline:</i> )rawliteral";
+  s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</li>
+  <li><i>Get Meter Values from other SMGWLite:</i> )rawliteral";
+  s += (DebugFromOtherClient_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</li>
+  <li><i>Remote Client IP:</i> )rawliteral";
   s += String(DebugMeterValueFromOtherClientIP);
+  s += R"rawliteral(</li>
+</ul>
 
-  s += "</ul>";
-
-  s += "System Info";
-  s += "<ul>";
-  s += "<li><i>LED blink:</i> ";
-  if (led_blink_object.isChecked())
-    s += "activated";
-  else
-  {
-    s += "deactivated";
-  }
-  s += "<li>Water Mark Main Task: ";
+<h3>System Info</h3>
+<ul>
+  <li><i>LED blink:</i> )rawliteral";
+  s += (led_blink_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</li>
+  <li>Water Mark Main Task: )rawliteral";
   s += String(uxTaskGetStackHighWaterMark(NULL));
-  s += "<li>Water Mark meter Values: ";
+  s += R"rawliteral(</li>
+  <li>Water Mark Meter Values: )rawliteral";
   s += String(watermark_meter_buffer);
-  s += "<li>Water Mark Logs: ";
+  s += R"rawliteral(</li>
+  <li>Water Mark Logs: )rawliteral";
   s += String(watermark_log_buffer);
-  s += "<li>Uptime (min): ";
+  s += R"rawliteral(</li>
+  <li>Uptime (min): )rawliteral";
   s += Time_formatUptime();
+  s += R"rawliteral(</li>
+)rawliteral";
 
 #if defined(ESP32)
-
-  s += "<li>Reset Reason: ";
-  s += Log_get_reset_reason();
+  s += "<li>Reset Reason: " + Log_get_reset_reason() + "</li>\n";
 #elif defined(ESP8266)
-
-  s += "<li>Reset Reason: ";
-  s += String(/*esp_reset_reason()*/ ESP.getResetReason());
-  s += " / ";
-  s += String(/*esp_reset_reason()*/ ESP.getResetInfo());
+  s += "<li>Reset Reason: " + String(ESP.getResetReason()) + " / " + String(ESP.getResetInfo()) + "</li>\n";
 #endif
 
-  s += "<li>System time (UTC): ";
-  s += String(Time_getFormattedTime());
-  s += " / ";
-  s += String(Time_getEpochTime());
-  s += "<li>Build Time: "+String(BUILD_TIMESTAMP);
-  s += "<li>Free Heap: ";
+  s += R"rawliteral(
+  <li>System time (UTC): )rawliteral";
+  s += String(Time_getFormattedTime()) + " / " + String(Time_getEpochTime());
+  s += R"rawliteral(</li>
+  <li>Build Time: )rawliteral";
+  s += String(BUILD_TIMESTAMP);
+  s += R"rawliteral(</li>
+  <li>Free Heap: )rawliteral";
   s += String(ESP.getFreeHeap());
-  s += "<li>Log Buffer Length (max): " + String(LOG_BUFFER_SIZE);
-  s += "<br><a href='showLogBuffer'>Show entire Logbuffer</a>";
-  s += "<br><a href='resetLogBuffer'>Reset Log</a>";
-  s += "<br><a href='restart'>Restart</a>";
-  s += "</ul>";
+  s += R"rawliteral(</li>
+  <li>Log Buffer Length (max): )rawliteral";
+  s += String(LOG_BUFFER_SIZE);
+  s += R"rawliteral(</li>
+  <li><a href='restart'>Restart</a></li>
+</ul>
 
-  s += "<br><br>Log Buffer (last 10 entries / current buffer index " + String(logIndex) + ")<br>";
+
+
+
+<h3>Log Buffer (last 10 entries / current buffer index )rawliteral";
+s += String(logIndex);
+s += R"rawliteral()</h3>
+<ul>
+  <li><a href='showLogBuffer'>Show entire Logbuffer</a></li>
+  <li><a href='resetLogBuffer'>Reset Log</a></li>
+)rawliteral";
   s += Log_BufferToString(10);
+  s += R"rawliteral(
 
-  s += "<br></body></html>\n";
+</body>
+</html>
+)rawliteral";
 
   server.send(200, "text/html", s);
 }
@@ -1904,8 +1894,6 @@ void Webserver_ShowCert()
 {
   server.send(200, "text/html", String(FullCert));
 }
-
-
 
 void Webserver_ShowTelegram()
 {
@@ -1917,8 +1905,8 @@ void Webserver_ShowTelegram()
   }
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
 
-  s += "<br>Received Telegram @ "+String(timestamp_telegram) + " = " +Time_formatTimestamp(timestamp_telegram) + ": "+String(Time_getEpochTime()-timestamp_telegram)+"s old<br><table border=1>";
-  
+  s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br><table border=1>";
+
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
 
@@ -1956,12 +1944,12 @@ void Webserver_ShowTelegram()
 void Webserver_ShowLastMeterValue()
 {
 
-  JsonDocument jsonDoc;  // Heap-basiert
+  JsonDocument jsonDoc; // Heap-basiert
 
   jsonDoc["meter_value"] = LastMeterValue.meter_value;
-  jsonDoc["timestamp"]   = LastMeterValue.timestamp;
+  jsonDoc["timestamp"] = LastMeterValue.timestamp;
   jsonDoc["temperature"] = LastMeterValue.temperature;
-  jsonDoc["solar"]       = LastMeterValue.solar;
+  jsonDoc["solar"] = LastMeterValue.solar;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);
