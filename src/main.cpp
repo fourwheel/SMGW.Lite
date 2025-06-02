@@ -267,8 +267,9 @@ IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParam
 
 const char HTML_STYLE[] PROGMEM = R"rawliteral(
   <style>
-    body { font-family: sans-serif; margin: 1em; }
-    table { border-collapse: collapse; width: 100%; max-width: 700px; }
+    html, body { overflow-x: auto; max-width: 100%; }
+    body { font-family: sans-serif; margin: 1em;   column-width: 600px; column-gap: 40px;}
+    table { display: block; overflow-x: auto; white-space: nowrap; border-collapse: collapse; max-width: 100%;   }
     th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
     ul { list-style-type: square; padding-left: 20px; }
     li { margin-bottom: 0.3em; }
