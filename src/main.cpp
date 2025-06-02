@@ -265,6 +265,20 @@ IotWebConfTextParameter DebugMeterValueFromOtherClientIP_object = IotWebConfText
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
+const char HTML_STYLE[] PROGMEM = R"rawliteral(
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    table { border-collapse: collapse; width: 100%; max-width: 700px; }
+    th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+    ul { list-style-type: square; padding-left: 20px; }
+    li { margin-bottom: 0.3em; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    font[color="red"] { color: red; }
+  </style>
+)rawliteral";
+
+
 unsigned long Time_getEpochTime()
 {
   return static_cast<unsigned long>(time(nullptr));
@@ -456,7 +470,9 @@ String Log_EntryToString(int i)
 String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
-  String logString = "<table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
+  String logString = "<html><head><title>SMGWLite - Meter Values</title>";
+  logString += String(HTML_STYLE);
+  logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
   for (int i = logIndex; i >= 0; i--)
@@ -529,12 +545,15 @@ void Webserver_LocationHrefHome(int delay)
 }
 void Webserver_MeterValue_Num2()
 {
-  String MeterValueNum = String(MeterValue_Num2());
+  String MeterValueNum = "<html><head><title>SMGWLite - Alternative Amount Meter Value</title> " + String(HTML_STYLE) + "</head><body>"+String(MeterValue_Num2())+"</body></html>";
   server.send(200, "text/html", MeterValueNum);
 }
 void Webserver_ShowMeterValues()
 {
-  String MeterValues_string = "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
+  String MeterValues_string = "<html><head>";
+  MeterValues_string += "<title>SMGWLite - Meter Values</title>";
+  MeterValues_string += String(HTML_STYLE);
+  MeterValues_string += "</head><body><table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
   int count = 1;
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -590,22 +609,22 @@ void Webserver_TestBackendConnection()
   WiFiClientSecure client;
   client.setCACert(FullCert);
 
-  String res;
+  String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body>";
 
   if (client.connect(backend_host.c_str(), 443))
   {
-    res = "Host reachable,<br>Cert correct";
+    res += "Host reachable,<br>Cert correct";
   }
   else
   {
     client.setInsecure(); // If Cert not accepted, try without
     if (client.connect(backend_host.c_str(), 443))
     {
-      res = "Host reachable<br>Cert not working.";
+      res += "Host reachable<br>Cert not working.";
     }
     else
     {
-      res = "Host not reachable.";
+      res += "Host not reachable.";
       server.send(200, "text/html", res);
       return;
     }
@@ -1665,10 +1684,11 @@ void Webserver_HandleRoot()
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
   <title>)rawliteral";
   s += thingName;
-  s += R"rawliteral(</title>
-  <style>
+  s += R"rawliteral(</title>)rawliteral";
+  s += HTML_STYLE;
+  s += R"rawliteral(<style>
     body { font-family: sans-serif; margin: 1em; }
-    table { border-collapse: collapse; width: 100%; max-width: 700px; }
+    table { border-collapse: collapse; width: 100%; max-width: 7<00px; }
     th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
     ul { list-style-type: square; padding-left: 20px; }
     li { margin-bottom: 0.3em; }
@@ -1904,7 +1924,8 @@ void Webserver_ShowTelegram()
     return;
   }
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-
+  s += "<title>SMGWLite - Show Telegram</title>";
+  s += HTML_STYLE;
   s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br><table border=1>";
 
   if (!Telegram_prefix_suffix_correct())
