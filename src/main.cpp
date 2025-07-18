@@ -411,7 +411,7 @@ String Log_StatusCodeToString(int statusCode)
   case 5000:
     return "myStrom_get_Meter_value Connection failed";
   case 5001:
-    return "Failed to connect to mystrom";
+    return "Failed to connect to myStrom";
   case 5002:
     return "myStrom_get_Meter_value deserializeJson() failed";
   case 7000:
