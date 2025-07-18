@@ -408,6 +408,12 @@ String Log_StatusCodeToString(int statusCode)
     return "Telegram too big for buffer";
   case 4000:
     return "Connection to server failed (Cert!?)";
+  case 5000:
+    return "myStrom_get_Meter_value Connection failed";
+  case 5001:
+    return "Failed to connect to myStrom";
+  case 5002:
+    return "myStrom_get_Meter_value deserializeJson() failed";
   case 7000:
     return "Stopping Wifi, Backendcall unsuccessfull";
   case 7001:
@@ -962,6 +968,7 @@ void myStrom_get_Meter_value()
   client.setTimeout(1000);
   if (!client.connect(mystrom_PV_IP, 80))
   {
+    Log_AddEntry(5000);
     Serial.println(F("myStrom_get_Meter_value Connection failed"));
     LastMeterValue.solar = -1;
     return;
@@ -976,7 +983,8 @@ void myStrom_get_Meter_value()
   client.println(F("Connection: close"));
   if (client.println() == 0)
   {
-    Serial.println(F("Failed to send request"));
+    Log_AddEntry(5001);
+    Serial.println(F("Failed to connect to mystrom"));
     client.stop();
     LastMeterValue.solar = -2;
     return;
@@ -1012,6 +1020,7 @@ void myStrom_get_Meter_value()
   DeserializationError error = deserializeJson(doc, client);
   if (error)
   {
+    Log_AddEntry(5002);
     Serial.print(F("myStrom_get_Meter_value deserializeJson() failed: "));
     Serial.println(error.f_str());
     client.stop();
