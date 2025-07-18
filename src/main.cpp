@@ -1421,7 +1421,7 @@ void MeterValue_store(bool override)
     return;
   }
 
-  if (meter_value == previous_meter_value)
+  if (meter_value == previous_meter_value && !mystrom_PV_object.isChecked())
   {
     Log_AddEntry(1201);
     return;
