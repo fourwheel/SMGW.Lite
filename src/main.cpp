@@ -102,7 +102,6 @@ MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 unsigned long last_meter_value = 0;
 long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
-unsigned long previous_meter_value = 0;
 
 int Meter_Value_Buffer_Size = 234;
 bool meter_value_buffer_overflow = false;
@@ -1448,19 +1447,25 @@ void MeterValue_store(bool override)
     return;
   }
 
-  int32_t meter_value = LastMeterValue.meter_value;
-  if (meter_value <= 0)
+  if (mystrom_PV_object.isChecked())
+  {
+    myStrom_get_Meter_value();
+  }
+
+  if (LastMeterValue.meter_value <= 0)
   {
     Log_AddEntry(1200);
     return;
   }
 
-  if (meter_value == previous_meter_value && !mystrom_PV_object.isChecked())
+  if (LastMeterValue.meter_value == PrevMeterValue.meter_value
+    && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
     return;
   }
-  previous_meter_value = meter_value;
+  PrevMeterValue = LastMeterValue; // save last meter value as previous
+
 
   // var where to write
   int write_i = 0;
@@ -1488,10 +1493,7 @@ void MeterValue_store(bool override)
   // If I must not override, I need to be sure that buffer not full yet
   if (override == true || meter_value_buffer_full == false)
   {
-    if (mystrom_PV_object.isChecked())
-    {
-      myStrom_get_Meter_value();
-    }
+
     MeterValues[write_i] = LastMeterValue; // copy last meter value to buffer
 
     // calculate next writing location
