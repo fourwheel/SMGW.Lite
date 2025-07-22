@@ -799,6 +799,40 @@ void Webserver_UrlConfig()
 
   server.onNotFound([]()
                     { iotWebConf.handleNotFound(); });
+
+  // OTA Update Handler
+  server.on("/update", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", 
+      "<form method='POST' action='/update' enctype='multipart/form-data'>"
+      "<input type='file' name='update'>"
+      "<input type='submit' value='Update'>"
+      "</form>");
+  });
+
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "Update Failed" : "Update Successful. Rebooting...");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update Start: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
 }
 
 void setup()
@@ -810,7 +844,7 @@ void setup()
   mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
 
   Serial.println();
-  Serial.println("Starting up...HELLAU!");
+  Serial.println("Starting up...Hello!");
 
   Param_setup();
   Led_update_Blink();
@@ -1898,6 +1932,7 @@ void Webserver_HandleRoot()
   <li>Log Buffer Length (max): )rawliteral";
   s += String(LOG_BUFFER_SIZE);
   s += R"rawliteral(</li>
+  <li><a href='update'>FW Update</a></li>
   <li><a href='restart'>Restart</a></li>
 </ul>
 
