@@ -1936,10 +1936,12 @@ void Webserver_ShowTelegram()
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>SMGWLite - Show Telegram</title>";
   s += HTML_STYLE;
-  s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br><table border=1>";
 
+  s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
+  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
+
 
   String color;
 
@@ -1963,7 +1965,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">" + String(TELEGRAM[i], HEX) + "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td>"+String(telegram_receive_buffer[i], HEX)+"</td><td " + String(color) + ">" + String(TELEGRAM[i], HEX) + "</td></tr>";
   }
   s += "</table";
 
