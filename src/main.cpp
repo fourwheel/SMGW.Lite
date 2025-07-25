@@ -102,7 +102,6 @@ MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 unsigned long last_meter_value = 0;
 long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
-unsigned long previous_meter_value = 0;
 
 int Meter_Value_Buffer_Size = 234;
 bool meter_value_buffer_overflow = false;
@@ -248,7 +247,7 @@ IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend 
 IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
 IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
 IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
-IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "5..100 s", "min='5' max='100' step='1'");
+IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "1..100 s", "min='1' max='100' step='1'");
 IotWebConfCheckboxParameter tafdyn_b_object = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
 IotWebConfNumberParameter tafdyn_absolute_object = IotWebConfNumberParameter("Dyn Taf absolute Delta", "tafdyn_absolute", tafdyn_absolute, NUMBER_LEN, "100", "Power Delta in Watts", "min='10' max='10000' step='1'");
 IotWebConfNumberParameter tafdyn_multiplicator_object = IotWebConfNumberParameter("Dyn Taf multiplicator ", "tafdyn_multiplicator", tafdyn_multiplicator, NUMBER_LEN, "2", "Power n bigger or 1/n smaller", "min='1' max='10' step='0.1'");
@@ -1151,10 +1150,10 @@ int32_t MeterValue_get_from_remote()
   Serial.println(meter_value_i32);
   Serial.print(F("Timestamp: "));
   Serial.println(timestamp);
-  if (timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
-  {
-    PrevMeterValue = LastMeterValue;
-  }
+  // if (timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
+  // {
+  //   PrevMeterValue = LastMeterValue;
+  // }
   resetMeterValue(LastMeterValue);                 // reset LastMeterValue
   LastMeterValue.meter_value = doc["meter_value"]; // save meter value
   LastMeterValue.timestamp = doc["timestamp"];     // save timestamp
@@ -1440,7 +1439,7 @@ void Webclient_send_meter_values_to_backend()
 void MeterValue_store(bool override)
 {
 
-  last_meter_value = millis();
+  
   if (ESP.getFreeHeap() < 1000)
   {
     Log_AddEntry(1015);
@@ -1448,19 +1447,26 @@ void MeterValue_store(bool override)
     return;
   }
 
-  int32_t meter_value = LastMeterValue.meter_value;
-  if (meter_value <= 0)
+  if (mystrom_PV_object.isChecked())
+  {
+    myStrom_get_Meter_value();
+  }
+
+  if (LastMeterValue.meter_value <= 0)
   {
     Log_AddEntry(1200);
     return;
   }
 
-  if (meter_value == previous_meter_value)
+  if (LastMeterValue.meter_value == PrevMeterValue.meter_value
+    && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
+    last_meter_value += 1000;
     return;
   }
-  previous_meter_value = meter_value;
+  PrevMeterValue = LastMeterValue; // save last meter value as previous
+  last_meter_value = millis();
 
   // var where to write
   int write_i = 0;
@@ -1488,10 +1494,7 @@ void MeterValue_store(bool override)
   // If I must not override, I need to be sure that buffer not full yet
   if (override == true || meter_value_buffer_full == false)
   {
-    if (mystrom_PV_object.isChecked())
-    {
-      myStrom_get_Meter_value();
-    }
+
     MeterValues[write_i] = LastMeterValue; // copy last meter value to buffer
 
     // calculate next writing location
@@ -1636,7 +1639,7 @@ void handle_MeterValue_store()
   }
   if (
       taf14_b_object.isChecked() &&
-      millis() - last_meter_value > 1000UL * max(5UL, (unsigned long)atoi(taf14_param)))
+      millis() - last_meter_value > 1000UL * max(1UL, (unsigned long)atoi(taf14_param)))
   {
     Log_AddEntry(1011);
     MeterValue_store(false);
