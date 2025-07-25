@@ -99,6 +99,10 @@ MeterValue *MeterValues = nullptr;        // initiaize with nullptr
 MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
 MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 
+bool MeterValue_trigger_taf7 = false;
+bool MeterValue_trigger_taf14 = false;
+
+
 unsigned long last_meter_value = 0;
 long last_taf7_meter_value = -100000;
 long last_taf14_meter_value = -100000;
@@ -142,6 +146,7 @@ unsigned long last_remote_meter_value = 0;
 // -- Forward declarations.
 void handle_call_backend();
 void handle_check_wifi_connection();
+void handle_MeterValue_trigger();
 void handle_MeterValue_store();
 void handle_temperature();
 void Led_update_Blink();
@@ -1621,7 +1626,7 @@ void handle_call_backend()
 //     LastPower = currentPower;
 //   }
 // }
-void handle_MeterValue_store()
+void handle_MeterValue_trigger()
 {
   if (
       taf7_b_object.isChecked() &&
@@ -1656,6 +1661,7 @@ void loop()
   handle_temperature();
   handle_MeterValue_receive();
   handle_check_wifi_connection();
+  handle_MeterValue_trigger();
   handle_MeterValue_store();
   handle_call_backend();
 }
