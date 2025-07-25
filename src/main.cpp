@@ -186,6 +186,7 @@ void Webserver_ShowLastMeterValue();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
 void Webserver_ShowTelegram();
+void Webserver_ShowTelegram_Raw();
 void Webserver_TestBackendConnection();
 void Webserver_UrlConfig();
 
@@ -746,6 +747,7 @@ void Webserver_UrlConfig()
   // -- Set up required URL handlers on the web server.
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
+  server.on("/showTelegramRaw", Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);
@@ -1818,7 +1820,7 @@ void Webserver_HandleRoot()
   <li><i>Suffix Begin:</i> )rawliteral";
   s += String(atoi(telegram_suffix));
   s += R"rawliteral(</li>
-  <li><a href='showTelegram'>Show Telegram</a></li>
+  <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
 </ul>
 
 <h3>Backend Config</h3>
@@ -1963,6 +1965,44 @@ void Webserver_ShowCert()
   server.send(200, "text/html", String(FullCert));
 }
 
+void Webserver_ShowTelegram_Raw()
+{
+  String s = "Receive Buffer<br><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i]);
+  }
+
+  s += "</textarea><br><br>Validated Telegram<br><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i]);
+  }
+  s += "</textarea>";
+  s += "<br>Receive Buffer Hex<br><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i], HEX);
+  }
+
+  s += "</textarea><br><br>Validated Telegram Hex<br><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i], HEX);
+  }
+  s += "</textarea>";
+  server.send(200, "text/html", s);
+
+}
+
 void Webserver_ShowTelegram()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -1975,9 +2015,9 @@ void Webserver_ShowTelegram()
   s += "<title>SMGWLite - Show Telegram</title>";
   s += HTML_STYLE;
 
-  s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
   s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
-  
+  s += "<br>Last Validated Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+    
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
   s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
