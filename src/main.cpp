@@ -1235,7 +1235,7 @@ void handle_MeterValue_receive()
     else
     {
       // Serial.println("Error: Buffer Overflow!");
-      // Log_AddEntry(3001);
+      Log_AddEntry(3001);
       Telegram_ResetReceiveBuffer();
       continue;
     }
@@ -1976,6 +1976,8 @@ void Webserver_ShowTelegram()
   s += HTML_STYLE;
 
   s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+  s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
+  
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
   s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
@@ -1984,14 +1986,16 @@ void Webserver_ShowTelegram()
   String color;
 
   int signature_7101 = 9999;
+  int k = 0;
   for (int i = 0; i < TELEGRAM_LENGTH; i++)
   {
-    if (i < TELEGRAM_LENGTH - 5 && TELEGRAM[i] == 7 && TELEGRAM[i + 1] == 1 && TELEGRAM[i + 2] == 0 && TELEGRAM[i + 3] == 1 && TELEGRAM[i + 4] == 8)
+    if (i < TELEGRAM_LENGTH - 5 && telegram_receive_buffer[i - k] == 7 && telegram_receive_buffer[i + 1 - k] == 1 && telegram_receive_buffer[i + 2 - k] == 0 && telegram_receive_buffer[i + 3 - k] == 1 && telegram_receive_buffer[i + 4 - k] == 8)
     {
       color = "bgcolor=959018";
       signature_7101 = i;
+      if(k<5) k++;
     }
-    else if (i > signature_7101 && TELEGRAM[i] == 0x77)
+    else if (i > signature_7101 && telegram_receive_buffer[i] == 0x77)
     {
       signature_7101 = 9999;
       color = "bgcolor=959018";
@@ -2003,7 +2007,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td>"+String(telegram_receive_buffer[i], HEX)+"</td><td " + String(color) + ">" + String(TELEGRAM[i], HEX) + "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + String(TELEGRAM[i], HEX) + "</td></tr>";
   }
   s += "</table";
 
