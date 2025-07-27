@@ -55,7 +55,7 @@ const char wifiInitialApPassword[] = "password";
 #define NUMBER_LEN 5
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "2905"
+#define CONFIG_VERSION "2607"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
@@ -157,7 +157,8 @@ void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-int32_t MeterValue_get_from_telegram();
+int32_t MeterValue_get_from_SML_telegram();
+int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -219,7 +220,7 @@ char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char telegram_offset[NUMBER_LEN];
-char telegram_length[NUMBER_LEN];
+char telegram_MeterValue_length[NUMBER_LEN];
 char telegram_prefix[NUMBER_LEN];
 char telegram_suffix[NUMBER_LEN];
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
@@ -235,9 +236,10 @@ IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanc
 IotWebConfParameterGroup groupDebug = IotWebConfParameterGroup("groupDebug", "Debug Helpers");
 
 IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
+IotWebConfNumberParameter telegram_MeterValue_length_object = IotWebConfNumberParameter("MeterValue Length", "telegram_MeterValue_length_object", telegram_MeterValue_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_suffix_object = IotWebConfNumberParameter("Suffix Begin", "telegram_suffix", telegram_suffix, NUMBER_LEN, "100", "1..TELEGRAM_LENGTH", "min='100' max='TELEGRAM_LENGTH' step='1'");
+
 
 IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
@@ -867,7 +869,7 @@ void setup()
 void Param_setup()
 {
   groupTelegram.addItem(&telegram_offset_object);
-  groupTelegram.addItem(&telegram_length_object);
+  groupTelegram.addItem(&telegram_MeterValue_length_object);
   groupTelegram.addItem(&telegram_prefix_object);
   groupTelegram.addItem(&telegram_suffix_object);
   groupBackend.addItem(&backend_endpoint_object);
@@ -966,10 +968,10 @@ bool Telegram_prefix_suffix_correct()
   }
 }
 
-int32_t MeterValue_get_from_telegram()
+int32_t MeterValue_get_from_SML_telegram()
 {
   int offset = atoi(telegram_offset);
-  int length = atoi(telegram_length);
+  int length = atoi(telegram_MeterValue_length);
   int32_t meter_value = -1;
 
   if (!Telegram_prefix_suffix_correct())
@@ -983,6 +985,44 @@ int32_t MeterValue_get_from_telegram()
     meter_value += TELEGRAM[offset + i] << 8 * shift;
   }
   return meter_value;
+}
+
+int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
+  // Temporären Null-terminierten String anlegen
+  char telegram_str[length + 1];
+  memcpy(telegram_str, buffer, length);
+  telegram_str[length] = '\0'; // Null-terminieren
+
+  // Suche nach "1-0:1.8.0"
+  const char *obis = strstr(telegram_str, "1-0:1.8.0");
+  if (!obis) {
+    return -1; // OBIS-Code nicht gefunden
+  }
+
+  // Suche nach '(' und '*'
+  const char *openParen = strchr(obis, '(');
+  const char *star = strchr(obis, '*');
+  if (!openParen || !star || openParen > star) {
+    return -2; // Formatproblem
+  }
+
+  // Wert extrahieren
+  char valueStr[16];
+  size_t len = star - openParen - 1;
+  if (len >= sizeof(valueStr)) {
+    return -3; // Zu lang
+  }
+
+  strncpy(valueStr, openParen + 1, len);
+  valueStr[len] = '\0';
+
+  // Komma durch Punkt ersetzen (falls nötig)
+  for (int i = 0; valueStr[i]; i++) {
+    if (valueStr[i] == ',') valueStr[i] = '.';
+  }
+
+  float kWh = atof(valueStr);
+  return (int32_t)(kWh * 1000.0); // Umwandlung in Wh
 }
 
 void myStrom_get_Meter_value()
@@ -1178,7 +1218,7 @@ void Telegram_saveCompleteTelegram()
   memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
-  int32_t meter_value = MeterValue_get_from_telegram();
+  int32_t meter_value = MeterValue_get_from_SML_telegram();
   if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
   {
     PrevMeterValue = LastMeterValue;
@@ -1813,7 +1853,7 @@ void Webserver_HandleRoot()
   s += String(atoi(telegram_offset));
   s += R"rawliteral(</li>
   <li><i>Meter Value Length:</i> )rawliteral";
-  s += String(atoi(telegram_length));
+  s += String(atoi(telegram_MeterValue_length));
   s += R"rawliteral(</li>
   <li><i>Suffix Begin:</i> )rawliteral";
   s += String(atoi(telegram_suffix));
@@ -1996,7 +2036,7 @@ void Webserver_ShowTelegram()
       signature_7101 = 9999;
       color = "bgcolor=959018";
     }
-    else if (i >= atoi(telegram_offset) && i < atoi(telegram_offset) + atoi(telegram_length))
+    else if (i >= atoi(telegram_offset) && i < atoi(telegram_offset) + atoi(telegram_MeterValue_length))
     {
 
       color = "bgcolor=cccccc";
