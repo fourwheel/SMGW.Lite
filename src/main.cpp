@@ -104,8 +104,8 @@ bool MeterValue_trigger_non_override = false;
 
 
 unsigned long last_meter_value = 0;
-long last_taf7_meter_value = -100000;
-long last_taf14_meter_value = -100000;
+unsigned long last_taf7_meter_value = 0;
+unsigned long last_taf14_meter_value = 0;
 
 int Meter_Value_Buffer_Size = 234;
 bool meter_value_buffer_overflow = false;
@@ -395,6 +395,8 @@ String Log_StatusCodeToString(int statusCode)
     return "Sending Log successful";
   case 1021:
     return "call_backend successful";
+  case 1022:
+    return "taf14 trigger not possible, buffer full";
   case 1200:
     return "meter value <= 0";
   case 1201:
@@ -567,7 +569,7 @@ void Webserver_ShowMeterValues()
   String MeterValues_string = "<html><head>";
   MeterValues_string += "<title>SMGWLite - Meter Values</title>";
   MeterValues_string += String(HTML_STYLE);
-  MeterValues_string += "</head><body><table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
+  MeterValues_string += "</head><body><table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
   int count = 1;
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -579,9 +581,9 @@ void Webserver_ShowMeterValues()
         first = false;
         MeterValues_string += "<tr><td>-----</td></tr>";
       }
-      continue; // skip empty entries
+      continue; // skip empty entries 
     }
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(Time_formatTimestamp(MeterValues[m].timestamp)) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -1188,10 +1190,10 @@ void Telegram_saveCompleteTelegram()
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
   int32_t meter_value = MeterValue_get_from_telegram();
-  if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
-  {
-    PrevMeterValue = LastMeterValue;
-  }
+  // if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
+  // {
+  //   PrevMeterValue = LastMeterValue;
+  // }
   resetMeterValue(LastMeterValue);               // reset LastMeterValue
   LastMeterValue.meter_value = meter_value;      // get meter value from telegram
   LastMeterValue.timestamp = timestamp_telegram; // save timestamp
@@ -1471,7 +1473,7 @@ bool MeterValue_store(bool override)
     Log_AddEntry(1201);
     return false;
   }
-  PrevMeterValue = LastMeterValue; // save last meter value as previous
+
   
 
   // var where to write
@@ -1528,8 +1530,12 @@ bool MeterValue_store(bool override)
   else
   {
     Log_AddEntry(1016);
+    MeterValue_trigger_non_override = false; //deactivate so that is not retriggered
+    return false;
     Serial.println("Buffer Full, no space to write new value!");
   }
+  
+  PrevMeterValue = LastMeterValue; // save last meter value as previous
   return true;
 }
 
@@ -1628,12 +1634,19 @@ void handle_call_backend()
 //     LastPower = currentPower;
 //   }
 // }
+unsigned long last_meter_value_attempt = 0;
 void handle_MeterValue_store()
 {
-  if(millis() - last_meter_value < 1000)
+  if(!MeterValue_trigger_override && !MeterValue_trigger_non_override)
+  {
+    return; // nothing to do
+  }
+  if(millis() - last_meter_value_attempt < 1000)
   {
     return;
   }
+  last_meter_value_attempt = millis();
+
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
@@ -1657,15 +1670,15 @@ void handle_MeterValue_store()
   if(retVal == true)
   {
     Log_AddEntry(1017);
-    
+    last_taf14_meter_value = millis();
     last_meter_value = millis();
     MeterValue_trigger_override = false;
     MeterValue_trigger_non_override = false;
   }
-  else
-  {
-    last_meter_value += 1000;
-  }
+  // else
+  // {
+  //   last_meter_value += 1000;
+  // }
 }
 
 
@@ -1688,12 +1701,23 @@ void handle_MeterValue_trigger()
     MeterValue_trigger_override = true;
     
   }
-  if (MeterValue_trigger_non_override == false &&
+  if (MeterValue_trigger_override == false &&
+      MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
-      millis() - last_meter_value > 1000UL * max(1UL, (unsigned long)atoi(taf14_param)))
+      millis() - last_meter_value >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
+      millis() - last_taf14_meter_value >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param))
+    )
   {
-    Log_AddEntry(1011);
-    MeterValue_trigger_non_override = true;
+    if(meter_value_buffer_full == true)
+    {
+      last_taf14_meter_value = millis();
+      Log_AddEntry(9999);
+    }
+    else
+    {
+      Log_AddEntry(1011);
+      MeterValue_trigger_non_override = true;
+    }
   }
   // if(tafdyn_b_object.isChecked())
   // {
