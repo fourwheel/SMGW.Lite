@@ -1967,31 +1967,31 @@ void Webserver_ShowCert()
 
 void Webserver_ShowTelegram_Raw()
 {
-  String s = "Receive Buffer<br><textarea name='cert' rows='10' cols='80'>";
+  String  s = "<div class='block'>Receive Buffer</div><textarea name='cert' rows='10' cols='80'>";
   for(int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     if (i > 0)
       s += " ";
     s += String(telegram_receive_buffer[i]);
   }
-
-  s += "</textarea><br><br>Validated Telegram<br><textarea name='cert' rows='10' cols='80'>";
-  for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  {
-    if (i > 0)
-      s += " ";
-    s += String(telegram_receive_buffer[i]);
-  }
-  s += "</textarea>";
-  s += "<br>Receive Buffer Hex<br><textarea name='cert' rows='10' cols='80'>";
+  s += "</textarea><br><br><div class='block'>Receive Buffer Hex</div><textarea name='cert' rows='10' cols='80'>";
   for(int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     if (i > 0)
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
   }
+  s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i]);
+  }
+ 
 
-  s += "</textarea><br><br>Validated Telegram Hex<br><textarea name='cert' rows='10' cols='80'>";
+
+  s += "<br><br></textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
   for(int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     if (i > 0)
