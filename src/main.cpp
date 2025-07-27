@@ -99,8 +99,8 @@ MeterValue *MeterValues = nullptr;        // initiaize with nullptr
 MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
 MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 
-bool MeterValue_trigger_taf7 = false;
-bool MeterValue_trigger_taf14 = false;
+bool MeterValue_trigger_override = false;
+bool MeterValue_trigger_non_override = false;
 
 
 unsigned long last_meter_value = 0;
@@ -156,7 +156,7 @@ String Log_StatusCodeToString(int statusCode);
 #if defined(ESP32)
 String Log_get_reset_reason();
 #endif
-void MeterValue_store(bool override);
+bool MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
 void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
@@ -174,7 +174,7 @@ int Time_getMinutes();
 bool Telegram_prefix_suffix_correct();
 void Telegram_saveCompleteTelegram();
 void Telegram_ResetReceiveBuffer();
-void handle_MeterValue_receive();
+void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
 void Webclient_Send_Log_to_backend_Task(void *pvParameters);
 void Webclient_Send_Log_to_backend_wrapper();
@@ -385,6 +385,8 @@ String Log_StatusCodeToString(int statusCode)
     return "not enough heap to store value";
   case 1016:
     return "Buffer full, cannot store non-override value";
+  case 1017:
+    return "Meter Value stored";
   case 1018:
     return "dynamic Taf trigger";
   case 1019:
@@ -483,7 +485,7 @@ String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
   String logString = "<html><head><title>SMGWLite - Meter Values</title>";
-  logString += String(HTML_STYLE);
+  //logString += String(HTML_STYLE);
   logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
@@ -780,7 +782,7 @@ void Webserver_UrlConfig()
   server.on("/StoreMeterValue", []
             { Webserver_LocationHrefHome();
               Log_AddEntry(1006);
-              MeterValue_store(true); });
+              MeterValue_trigger_override = true;});
   server.on("/MeterValue_init_Buffer", []
             { MeterValue_init_Buffer();
               Webserver_LocationHrefHome(); });
@@ -1206,7 +1208,7 @@ void Telegram_ResetReceiveBuffer()
   extraIndex = 0;
 }
 
-void handle_MeterValue_receive()
+void handle_Telegram_receive()
 {
   if (DebugFromOtherClient_object.isChecked())
   {
@@ -1443,15 +1445,13 @@ void Webclient_send_meter_values_to_backend()
   client.stop();
 }
 
-void MeterValue_store(bool override)
+bool MeterValue_store(bool override)
 {
-
-  
   if (ESP.getFreeHeap() < 1000)
   {
     Log_AddEntry(1015);
     Serial.println("Not enough free heap to store another value");
-    return;
+    return false;
   }
 
   if (mystrom_PV_object.isChecked())
@@ -1462,18 +1462,17 @@ void MeterValue_store(bool override)
   if (LastMeterValue.meter_value <= 0)
   {
     Log_AddEntry(1200);
-    return;
+    return false;
   }
 
   if (LastMeterValue.meter_value == PrevMeterValue.meter_value
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
-    last_meter_value += 1000;
-    return;
+    return false;
   }
   PrevMeterValue = LastMeterValue; // save last meter value as previous
-  last_meter_value = millis();
+  
 
   // var where to write
   int write_i = 0;
@@ -1531,6 +1530,7 @@ void MeterValue_store(bool override)
     Log_AddEntry(1016);
     Serial.println("Buffer Full, no space to write new value!");
   }
+  return true;
 }
 
 void handle_check_wifi_connection()
@@ -1628,28 +1628,72 @@ void handle_call_backend()
 //     LastPower = currentPower;
 //   }
 // }
+void handle_MeterValue_store()
+{
+  if(millis() - last_meter_value < 1000)
+  {
+    return;
+  }
+  bool retVal = false;
+  if (MeterValue_trigger_override == true)
+  {
+    retVal = MeterValue_store(true);
+    if(retVal == true)
+    {
+      last_taf7_meter_value = millis();
+    }
+
+  }
+  else if (MeterValue_trigger_non_override == true)
+  {
+    
+    retVal = MeterValue_store(false);
+   if(retVal == true)
+    {
+      last_taf14_meter_value = millis();
+    }
+  }
+
+  if(retVal == true)
+  {
+    Log_AddEntry(1017);
+    
+    last_meter_value = millis();
+    MeterValue_trigger_override = false;
+    MeterValue_trigger_non_override = false;
+  }
+  else
+  {
+    last_meter_value += 1000;
+  }
+}
+
+
 void handle_MeterValue_trigger()
 {
-  if (
+  if (MeterValue_trigger_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000))
   {
-    last_taf7_meter_value = millis();
+    
     Log_AddEntry(1010);
-    MeterValue_store(true);
+    MeterValue_trigger_override = true;
+    
   }
-  if (!wifi_connected && millis() - last_meter_value > 900000)
+  if (MeterValue_trigger_override == false && 
+    !wifi_connected && millis() - last_meter_value > 900000)
   {
     Log_AddEntry(1014);
-    MeterValue_store(true);
+    MeterValue_trigger_override = true;
+    
   }
-  if (
+  if (MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
       millis() - last_meter_value > 1000UL * max(1UL, (unsigned long)atoi(taf14_param)))
   {
     Log_AddEntry(1011);
-    MeterValue_store(false);
+    MeterValue_trigger_non_override = true;
   }
   // if(tafdyn_b_object.isChecked())
   // {
@@ -1661,7 +1705,7 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   handle_temperature();
-  handle_MeterValue_receive();
+  handle_Telegram_receive();
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
