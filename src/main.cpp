@@ -186,6 +186,7 @@ void Webserver_ShowLastMeterValue();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
 void Webserver_ShowTelegram();
+void Webserver_ShowTelegram_Raw();
 void Webserver_TestBackendConnection();
 void Webserver_UrlConfig();
 
@@ -746,6 +747,7 @@ void Webserver_UrlConfig()
   // -- Set up required URL handlers on the web server.
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
+  server.on("/showTelegramRaw", Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
   server.on("/showCert", Webserver_ShowCert);
   server.on("/setCert", Webserver_SetCert);
@@ -1235,7 +1237,7 @@ void handle_MeterValue_receive()
     else
     {
       // Serial.println("Error: Buffer Overflow!");
-      // Log_AddEntry(3001);
+      Log_AddEntry(3001);
       Telegram_ResetReceiveBuffer();
       continue;
     }
@@ -1818,7 +1820,7 @@ void Webserver_HandleRoot()
   <li><i>Suffix Begin:</i> )rawliteral";
   s += String(atoi(telegram_suffix));
   s += R"rawliteral(</li>
-  <li><a href='showTelegram'>Show Telegram</a></li>
+  <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
 </ul>
 
 <h3>Backend Config</h3>
@@ -1963,6 +1965,44 @@ void Webserver_ShowCert()
   server.send(200, "text/html", String(FullCert));
 }
 
+void Webserver_ShowTelegram_Raw()
+{
+  String  s = "<div class='block'>Receive Buffer</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i]);
+  }
+  s += "</textarea><br><br><div class='block'>Receive Buffer Hex</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i], HEX);
+  }
+  s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i]);
+  }
+ 
+
+
+  s += "<br><br></textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    if (i > 0)
+      s += " ";
+    s += String(telegram_receive_buffer[i], HEX);
+  }
+  s += "</textarea>";
+  server.send(200, "text/html", s);
+
+}
+
 void Webserver_ShowTelegram()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -1975,7 +2015,9 @@ void Webserver_ShowTelegram()
   s += "<title>SMGWLite - Show Telegram</title>";
   s += HTML_STYLE;
 
-  s += "<br>Received Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+  s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
+  s += "<br>Last Validated Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+    
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
   s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
@@ -1984,14 +2026,16 @@ void Webserver_ShowTelegram()
   String color;
 
   int signature_7101 = 9999;
+  int k = 0;
   for (int i = 0; i < TELEGRAM_LENGTH; i++)
   {
-    if (i < TELEGRAM_LENGTH - 5 && TELEGRAM[i] == 7 && TELEGRAM[i + 1] == 1 && TELEGRAM[i + 2] == 0 && TELEGRAM[i + 3] == 1 && TELEGRAM[i + 4] == 8)
+    if (i < TELEGRAM_LENGTH - 5 && telegram_receive_buffer[i - k] == 7 && telegram_receive_buffer[i + 1 - k] == 1 && telegram_receive_buffer[i + 2 - k] == 0 && telegram_receive_buffer[i + 3 - k] == 1 && telegram_receive_buffer[i + 4 - k] == 8)
     {
       color = "bgcolor=959018";
       signature_7101 = i;
+      if(k<5) k++;
     }
-    else if (i > signature_7101 && TELEGRAM[i] == 0x77)
+    else if (i > signature_7101 && telegram_receive_buffer[i] == 0x77)
     {
       signature_7101 = 9999;
       color = "bgcolor=959018";
@@ -2003,7 +2047,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td>"+String(telegram_receive_buffer[i], HEX)+"</td><td " + String(color) + ">" + String(TELEGRAM[i], HEX) + "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + String(TELEGRAM[i], HEX) + "</td></tr>";
   }
   s += "</table";
 
