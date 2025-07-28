@@ -74,7 +74,7 @@ const char wifiInitialApPassword[] = "password";
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-#define TELEGRAM_LENGTH 512
+#define TELEGRAM_LENGTH 1000
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
 size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
@@ -158,6 +158,7 @@ int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
 int32_t MeterValue_get_from_telegram();
+int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -987,6 +988,44 @@ int32_t MeterValue_get_from_telegram()
   return meter_value;
 }
 
+int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
+  // Temporären Null-terminierten String anlegen
+  char telegram_str[length + 1];
+  memcpy(telegram_str, buffer, length);
+  telegram_str[length] = '\0'; // Null-terminieren
+
+  // Suche nach "1-0:1.8.0"
+  const char *obis = strstr(telegram_str, "1-0:1.8.0");
+  if (!obis) {
+    return 1; // OBIS-Code nicht gefunden
+  }
+
+  // Suche nach '(' und '*'
+  const char *openParen = strchr(obis, '(');
+  const char *star = (openParen) ? strchr(openParen, '*') : nullptr;
+  if (!openParen || !star || openParen > star) {
+    return 2; // Formatproblem
+  }
+
+  // Wert extrahieren
+  char valueStr[16];
+  size_t len = star - openParen - 1;
+  if (len >= sizeof(valueStr)) {
+    return 3; // Zu lang
+  }
+
+  strncpy(valueStr, openParen + 1, len);
+  valueStr[len] = '\0';
+
+  // Komma durch Punkt ersetzen (falls nötig)
+  for (int i = 0; valueStr[i]; i++) {
+    if (valueStr[i] == ',') valueStr[i] = '.';
+  }
+
+  float kWh = atof(valueStr);
+  return (int32_t)(kWh * 10000.0); // Umwandlung in 0.1 Wh
+}
+
 void myStrom_get_Meter_value()
 {
 
@@ -1264,6 +1303,8 @@ void handle_MeterValue_receive()
   {
     // Serial.println("Error: Timeout!");
     // Log_AddEntry(3002);
+    LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
+    LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
     Telegram_ResetReceiveBuffer();
   }
 }
