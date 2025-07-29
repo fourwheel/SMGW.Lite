@@ -1346,8 +1346,12 @@ void Webclient_send_log_to_backend()
 
   String logHeader = "POST ";
   logHeader += backend_path;
-  logHeader += "log.php HTTP/1.1\r\n";
-  logHeader += "Host: ";
+  logHeader += "log.php";
+  logHeader += "?ID=";
+  logHeader += backend_ID;
+  logHeader += "&token=";
+  logHeader += String(backend_token);
+  logHeader += " HTTP/1.1\r\nHost: ";
   logHeader += backend_host;
   logHeader += "\r\n";
   logHeader += "Content-Type: application/octet-stream\r\n";
@@ -2035,7 +2039,7 @@ void Webserver_ShowTelegram_Raw()
  
 
 
-  s += "<br><br></textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
+  s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
   for(int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     if (i > 0)
