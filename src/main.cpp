@@ -2030,7 +2030,7 @@ void Webserver_ShowTelegram_Raw()
   {
     if (i > 0)
       s += " ";
-    s += String(telegram_receive_buffer[i]);
+    s += String(TELEGRAM[i]);
   }
  
 
@@ -2040,7 +2040,7 @@ void Webserver_ShowTelegram_Raw()
   {
     if (i > 0)
       s += " ";
-    s += String(telegram_receive_buffer[i], HEX);
+    s += String(TELEGRAM[i], HEX);
   }
   s += "</textarea>";
   server.send(200, "text/html", s);
