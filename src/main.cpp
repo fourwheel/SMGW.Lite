@@ -989,41 +989,41 @@ int32_t MeterValue_get_from_telegram()
 }
 
 int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
-  // Temporären Null-terminierten String anlegen
+  // Create a temporary null-terminated string
   char telegram_str[length + 1];
   memcpy(telegram_str, buffer, length);
-  telegram_str[length] = '\0'; // Null-terminieren
+  telegram_str[length] = '\0'; // Null-terminate
 
-  // Suche nach "1-0:1.8.0"
+  // Search for "1-0:1.8.0"
   const char *obis = strstr(telegram_str, "1-0:1.8.0");
   if (!obis) {
-    return 1; // OBIS-Code nicht gefunden
+    return 1; // OBIS code not found
   }
 
-  // Suche nach '(' und '*'
+  // Search for '(' and '*'
   const char *openParen = strchr(obis, '(');
   const char *star = (openParen) ? strchr(openParen, '*') : nullptr;
   if (!openParen || !star || openParen > star) {
-    return 2; // Formatproblem
+    return 2; // Format issue
   }
 
-  // Wert extrahieren
+  // Extract value
   char valueStr[16];
   size_t len = star - openParen - 1;
   if (len >= sizeof(valueStr)) {
-    return 3; // Zu lang
+    return 3; // Too long
   }
 
   strncpy(valueStr, openParen + 1, len);
   valueStr[len] = '\0';
 
-  // Komma durch Punkt ersetzen (falls nötig)
+  // Replace comma with dot (if necessary)
   for (int i = 0; valueStr[i]; i++) {
     if (valueStr[i] == ',') valueStr[i] = '.';
   }
 
   float kWh = atof(valueStr);
-  return (int32_t)(kWh * 10000.0); // Umwandlung in 0.1 Wh
+  return (int32_t)(kWh * 10000.0); // Convert to 0.1 Wh
 }
 
 void myStrom_get_Meter_value()
@@ -1303,8 +1303,11 @@ void handle_MeterValue_receive()
   {
     // Serial.println("Error: Timeout!");
     // Log_AddEntry(3002);
-    LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
-    LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
+
+    // Quick And Dirty Integratoin for IEC Protocoll
+    // LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
+    // LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
+    
     Telegram_ResetReceiveBuffer();
   }
 }
