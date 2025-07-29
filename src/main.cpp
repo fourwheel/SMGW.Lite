@@ -74,7 +74,7 @@ const char wifiInitialApPassword[] = "password";
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-#define TELEGRAM_LENGTH 1000
+#define TELEGRAM_LENGTH 500
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
 size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
@@ -1304,7 +1304,7 @@ void handle_MeterValue_receive()
     // Serial.println("Error: Timeout!");
     // Log_AddEntry(3002);
 
-    // Quick And Dirty Integratoin for IEC Protocoll
+    // Quick And Dirty Integration for IEC Protocoll
     // LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
     // LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
     
