@@ -12,7 +12,7 @@ $logEntries = [];
 
 // Statuscode-Beschreibungen
 function getStatusDescription($statusCode) {
-   switch (statusCode)
+   switch ($statusCode)
   {
   case 1001:
     return "setup()";
