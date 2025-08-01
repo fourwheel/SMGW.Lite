@@ -1,6 +1,22 @@
 <?php
+
+include("valid_clients.php");
+
+$id = $_GET['ID'] ?? '';
+$token = $_GET['token'] ?? '';
+
+// check if client is valid
+if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
+    http_response_code(403);
+    echo "Zugriff verweigert.";
+    exit;
+}
+$data = [];
+$data["ID"] = "";
+$data["ID"] = $_GET['ID'];
+
 // Datei, in der der Log-Buffer gespeichert wird
-$logFile = "log/" . date("y-m-d-H-i-s") . "_log.txt";
+$logFile = "log/" . date("y-m-d-H-i-s") . "-".$data["ID"]."_log.txt";
 
 
 // Rohdaten des Log-Buffers aus der Anfrage lesen
@@ -52,8 +68,10 @@ function getStatusDescription($statusCode) {
     return "Sending Log successful";
   case 1021:
     return "call_backend successful";
+
   case 1022:
     return "taf14 trigger not possible, buffer full";
+
   case 1200:
     return "meter value <= 0";
   case 1201:
