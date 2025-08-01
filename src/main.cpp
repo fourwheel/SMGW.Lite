@@ -74,7 +74,7 @@ const char wifiInitialApPassword[] = "password";
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-#define TELEGRAM_LENGTH 512
+#define TELEGRAM_LENGTH 500
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
 size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
@@ -158,6 +158,7 @@ int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
 int32_t MeterValue_get_from_telegram();
+int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -987,6 +988,44 @@ int32_t MeterValue_get_from_telegram()
   return meter_value;
 }
 
+int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
+  // Create a temporary null-terminated string
+  char telegram_str[length + 1];
+  memcpy(telegram_str, buffer, length);
+  telegram_str[length] = '\0'; // Null-terminate
+
+  // Search for "1-0:1.8.0"
+  const char *obis = strstr(telegram_str, "1-0:1.8.0");
+  if (!obis) {
+    return 1; // OBIS code not found
+  }
+
+  // Search for '(' and '*'
+  const char *openParen = strchr(obis, '(');
+  const char *star = (openParen) ? strchr(openParen, '*') : nullptr;
+  if (!openParen || !star || openParen > star) {
+    return 2; // Format issue
+  }
+
+  // Extract value
+  char valueStr[16];
+  size_t len = star - openParen - 1;
+  if (len >= sizeof(valueStr)) {
+    return 3; // Too long
+  }
+
+  strncpy(valueStr, openParen + 1, len);
+  valueStr[len] = '\0';
+
+  // Replace comma with dot (if necessary)
+  for (int i = 0; valueStr[i]; i++) {
+    if (valueStr[i] == ',') valueStr[i] = '.';
+  }
+
+  float kWh = atof(valueStr);
+  return (int32_t)(kWh * 10000.0); // Convert to 0.1 Wh
+}
+
 void myStrom_get_Meter_value()
 {
 
@@ -1264,6 +1303,11 @@ void handle_MeterValue_receive()
   {
     // Serial.println("Error: Timeout!");
     // Log_AddEntry(3002);
+
+    // Quick And Dirty Integration for IEC Protocoll
+    // LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
+    // LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
+    
     Telegram_ResetReceiveBuffer();
   }
 }
@@ -1302,8 +1346,12 @@ void Webclient_send_log_to_backend()
 
   String logHeader = "POST ";
   logHeader += backend_path;
-  logHeader += "log.php HTTP/1.1\r\n";
-  logHeader += "Host: ";
+  logHeader += "log.php";
+  logHeader += "?ID=";
+  logHeader += backend_ID;
+  logHeader += "&token=";
+  logHeader += String(backend_token);
+  logHeader += " HTTP/1.1\r\nHost: ";
   logHeader += backend_host;
   logHeader += "\r\n";
   logHeader += "Content-Type: application/octet-stream\r\n";
@@ -1986,17 +2034,17 @@ void Webserver_ShowTelegram_Raw()
   {
     if (i > 0)
       s += " ";
-    s += String(telegram_receive_buffer[i]);
+    s += String(TELEGRAM[i]);
   }
  
 
 
-  s += "<br><br></textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
+  s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
   for(int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     if (i > 0)
       s += " ";
-    s += String(telegram_receive_buffer[i], HEX);
+    s += String(TELEGRAM[i], HEX);
   }
   s += "</textarea>";
   server.send(200, "text/html", s);

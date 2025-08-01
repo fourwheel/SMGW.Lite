@@ -1,6 +1,22 @@
 <?php
+
+include("valid_clients.php");
+
+$id = $_GET['ID'] ?? '';
+$token = $_GET['token'] ?? '';
+
+// check if client is valid
+if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
+    http_response_code(403);
+    echo "Zugriff verweigert.";
+    exit;
+}
+$data = [];
+$data["ID"] = "";
+$data["ID"] = $_GET['ID'];
+
 // Datei, in der der Log-Buffer gespeichert wird
-$logFile = "log/" . date("y-m-d-H-i-s") . "_log.txt";
+$logFile = "log/" . date("y-m-d-H-i-s") . "-".$data["ID"]."_log.txt";
 
 
 // Rohdaten des Log-Buffers aus der Anfrage lesen
@@ -13,39 +29,82 @@ $logEntries = [];
 // Statuscode-Beschreibungen
 function getStatusDescription($statusCode) {
     switch ($statusCode) {
-    	case 1013: return "clear_data_array()";
-        case 1001: return "setup()";
-        case 1005: return "call_backend()";
-        case 1006: return "store_meter_value()";
-        case 1008: return "WiFi returned";
-        case 1009: return "WiFi lost";
-        case 1010: return "Taf 7 meter reading trigger";
-        case 1002: return "Taf 6 meter reading trigger";
-        case 1014: return "Taf 7-900s meter reading trigger";
-        case 1015: return "not enough heap to store value";
-        case 1016: return "Buffer full, cannot store non-override value";    
-        case 1011: return "Taf 14 meter reading trigger";
-        case 1012: return "call backend trigger";
-        case 1019: return "Sending Log";
-        case 1020: return "Sending Log successful";
-        case 1021: return "call_backend successful";
-        case 1200: return "meter value <= 0"; 
-        case 1201: return "current Meter value = previous meter value";
-        case 1203: return "Suffix Must not be 0";
-        case 1204: return "prefix suffix not correct";
-        case 1205: return "Error Buffer Size Exceeded";
-        case 3000: return "Complete Telegram received";
-        case 3001: return "Telegram Pufferueberlauf";
-        case 3002: return "Telegram timeout";
-        case 3003: return "Telegramm zu groß für Speicher";
-        case 4000: return "Connection to server failed (Cert!?)";
-        case 7000: return "Stopping Wifi, Backendcall unsuccessfull";
-        case 7001: return "Restarting Wifi";
-        case 8000: return "Spiffs not mounted";
-        case 8001: return "Fehler beim Öffnen der Zertifikatsdatei!";
-        case 8002: return "Zertifikat gespeichert";
-        case 8003: return "Fehler beim Öffnen der Cert Datei";
-        case 8004: return "Kein Zertifikat erhalten!";
+  case 1001:
+    return "setup()";
+  case 1002:
+    return "Memory Allocation failed";
+  case 1003:
+    return "Config saved";
+  case 1005:
+    return "call_backend()";
+  case 1006:
+    return "Taf 6 meter reading trigger";
+  case 1008:
+    return "WiFi returned";
+  case 1009:
+    return "WiFi lost";
+  case 1010:
+    return "Taf 7 meter reading trigger";
+  case 1011:
+    return "Taf 14 meter reading trigger";
+  case 1012:
+    return "call backend trigger";
+  case 1013:
+    return "MeterValues_clear_Buffer()";
+  case 1014:
+    return "Taf 7-900s meter reading trigger";
+  case 1015:
+    return "not enough heap to store value";
+  case 1016:
+    return "Buffer full, cannot store non-override value";
+  case 1018:
+    return "dynamic Taf trigger";
+  case 1019:
+    return "Sending Log";
+  case 1020:
+    return "Sending Log successful";
+  case 1021:
+    return "call_backend successful";
+  case 1200:
+    return "meter value <= 0";
+  case 1201:
+    return "current Meter value = previous meter value";
+  case 1203:
+    return "Suffix Must not be 0";
+  case 1204:
+    return "prefix suffix not correct";
+  case 1205:
+    return "Error Buffer Size Exceeded";
+  case 3000:
+    return "Complete Telegram received";
+  case 3001:
+    return "Telegram Buffer overflow";
+  case 3002:
+    return "Telegram timeout";
+  case 3003:
+    return "Telegram too big for buffer";
+  case 4000:
+    return "Connection to server failed (Cert!?)";
+  case 5000:
+    return "myStrom_get_Meter_value Connection failed";
+  case 5001:
+    return "Failed to connect to myStrom";
+  case 5002:
+    return "myStrom_get_Meter_value deserializeJson() failed";
+  case 7000:
+    return "Stopping Wifi, Backendcall unsuccessfull";
+  case 7001:
+    return "Restarting Wifi";
+  case 8000:
+    return "Spiffs not mounted";
+  case 8001:
+    return "Error reading cert file";
+  case 8002:
+    return "Cert saved";
+  case 8003:
+    return "Error reading cert file";
+  case 8004:
+    return "No Cert received";
 		default: return "Unknown status code";
     }
 }
