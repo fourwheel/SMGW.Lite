@@ -84,7 +84,7 @@ uint8_t extraBytes[3];                            // additional bytes after end 
 size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
-uint8_t TELEGRAM[TELEGRAM_LENGTH];                // buffer for entire telegram
+// uint8_t TELEGRAM[TELEGRAM_LENGTH];                // buffer for entire telegram
 
 // Meter Value Vsrs
 
@@ -969,7 +969,7 @@ bool Telegram_prefix_suffix_correct()
     return false;
   }
 
-  if (TELEGRAM[suffix] == 0x1B && TELEGRAM[suffix + 1] == 0x1B && TELEGRAM[suffix + 2] == 0x1B && TELEGRAM[suffix + 3] == 0x1B && TELEGRAM[prefix] == 0x1B && TELEGRAM[prefix + 1] == 0x1B && TELEGRAM[prefix + 2] == 0x1B && TELEGRAM[prefix + 3] == 0x1B)
+  if (telegram_receive_buffer[suffix] == 0x1B && telegram_receive_buffer[suffix + 1] == 0x1B && telegram_receive_buffer[suffix + 2] == 0x1B && telegram_receive_buffer[suffix + 3] == 0x1B && telegram_receive_buffer[prefix] == 0x1B && telegram_receive_buffer[prefix + 1] == 0x1B && telegram_receive_buffer[prefix + 2] == 0x1B && telegram_receive_buffer[prefix + 3] == 0x1B)
     return true;
   else
   {
@@ -992,7 +992,7 @@ int32_t MeterValue_get_from_telegram()
   for (int i = 0; i < length; i++)
   {
     int shift = length - 1 - i;
-    meter_value += TELEGRAM[offset + i] << 8 * shift;
+    meter_value += telegram_receive_buffer[offset + i] << 8 * shift;
   }
   return meter_value;
 }
@@ -1224,8 +1224,8 @@ void Telegram_saveCompleteTelegram()
   }
 
   // copy telegram
-  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // copy main data
-  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
+  // memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // copy main data
+  // memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
   int32_t meter_value = MeterValue_get_from_telegram();
@@ -2103,23 +2103,23 @@ void Webserver_ShowTelegram_Raw()
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
   }
-  s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
-  for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  {
-    if (i > 0)
-      s += " ";
-    s += String(TELEGRAM[i]);
-  }
+  // s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
+  // for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  // {
+  //   if (i > 0)
+  //     s += " ";
+  //   s += String(TELEGRAM[i]);
+  // }
  
 
 
-  s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
-  for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  {
-    if (i > 0)
-      s += " ";
-    s += String(TELEGRAM[i], HEX);
-  }
+  // s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
+  // for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  // {
+  //   if (i > 0)
+  //     s += " ";
+  //   s += String(TELEGRAM[i], HEX);
+  // }
   s += "</textarea>";
   server.send(200, "text/html", s);
 
@@ -2169,7 +2169,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + String(TELEGRAM[i], HEX) + "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + /*String(TELEGRAM[i], HEX) + */ "</td></tr>";
   }
   s += "</table";
 
