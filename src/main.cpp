@@ -162,7 +162,7 @@ void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-int32_t MeterValue_get_from_telegram();
+int32_t MeterValue_get_from_SML_telegram();
 int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
@@ -978,7 +978,7 @@ bool Telegram_prefix_suffix_correct()
   }
 }
 
-int32_t MeterValue_get_from_telegram()
+int32_t MeterValue_get_from_SML_telegram()
 {
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
@@ -1228,7 +1228,7 @@ void Telegram_saveCompleteTelegram()
   // memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
-  int32_t meter_value = MeterValue_get_from_telegram();
+  int32_t meter_value = MeterValue_get_from_SML_telegram();
   // if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
   // {
   //   PrevMeterValue = LastMeterValue;
