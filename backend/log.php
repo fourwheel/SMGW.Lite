@@ -82,6 +82,8 @@ function getStatusDescription($statusCode) {
     return "prefix suffix not correct";
   case 1205:
     return "Error Buffer Size Exceeded";
+  case 1206:
+    return "Buffer Full, cannot store non-override value";
   case 3000:
     return "Complete Telegram received";
   case 3001:

@@ -103,7 +103,7 @@ bool MeterValue_trigger_override = false;
 bool MeterValue_trigger_non_override = false;
 
 
-unsigned long last_meter_value = 0;
+unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value = 0;
 unsigned long last_taf14_meter_value = 0;
 
@@ -408,6 +408,8 @@ String Log_StatusCodeToString(int statusCode)
     return "prefix suffix not correct";
   case 1205:
     return "Error Buffer Size Exceeded";
+  case 1206:
+    return "Buffer Full, cannot store non-override value";
   case 3000:
     return "Complete Telegram received";
   case 3001:
@@ -1682,18 +1684,19 @@ void handle_call_backend()
 //     LastPower = currentPower;
 //   }
 // }
-unsigned long last_meter_value_attempt = 0;
+unsigned long last_meter_value_store = 0;
+unsigned long last_meter_value_trigger = 0;
 void handle_MeterValue_store()
 {
   if(!MeterValue_trigger_override && !MeterValue_trigger_non_override)
   {
     return; // nothing to do
   }
-  if(millis() - last_meter_value_attempt < 1000)
+  if(millis() - last_meter_value_store < 1000)
   {
     return;
   }
-  last_meter_value_attempt = millis();
+  last_meter_value_store = millis();
 
   bool retVal = false;
   if (MeterValue_trigger_override == true)
@@ -1719,13 +1722,13 @@ void handle_MeterValue_store()
   {
     Log_AddEntry(1017);
     last_taf14_meter_value = millis();
-    last_meter_value = millis();
+    last_meter_value_successful = millis();
     MeterValue_trigger_override = false;
     MeterValue_trigger_non_override = false;
   }
   // else
   // {
-  //   last_meter_value += 1000;
+  //   last_meter_value_successful += 1000;
   // }
 }
 
@@ -1733,33 +1736,28 @@ void handle_MeterValue_store()
 void handle_MeterValue_trigger()
 {
   if (MeterValue_trigger_override == false &&
+      MeterValue_trigger_non_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
-      (millis() - last_taf7_meter_value > 45000))
+      (millis() - last_taf7_meter_value > 45000) &&
+      (millis() - last_meter_value_successful >= 15000 ))
   {
     
     Log_AddEntry(1010);
     MeterValue_trigger_override = true;
     
   }
-  if (MeterValue_trigger_override == false && 
-    !wifi_connected && millis() - last_meter_value > 900000)
-  {
-    Log_AddEntry(1014);
-    MeterValue_trigger_override = true;
-    
-  }
   if (MeterValue_trigger_override == false &&
       MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
-      millis() - last_meter_value >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
+      millis() - last_meter_value_successful >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
       millis() - last_taf14_meter_value >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param))
     )
   {
     if(meter_value_buffer_full == true)
     {
       last_taf14_meter_value = millis();
-      Log_AddEntry(9999);
+      Log_AddEntry(1206);
     }
     else
     {
