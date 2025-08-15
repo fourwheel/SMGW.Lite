@@ -1740,7 +1740,7 @@ void handle_MeterValue_trigger()
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000) &&
-      (millis() - last_meter_value_successful >= 15000 ))
+      (millis() - last_meter_value_successful >= 20000 ))
   {
     
     Log_AddEntry(1010);
