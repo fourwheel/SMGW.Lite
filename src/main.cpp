@@ -84,7 +84,7 @@ uint8_t extraBytes[3];                            // additional bytes after end 
 size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
-// uint8_t TELEGRAM[TELEGRAM_LENGTH];                // buffer for entire telegram
+
 
 // Meter Value Vsrs
 
@@ -1225,9 +1225,7 @@ void Telegram_saveCompleteTelegram()
     return;
   }
 
-  // copy telegram
-  // memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // copy main data
-  // memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
+  
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
   int32_t meter_value = MeterValue_get_from_SML_telegram();
@@ -2101,23 +2099,7 @@ void Webserver_ShowTelegram_Raw()
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
   }
-  // s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
-  // for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  // {
-  //   if (i > 0)
-  //     s += " ";
-  //   s += String(TELEGRAM[i]);
-  // }
- 
 
-
-  // s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
-  // for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  // {
-  //   if (i > 0)
-  //     s += " ";
-  //   s += String(TELEGRAM[i], HEX);
-  // }
   s += "</textarea>";
   server.send(200, "text/html", s);
 
@@ -2136,11 +2118,11 @@ void Webserver_ShowTelegram()
   s += HTML_STYLE;
 
   s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
-  s += "<br>Last Validated Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+  s += "<br>Last Complete Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
     
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
-  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
+  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th></tr>";
 
 
   String color;
@@ -2167,7 +2149,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + /*String(TELEGRAM[i], HEX) + */ "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td></tr>";
   }
   s += "</table";
 
