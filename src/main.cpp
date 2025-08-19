@@ -1271,7 +1271,10 @@ void handle_Telegram_receive()
 
       if (extraIndex == 3)
       {
-        Telegram_saveCompleteTelegram();
+        if(Telegram_prefix_suffix_correct())
+        {
+          Telegram_saveCompleteTelegram();
+        }
         Telegram_ResetReceiveBuffer();
       }
       continue;
