@@ -28,7 +28,8 @@ $logEntries = [];
 
 // Statuscode-Beschreibungen
 function getStatusDescription($statusCode) {
-    switch ($statusCode) {
+   switch ($statusCode)
+  {
   case 1001:
     return "setup()";
   case 1002:
@@ -57,6 +58,8 @@ function getStatusDescription($statusCode) {
     return "not enough heap to store value";
   case 1016:
     return "Buffer full, cannot store non-override value";
+  case 1017:
+    return "Meter Value stored";
   case 1018:
     return "dynamic Taf trigger";
   case 1019:
@@ -65,6 +68,10 @@ function getStatusDescription($statusCode) {
     return "Sending Log successful";
   case 1021:
     return "call_backend successful";
+
+  case 1022:
+    return "taf14 trigger not possible, buffer full";
+
   case 1200:
     return "meter value <= 0";
   case 1201:
@@ -75,6 +82,8 @@ function getStatusDescription($statusCode) {
     return "prefix suffix not correct";
   case 1205:
     return "Error Buffer Size Exceeded";
+  case 1206:
+    return "Buffer Full, cannot store non-override value";
   case 3000:
     return "Complete Telegram received";
   case 3001:
@@ -105,8 +114,8 @@ function getStatusDescription($statusCode) {
     return "Error reading cert file";
   case 8004:
     return "No Cert received";
-		default: return "Unknown status code";
-    }
+  default: return "Unknown status code";
+  }
 }
 
 

@@ -84,7 +84,7 @@ uint8_t extraBytes[3];                            // additional bytes after end 
 size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
-uint8_t TELEGRAM[TELEGRAM_LENGTH];                // buffer for entire telegram
+
 
 // Meter Value Vsrs
 
@@ -99,9 +99,13 @@ MeterValue *MeterValues = nullptr;        // initiaize with nullptr
 MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
 MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
 
-unsigned long last_meter_value = 0;
-long last_taf7_meter_value = -100000;
-long last_taf14_meter_value = -100000;
+bool MeterValue_trigger_override = false;
+bool MeterValue_trigger_non_override = false;
+
+
+unsigned long last_meter_value_successful = 0;
+unsigned long last_taf7_meter_value = 0;
+unsigned long last_taf14_meter_value = 0;
 
 int Meter_Value_Buffer_Size = 234;
 bool meter_value_buffer_overflow = false;
@@ -142,6 +146,7 @@ unsigned long last_remote_meter_value = 0;
 // -- Forward declarations.
 void handle_call_backend();
 void handle_check_wifi_connection();
+void handle_MeterValue_trigger();
 void handle_MeterValue_store();
 void handle_temperature();
 void Led_update_Blink();
@@ -151,13 +156,13 @@ String Log_StatusCodeToString(int statusCode);
 #if defined(ESP32)
 String Log_get_reset_reason();
 #endif
-void MeterValue_store(bool override);
+bool MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
 void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-int32_t MeterValue_get_from_telegram();
+int32_t MeterValue_get_from_SML_telegram();
 int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
@@ -170,7 +175,7 @@ int Time_getMinutes();
 bool Telegram_prefix_suffix_correct();
 void Telegram_saveCompleteTelegram();
 void Telegram_ResetReceiveBuffer();
-void handle_MeterValue_receive();
+void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
 void Webclient_Send_Log_to_backend_Task(void *pvParameters);
 void Webclient_Send_Log_to_backend_wrapper();
@@ -381,6 +386,8 @@ String Log_StatusCodeToString(int statusCode)
     return "not enough heap to store value";
   case 1016:
     return "Buffer full, cannot store non-override value";
+  case 1017:
+    return "Meter Value stored";
   case 1018:
     return "dynamic Taf trigger";
   case 1019:
@@ -389,6 +396,8 @@ String Log_StatusCodeToString(int statusCode)
     return "Sending Log successful";
   case 1021:
     return "call_backend successful";
+  case 1022:
+    return "taf14 trigger not possible, buffer full";
   case 1200:
     return "meter value <= 0";
   case 1201:
@@ -399,6 +408,8 @@ String Log_StatusCodeToString(int statusCode)
     return "prefix suffix not correct";
   case 1205:
     return "Error Buffer Size Exceeded";
+  case 1206:
+    return "Buffer Full, cannot store non-override value";
   case 3000:
     return "Complete Telegram received";
   case 3001:
@@ -479,7 +490,7 @@ String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
   String logString = "<html><head><title>SMGWLite - Meter Values</title>";
-  logString += String(HTML_STYLE);
+  //logString += String(HTML_STYLE);
   logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
@@ -561,7 +572,7 @@ void Webserver_ShowMeterValues()
   String MeterValues_string = "<html><head>";
   MeterValues_string += "<title>SMGWLite - Meter Values</title>";
   MeterValues_string += String(HTML_STYLE);
-  MeterValues_string += "</head><body><table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
+  MeterValues_string += "</head><body><table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Meter Value</th><th>Termperature </th><th>Solar </th></tr>";
   int count = 1;
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
@@ -573,9 +584,9 @@ void Webserver_ShowMeterValues()
         first = false;
         MeterValues_string += "<tr><td>-----</td></tr>";
       }
-      continue; // skip empty entries
+      continue; // skip empty entries 
     }
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(Time_formatTimestamp(MeterValues[m].timestamp)) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -776,7 +787,7 @@ void Webserver_UrlConfig()
   server.on("/StoreMeterValue", []
             { Webserver_LocationHrefHome();
               Log_AddEntry(1006);
-              MeterValue_store(true); });
+              MeterValue_trigger_override = true;});
   server.on("/MeterValue_init_Buffer", []
             { MeterValue_init_Buffer();
               Webserver_LocationHrefHome(); });
@@ -960,7 +971,7 @@ bool Telegram_prefix_suffix_correct()
     return false;
   }
 
-  if (TELEGRAM[suffix] == 0x1B && TELEGRAM[suffix + 1] == 0x1B && TELEGRAM[suffix + 2] == 0x1B && TELEGRAM[suffix + 3] == 0x1B && TELEGRAM[prefix] == 0x1B && TELEGRAM[prefix + 1] == 0x1B && TELEGRAM[prefix + 2] == 0x1B && TELEGRAM[prefix + 3] == 0x1B)
+  if (telegram_receive_buffer[suffix] == 0x1B && telegram_receive_buffer[suffix + 1] == 0x1B && telegram_receive_buffer[suffix + 2] == 0x1B && telegram_receive_buffer[suffix + 3] == 0x1B && telegram_receive_buffer[prefix] == 0x1B && telegram_receive_buffer[prefix + 1] == 0x1B && telegram_receive_buffer[prefix + 2] == 0x1B && telegram_receive_buffer[prefix + 3] == 0x1B)
     return true;
   else
   {
@@ -969,7 +980,7 @@ bool Telegram_prefix_suffix_correct()
   }
 }
 
-int32_t MeterValue_get_from_telegram()
+int32_t MeterValue_get_from_SML_telegram()
 {
   int offset = atoi(telegram_offset);
   int length = atoi(telegram_length);
@@ -983,7 +994,7 @@ int32_t MeterValue_get_from_telegram()
   for (int i = 0; i < length; i++)
   {
     int shift = length - 1 - i;
-    meter_value += TELEGRAM[offset + i] << 8 * shift;
+    meter_value += telegram_receive_buffer[offset + i] << 8 * shift;
   }
   return meter_value;
 }
@@ -1214,16 +1225,14 @@ void Telegram_saveCompleteTelegram()
     return;
   }
 
-  // copy telegram
-  memcpy(TELEGRAM, telegram_receive_buffer, telegram_receive_bufferIndex); // copy main data
-  memcpy(TELEGRAM + telegram_receive_bufferIndex, extraBytes, 3);          // copy additional bytes
+  
   TelegramSizeUsed = telegramLength;
   timestamp_telegram = Time_getEpochTime();
-  int32_t meter_value = MeterValue_get_from_telegram();
-  if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
-  {
-    PrevMeterValue = LastMeterValue;
-  }
+  int32_t meter_value = MeterValue_get_from_SML_telegram();
+  // if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
+  // {
+  //   PrevMeterValue = LastMeterValue;
+  // }
   resetMeterValue(LastMeterValue);               // reset LastMeterValue
   LastMeterValue.meter_value = meter_value;      // get meter value from telegram
   LastMeterValue.timestamp = timestamp_telegram; // save timestamp
@@ -1240,7 +1249,7 @@ void Telegram_ResetReceiveBuffer()
   extraIndex = 0;
 }
 
-void handle_MeterValue_receive()
+void handle_Telegram_receive()
 {
   if (DebugFromOtherClient_object.isChecked())
   {
@@ -1262,7 +1271,10 @@ void handle_MeterValue_receive()
 
       if (extraIndex == 3)
       {
-        Telegram_saveCompleteTelegram();
+        if(Telegram_prefix_suffix_correct())
+        {
+          Telegram_saveCompleteTelegram();
+        }
         Telegram_ResetReceiveBuffer();
       }
       continue;
@@ -1486,15 +1498,13 @@ void Webclient_send_meter_values_to_backend()
   client.stop();
 }
 
-void MeterValue_store(bool override)
+bool MeterValue_store(bool override)
 {
-
-  
   if (ESP.getFreeHeap() < 1000)
   {
     Log_AddEntry(1015);
     Serial.println("Not enough free heap to store another value");
-    return;
+    return false;
   }
 
   if (mystrom_PV_object.isChecked())
@@ -1505,18 +1515,17 @@ void MeterValue_store(bool override)
   if (LastMeterValue.meter_value <= 0)
   {
     Log_AddEntry(1200);
-    return;
+    return false;
   }
 
   if (LastMeterValue.meter_value == PrevMeterValue.meter_value
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
-    last_meter_value += 1000;
-    return;
+    return false;
   }
-  PrevMeterValue = LastMeterValue; // save last meter value as previous
-  last_meter_value = millis();
+
+  
 
   // var where to write
   int write_i = 0;
@@ -1572,8 +1581,13 @@ void MeterValue_store(bool override)
   else
   {
     Log_AddEntry(1016);
+    MeterValue_trigger_non_override = false; //deactivate so that is not retriggered
+    return false;
     Serial.println("Buffer Full, no space to write new value!");
   }
+  
+  PrevMeterValue = LastMeterValue; // save last meter value as previous
+  return true;
 }
 
 void handle_check_wifi_connection()
@@ -1671,28 +1685,86 @@ void handle_call_backend()
 //     LastPower = currentPower;
 //   }
 // }
+unsigned long last_meter_value_store = 0;
+unsigned long last_meter_value_trigger = 0;
 void handle_MeterValue_store()
 {
-  if (
+  if(!MeterValue_trigger_override && !MeterValue_trigger_non_override)
+  {
+    return; // nothing to do
+  }
+  if(millis() - last_meter_value_store < 1000)
+  {
+    return;
+  }
+  last_meter_value_store = millis();
+
+  bool retVal = false;
+  if (MeterValue_trigger_override == true)
+  {
+    retVal = MeterValue_store(true);
+    if(retVal == true)
+    {
+      last_taf7_meter_value = millis();
+    }
+
+  }
+  else if (MeterValue_trigger_non_override == true)
+  {
+    
+    retVal = MeterValue_store(false);
+   if(retVal == true)
+    {
+      last_taf14_meter_value = millis();
+    }
+  }
+
+  if(retVal == true)
+  {
+    Log_AddEntry(1017);
+    last_taf14_meter_value = millis();
+    last_meter_value_successful = millis();
+    MeterValue_trigger_override = false;
+    MeterValue_trigger_non_override = false;
+  }
+  // else
+  // {
+  //   last_meter_value_successful += 1000;
+  // }
+}
+
+
+void handle_MeterValue_trigger()
+{
+  if (MeterValue_trigger_override == false &&
+      MeterValue_trigger_non_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
-      (millis() - last_taf7_meter_value > 45000))
+      (millis() - last_taf7_meter_value > 45000) &&
+      (millis() - last_meter_value_successful >= 20000 ))
   {
-    last_taf7_meter_value = millis();
+    
     Log_AddEntry(1010);
-    MeterValue_store(true);
+    MeterValue_trigger_override = true;
+    
   }
-  if (!wifi_connected && millis() - last_meter_value > 900000)
-  {
-    Log_AddEntry(1014);
-    MeterValue_store(true);
-  }
-  if (
+  if (MeterValue_trigger_override == false &&
+      MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
-      millis() - last_meter_value > 1000UL * max(1UL, (unsigned long)atoi(taf14_param)))
+      millis() - last_meter_value_successful >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
+      millis() - last_taf14_meter_value >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param))
+    )
   {
-    Log_AddEntry(1011);
-    MeterValue_store(false);
+    if(meter_value_buffer_full == true)
+    {
+      last_taf14_meter_value = millis();
+      Log_AddEntry(1206);
+    }
+    else
+    {
+      Log_AddEntry(1011);
+      MeterValue_trigger_non_override = true;
+    }
   }
   // if(tafdyn_b_object.isChecked())
   // {
@@ -1704,8 +1776,9 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   handle_temperature();
-  handle_MeterValue_receive();
+  handle_Telegram_receive();
   handle_check_wifi_connection();
+  handle_MeterValue_trigger();
   handle_MeterValue_store();
   handle_call_backend();
 }
@@ -2029,23 +2102,7 @@ void Webserver_ShowTelegram_Raw()
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
   }
-  s += "</textarea><br><br><div class='block'>Validated Telegram</div><textarea name='cert' rows='10' cols='80'>";
-  for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  {
-    if (i > 0)
-      s += " ";
-    s += String(TELEGRAM[i]);
-  }
- 
 
-
-  s += "</textarea><br><br><div class='block'>Validated Telegram Hex</div><textarea name='cert' rows='10' cols='80'>";
-  for(int i = 0; i < TELEGRAM_LENGTH; i++)
-  {
-    if (i > 0)
-      s += " ";
-    s += String(TELEGRAM[i], HEX);
-  }
   s += "</textarea>";
   server.send(200, "text/html", s);
 
@@ -2064,11 +2121,11 @@ void Webserver_ShowTelegram()
   s += HTML_STYLE;
 
   s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
-  s += "<br>Last Validated Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
+  s += "<br>Last Complete Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
     
   if (!Telegram_prefix_suffix_correct())
     s += "<br><font color=red>incomplete telegram</font>";
-  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th><th>Validated Buffer</th></tr>";
+  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th></tr>";
 
 
   String color;
@@ -2095,7 +2152,7 @@ void Webserver_ShowTelegram()
     }
     else
       color = "";
-    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td><td>" + String(TELEGRAM[i], HEX) + "</td></tr>";
+    s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">"+String(telegram_receive_buffer[i], HEX)+"</td></tr>";
   }
   s += "</table";
 
