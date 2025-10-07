@@ -252,7 +252,7 @@ IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID"
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
 
 IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
-IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
+IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "60...1", "min='1' max='60' step='1'");
 IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
 IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "1..100 s", "min='1' max='100' step='1'");
 IotWebConfCheckboxParameter tafdyn_b_object = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
@@ -1253,11 +1253,12 @@ void handle_Telegram_receive()
 {
   if (DebugFromOtherClient_object.isChecked())
   {
-    if (last_remote_meter_value + 5000 < millis())
-    {
-      last_remote_meter_value = millis();
-      MeterValue_get_from_remote();
-    }
+    // if (last_remote_meter_value + 5000 < millis())
+    // {
+    //   last_remote_meter_value = millis();
+    //   MeterValue_get_from_remote();
+    // }
+    LastMeterValue.timestamp = Time_getEpochTime();
     return;
   }
   while (mySerial.available() > 0)
@@ -1518,7 +1519,8 @@ bool MeterValue_store(bool override)
     return false;
   }
 
-  if (LastMeterValue.meter_value == PrevMeterValue.meter_value
+  if ((millis() - last_meter_value_successful < 900000)
+  && LastMeterValue.meter_value == PrevMeterValue.meter_value
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
@@ -2012,7 +2014,7 @@ void Webserver_HandleRoot()
   <li><i>Set Device Offline:</i> )rawliteral";
   s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
-  <li><i>Get Meter Values from other SMGWLite:</i> )rawliteral";
+  <li><i>Get Meter Values from other SMGWLite / stop telegram retrievel:</i> )rawliteral";
   s += (DebugFromOtherClient_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
   <li><i>Remote Client IP:</i> )rawliteral";

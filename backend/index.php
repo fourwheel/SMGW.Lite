@@ -128,7 +128,7 @@ foreach ($data["values"] as $item) {
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     
 
-	if($item["power"] == 0 || $item["power"] > 40000) continue;
+	if($item["power"] < 0 || $item["power"] > 40000) continue;
 	if($prev["meter"] > $item['meter']) 
 	{
 		continue; // dismiss this values if lower than the previous one.
