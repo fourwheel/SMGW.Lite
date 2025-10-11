@@ -1519,8 +1519,8 @@ bool MeterValue_store(bool override)
     return false;
   }
 
-  if ((millis() - last_meter_value_successful < 900000)
-  && LastMeterValue.meter_value == PrevMeterValue.meter_value
+  if (((override == false && millis() - last_meter_value_successful < 900000) || (override == true && millis() - last_meter_value_successful < 60000)) // if last successful meter value read less than 15 minutes ago or override is true
+    && LastMeterValue.meter_value == PrevMeterValue.meter_value
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
@@ -1739,7 +1739,7 @@ void handle_MeterValue_store()
 void handle_MeterValue_trigger()
 {
   if (MeterValue_trigger_override == false &&
-      MeterValue_trigger_non_override == false &&
+      /*MeterValue_trigger_non_override == false &&*/
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000) &&
@@ -1748,9 +1748,10 @@ void handle_MeterValue_trigger()
     
     Log_AddEntry(1010);
     MeterValue_trigger_override = true;
+    MeterValue_trigger_non_override = false;
     
   }
-  if (MeterValue_trigger_override == false &&
+  else if (MeterValue_trigger_override == false &&
       MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
       millis() - last_meter_value_successful >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
