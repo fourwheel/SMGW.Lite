@@ -252,7 +252,7 @@ IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID"
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
 
 IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
-IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "15...1", "min='1' max='15' step='1'");
+IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "60...1", "min='1' max='60' step='1'");
 IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
 IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "1..100 s", "min='1' max='100' step='1'");
 IotWebConfCheckboxParameter tafdyn_b_object = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
@@ -1518,7 +1518,8 @@ bool MeterValue_store(bool override)
     return false;
   }
 
-  if (LastMeterValue.meter_value == PrevMeterValue.meter_value
+  if (((override == false && millis() - last_meter_value_successful < 900000) || (override == true && millis() - last_meter_value_successful < 60000)) // if last successful meter value read less than 15 minutes ago or override is true
+    && LastMeterValue.meter_value == PrevMeterValue.meter_value
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
@@ -1737,7 +1738,6 @@ void handle_MeterValue_store()
 void handle_MeterValue_trigger()
 {
   if (MeterValue_trigger_override == false &&
-      MeterValue_trigger_non_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000) &&
@@ -1746,9 +1746,10 @@ void handle_MeterValue_trigger()
     
     Log_AddEntry(1010);
     MeterValue_trigger_override = true;
+    MeterValue_trigger_non_override = false;
     
   }
-  if (MeterValue_trigger_override == false &&
+  else if (MeterValue_trigger_override == false &&
       MeterValue_trigger_non_override == false &&
       taf14_b_object.isChecked() &&
       millis() - last_meter_value_successful >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&

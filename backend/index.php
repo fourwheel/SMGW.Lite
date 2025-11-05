@@ -46,7 +46,7 @@ if ($dataCount != floor($dataCount)) {
 
 
 $value_count = 0;
-$meter_solar = 0;
+$meter_solar = NULL;
 for ($i = 0; $i < $dataCount; $i++) {
     $offset = $i * $entrySize;
     $timestamp = unpack("L", substr($rawData, $offset, 4))[1];
@@ -128,7 +128,7 @@ foreach ($data["values"] as $item) {
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     
 
-	if($item["power"] == 0 || $item["power"] > 40000) continue;
+	if($item["power"] < 0 || $item["power"] > 40000) continue;
 	if($prev["meter"] > $item['meter']) 
 	{
 		continue; // dismiss this values if lower than the previous one.
@@ -140,7 +140,7 @@ foreach ($data["values"] as $item) {
 	if(!isset($item['temperature'])) $item['temperature'] = 0;
 	$item['temperature'] = $item['temperature']/100;
 
-	if(!isset($item['meter_solar'])) $item['meter_solar'] = 0;
+	if(!isset($item['meter_solar'])) $item['meter_solar'] = NULL;
 	
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
@@ -158,7 +158,7 @@ foreach ($data["values"] as $item) {
 	".$current_time.",
 	'".$item["timestamp"]."', 
 	'".($item['meter'])."', 
-	'".($item["meter_solar"])."',
+	".($item["meter_solar"]).",
 	'".$item['temperature']."')";
 
 
