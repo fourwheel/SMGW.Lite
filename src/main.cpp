@@ -1253,11 +1253,11 @@ void handle_Telegram_receive()
 {
   if (DebugFromOtherClient_object.isChecked())
   {
-    // if (last_remote_meter_value + 5000 < millis())
-    // {
-    //   last_remote_meter_value = millis();
-    //   MeterValue_get_from_remote();
-    // }
+    if (last_remote_meter_value + 5000 < millis())
+    {
+      last_remote_meter_value = millis();
+      MeterValue_get_from_remote();
+    }
     LastMeterValue.timestamp = Time_getEpochTime();
     return;
   }
@@ -1739,7 +1739,6 @@ void handle_MeterValue_store()
 void handle_MeterValue_trigger()
 {
   if (MeterValue_trigger_override == false &&
-      /*MeterValue_trigger_non_override == false &&*/
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000) &&
@@ -2015,7 +2014,7 @@ void Webserver_HandleRoot()
   <li><i>Set Device Offline:</i> )rawliteral";
   s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
-  <li><i>Get Meter Values from other SMGWLite / stop telegram retrievel:</i> )rawliteral";
+  <li><i>Get Meter Values from other SMGWLite:</i> )rawliteral";
   s += (DebugFromOtherClient_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
   <li><i>Remote Client IP:</i> )rawliteral";
