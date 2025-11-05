@@ -1258,7 +1258,6 @@ void handle_Telegram_receive()
       last_remote_meter_value = millis();
       MeterValue_get_from_remote();
     }
-    LastMeterValue.timestamp = Time_getEpochTime();
     return;
   }
   while (mySerial.available() > 0)
