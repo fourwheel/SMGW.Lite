@@ -229,6 +229,7 @@ char telegram_offset[NUMBER_LEN];
 char telegram_length[NUMBER_LEN];
 char telegram_prefix[NUMBER_LEN];
 char telegram_suffix[NUMBER_LEN];
+char activate_IEC_Parser[STRING_LEN];
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
@@ -245,6 +246,7 @@ IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Of
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_suffix_object = IotWebConfNumberParameter("Suffix Begin", "telegram_suffix", telegram_suffix, NUMBER_LEN, "100", "1..TELEGRAM_LENGTH", "min='100' max='TELEGRAM_LENGTH' step='1'");
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, true);
 
 IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
@@ -884,6 +886,7 @@ void Param_setup()
   groupTelegram.addItem(&telegram_length_object);
   groupTelegram.addItem(&telegram_prefix_object);
   groupTelegram.addItem(&telegram_suffix_object);
+  groupTelegram.addItem(&activate_IEC_Parser_object);
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -1032,6 +1035,8 @@ int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
   for (int i = 0; valueStr[i]; i++) {
     if (valueStr[i] == ',') valueStr[i] = '.';
   }
+
+  LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
 
   float kWh = atof(valueStr);
   return (int32_t)(kWh * 10000.0); // Convert to 0.1 Wh
@@ -1317,8 +1322,10 @@ void handle_Telegram_receive()
     // Log_AddEntry(3002);
 
     // Quick And Dirty Integration for IEC Protocoll
-    // LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
-    // LastMeterValue.timestamp = Time_getEpochTime(); // save timestamp
+    if(activate_IEC_Parser_object.isChecked())
+    {
+      LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
+    }
     
     Telegram_ResetReceiveBuffer();
   }
@@ -1941,6 +1948,8 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</li>
   <li><i>Suffix Begin:</i> )rawliteral";
   s += String(atoi(telegram_suffix));
+  s += R"rawliteral(</li><li><i>IEC Parser:</i> )rawliteral";
+  s += (activate_IEC_Parser_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
   <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
 </ul>
