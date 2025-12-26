@@ -491,8 +491,8 @@ String Log_EntryToString(int i)
 String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
-  String logString = "<html><head><title>SMGWLite - Meter Values</title>";
-  //logString += String(HTML_STYLE);
+  String logString = "<html><head><title>SMGWLite - Log Buffer</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  logString += String(HTML_STYLE);
   logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
@@ -1665,7 +1665,7 @@ void handle_temperature()
 }
 void handle_call_backend()
 {
-  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
+  if (wifi_connected && millis() - wifi_reconnection_time > 20000)
   {
     if (
         (!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()) % atoi(backend_call_minute) == 0 && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
@@ -2111,6 +2111,23 @@ void Webserver_ShowTelegram_Raw()
     if (i > 0)
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
+  }
+
+  s += "</textarea><br><br><div class='block'>Receive Buffer ASCII</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    char c = (char)telegram_receive_buffer[i];
+    
+    // Prüfen, ob das Zeichen druckbar ist (ASCII 32 bis 126)
+    // oder ein Zeilenumbruch (10 = LF, 13 = CR)
+    if (isPrintable(c) || c == '\n' || c == '\r') 
+    {
+      s += c;
+    } 
+    else 
+    {
+      s += "."; // Platzhalter für nicht-druckbare Zeichen (z.B. Null-Bytes)
+    }
   }
 
   s += "</textarea>";
