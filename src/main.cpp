@@ -2118,15 +2118,13 @@ void Webserver_ShowTelegram_Raw()
   {
     char c = (char)telegram_receive_buffer[i];
     
-    // Prüfen, ob das Zeichen druckbar ist (ASCII 32 bis 126)
-    // oder ein Zeilenumbruch (10 = LF, 13 = CR)
     if (isPrintable(c) || c == '\n' || c == '\r') 
     {
       s += c;
     } 
     else 
     {
-      s += "."; // Platzhalter für nicht-druckbare Zeichen (z.B. Null-Bytes)
+      s += "."; 
     }
   }
 
