@@ -56,6 +56,7 @@ for ($i = 0; $i < $dataCount; $i++) {
 	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
 	
 	if($meter == 0) continue;
+	if($data["ID"] == "WP1") $meter *= 10000;
 	#if($temperature > 200) $temperature = -3;
 	$value_count++;
     $data["values"][] = [
@@ -124,7 +125,7 @@ foreach ($data["values"] as $item) {
 	
 
 	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
-	#if($item["timestamp"] == $prev["timestamp"]) continue; // deactivated xmas 2025
+	if($item["timestamp"] == $prev["timestamp"]) continue; // deactivated xmas 2025
 	
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     
