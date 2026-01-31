@@ -1665,7 +1665,7 @@ void handle_temperature()
 }
 void handle_call_backend()
 {
-  if (wifi_connected && millis() - wifi_reconnection_time > 20000)
+  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
     if (
         (!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()) % atoi(backend_call_minute) == 0 && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value

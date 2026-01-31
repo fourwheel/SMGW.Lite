@@ -56,7 +56,6 @@ for ($i = 0; $i < $dataCount; $i++) {
 	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
 	
 	if($meter == 0) continue;
-	if($data["ID"] == "WP1") $meter *= 10000;
 	#if($temperature > 200) $temperature = -3;
 	$value_count++;
     $data["values"][] = [
