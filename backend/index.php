@@ -124,6 +124,7 @@ foreach ($data["values"] as $item) {
 	
 
 	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
+	if($item["timestamp"] == $prev["timestamp"]) continue; // deactivated xmas 2025
 	
 	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
     
@@ -140,7 +141,7 @@ foreach ($data["values"] as $item) {
 	if(!isset($item['temperature'])) $item['temperature'] = 0;
 	$item['temperature'] = $item['temperature']/100;
 
-	if(!isset($item['meter_solar'])) $item['meter_solar'] = NULL;
+	if(!isset($item['meter_solar'])) $item['meter_solar'] = 0;
 	
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
@@ -158,7 +159,7 @@ foreach ($data["values"] as $item) {
 	".$current_time.",
 	'".$item["timestamp"]."', 
 	'".($item['meter'])."', 
-	".($item["meter_solar"]).",
+	'".($item["meter_solar"])."',
 	'".$item['temperature']."')";
 
 

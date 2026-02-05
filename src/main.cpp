@@ -491,8 +491,8 @@ String Log_EntryToString(int i)
 String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
-  String logString = "<html><head><title>SMGWLite - Meter Values</title>";
-  //logString += String(HTML_STYLE);
+  String logString = "<html><head><title>SMGWLite - Log Buffer</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  logString += String(HTML_STYLE);
   logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
@@ -2111,6 +2111,21 @@ void Webserver_ShowTelegram_Raw()
     if (i > 0)
       s += " ";
     s += String(telegram_receive_buffer[i], HEX);
+  }
+
+  s += "</textarea><br><br><div class='block'>Receive Buffer ASCII</div><textarea name='cert' rows='10' cols='80'>";
+  for(int i = 0; i < TELEGRAM_LENGTH; i++)
+  {
+    char c = (char)telegram_receive_buffer[i];
+    
+    if (isPrintable(c) || c == '\n' || c == '\r') 
+    {
+      s += c;
+    } 
+    else 
+    {
+      s += "."; 
+    }
   }
 
   s += "</textarea>";
