@@ -115,6 +115,8 @@ int meter_value_NON_override_i = Meter_Value_Buffer_Size - 1;
 
 float currentPower, LastPower = 0.0;
 
+int staticDelay = 0;
+
 // Backend Vars
 bool call_backend_successfull = true;
 SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
@@ -879,6 +881,15 @@ void setup()
   Temp_sensors.begin();
   Serial.print("Temp sensors found: ");
   Serial.println(Temp_sensors.getDeviceCount());
+  
+  uint8_t mac[6];
+  WiFi.macAddress(mac); // get mac address of the device
+
+  // use two last bytes
+  uint16_t lastTwoBytes = (mac[4] << 8) | mac[5];
+  
+  // Use modulo to get a number between 0 and 59 for the static delay
+  staticDelay = lastTwoBytes % 60;
 }
 void Param_setup()
 {
@@ -1668,7 +1679,7 @@ void handle_call_backend()
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
     if (
-        (!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()) % atoi(backend_call_minute) == 0 && Time_getEpochTime() % 60 > 5 // little delay to wait for latest metering value
+        (!call_backend_successfull && millis() - last_call_backend > 30000) || ((Time_getMinutes()) % atoi(backend_call_minute) == 0 && Time_getEpochTime() % 60 > staticDelay // device individual delay to avoid all devices calling at the same time
                                                                                 && millis() - last_call_backend > 60000))
     {
       Webclient_Send_Meter_Values_to_backend_wrapper();
@@ -1983,6 +1994,9 @@ void Webserver_HandleRoot()
   <li>Last Backend Call ago (min): )rawliteral";
   s += String((millis() - last_call_backend) / 60000);
   s += R"rawliteral(</li>
+  <li>Static Delay: )rawliteral";
+  s += String(staticDelay);
+  s += R"rawliteral( s</li>
   <li><a href='sendStatus_Task'>Send Status Report to Backend</a></li>
   <li><a href='sendMeterValues_Task'>Send Meter Values to Backend</a></li>
   <li><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a></li>
