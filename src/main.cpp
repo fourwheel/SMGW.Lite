@@ -74,7 +74,7 @@ const char wifiInitialApPassword[] = "password";
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-#define TELEGRAM_LENGTH 500
+#define TELEGRAM_LENGTH 550
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
 size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
@@ -275,20 +275,36 @@ IotWebConfTextParameter DebugMeterValueFromOtherClientIP_object = IotWebConfText
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
+// const char HTML_STYLE[] PROGMEM = R"rawliteral(
+//   <style>
+//     html, body { overflow-x: auto; max-width: 100%; }
+//     body { font-family: sans-serif; margin: 1em;   column-width: 600px; column-gap: 40px;}
+//     table { display: block; overflow-x: auto; white-space: nowrap; border-collapse: collapse; max-width: 100%;   }
+//     th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+//     ul { list-style-type: square; padding-left: 20px; }
+//     li { margin-bottom: 0.3em; }
+//     a { color: #0066cc; text-decoration: none; }
+//     a:hover { text-decoration: underline; }
+//     font[color="red"] { color: red; }
+//   </style>
+// )rawliteral";
 const char HTML_STYLE[] PROGMEM = R"rawliteral(
   <style>
-    html, body { overflow-x: auto; max-width: 100%; }
-    body { font-family: sans-serif; margin: 1em;   column-width: 600px; column-gap: 40px;}
-    table { display: block; overflow-x: auto; white-space: nowrap; border-collapse: collapse; max-width: 100%;   }
+    html, body { overflow-x: auto; max-width: 100%; background: #fdfdfd; }
+    body { font-family: sans-serif; margin: 1em; }
+    /* Flex-Container for the tables */
+    .container { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+    table { border-collapse: collapse; min-width: 300px; background: white; margin-bottom: 1em; }
     th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+    th { background: #eee; }
     ul { list-style-type: square; padding-left: 20px; }
     li { margin-bottom: 0.3em; }
     a { color: #0066cc; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    font[color="red"] { color: red; }
+    .err { color: red; font-weight: bold; }
+    .ok { color: green; font-weight: bold; }
   </style>
 )rawliteral";
-
 
 unsigned long Time_getEpochTime()
 {
@@ -566,6 +582,124 @@ void Webserver_LocationHrefHome(int delay)
   String call = "<meta http-equiv='refresh' content = '" + String(delay) + ";url=/'>";
   server.send(200, "text/html", call);
 }
+
+#include <Arduino.h>
+
+/**
+ * SML CRC16 (X25) Algorithm
+ * Initial: 0xFFFF, Poly: 0x1021 (reversed 0x8408), Final XOR: 0xFFFF
+ */
+uint16_t calculateSML_CRC16(uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x0001) crc = (crc >> 1) ^ 0x8408;
+            else crc >>= 1;
+        }
+    }
+    return crc ^ 0xFFFF;
+}
+
+/**
+ * Helper: Searches for OBIS code and returns a table row
+ */
+String getObisRow(uint8_t* buffer, int prefix, int suffix, uint8_t* code, const char* label, const char* unit, float scaler) {
+    for (size_t i = (size_t)prefix; i < (size_t)suffix - 12; i++) {
+        if (memcmp(&buffer[i], code, 6) == 0) {
+            for (int j = i + 6; j < i + 25; j++) {
+                if (buffer[j] == 0x52) { // Scaler anchor found
+                    uint8_t typeByte = buffer[j + 2];
+                    int vLen = (typeByte & 0x0F) - 1;
+                    int vStart = j + 3;
+                    
+                    int32_t raw = 0;
+                    for (int k = 0; k < vLen; k++) {
+                        raw = (raw << 8) | buffer[vStart + k];
+                    }
+                    
+                    // Sign correction for Active Power (W)
+                    if (vLen <= 4 && (buffer[vStart] & 0x80) && (strcmp(unit, "W") == 0)) {
+                        if (vLen == 1) raw -= 256;
+                        else if (vLen == 2) raw -= 65536;
+                    }
+
+                    return "<tr><td>" + String(label) + "</td>" +
+                           "<td>" + String(vStart) + "</td>" +
+                           "<td>" + String(vLen) + " Bytes</td>" +
+                           "<td><strong>" + String(raw * scaler, 1) + " " + unit + "</strong></td></tr>";
+                }
+            }
+        }
+    }
+    return ""; // Return empty if register is not found
+}
+
+String analyzeSML(uint8_t* buffer, size_t length) {
+    // Injecting your predefined style and setting charset
+    String s = "<meta charset='UTF-8'>";
+    s += String(HTML_STYLE); 
+    s += "<title>SML Live Analysis</title>";
+    s += "<h2>SML Live Analysis</h2>";
+    
+    // 1. Find Prefix and Suffix
+    int px = -1;
+    for (size_t i = 0; i < (int)length - 4; i++) {
+        if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b) { px = i; break; }
+    }
+    
+    int sx = -1;
+    if (px != -1) {
+        for (size_t i = px; i < (int)length - 5; i++) {
+            if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b && buffer[i+4] == 0x1a) { sx = i; break; }
+        }
+    }
+
+    if (px == -1 || sx == -1) {
+        return s + "<p><font color='red'><strong>Error:</strong> Telegram incomplete (Prefix/Suffix missing).</font></p>";
+    }
+
+    // 2. CRC Logic
+    int crcLen = (sx + 6) - px;
+    uint16_t compCRC = calculateSML_CRC16(&buffer[px], crcLen);
+    uint16_t recvCRC = (buffer[sx + 6] << 8) | buffer[sx + 7];
+    bool crcOk = (compCRC == recvCRC);
+
+    // 3. Status Table
+    s += "<h3>Telegram Status</h3>";
+    s += "<table><tr><th>Parameter</th><th>Value</th></tr>";
+    s += "<tr><td>Index (Start/End)</td><td>" + String(px) + " / " + String(sx) + "</td></tr>";
+    s += "<tr><td>Payload Length</td><td>" + String(crcLen + 2) + " Bytes</td></tr>";
+    
+    s += "<tr><td>Checksum (CRC)</td><td>";
+    if (recvCRC == 0) s += "Meter sent no CRC (0x0000)";
+    else if (crcOk) s += "0x" + String(recvCRC, HEX) + " (Valid)";
+    else s += "<font color='red'>0x" + String(recvCRC, HEX) + " (Invalid! Expected: " + String(compCRC, HEX) + ")</font>";
+    s += "</td></tr></table>";
+
+    // 4. Data Table
+    s += "<h3>Registers</h3>";
+    s += "<table><tr><th>OBIS Code</th><th>Index</th><th>Length</th><th>Reading</th></tr>";
+    
+    // Define OBIS codes
+    uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff}; // Total Consumption
+    uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff}; // Total Delivery
+    uint8_t obis167[] = {0x01, 0x00, 0x10, 0x07, 0x00, 0xff}; // Active Power
+
+    s += getObisRow(buffer, px, sx, obis180, "Consumption (1.8.0)", "Wh", 0.1);
+    s += getObisRow(buffer, px, sx, obis280, "Delivery (2.8.0)", "Wh", 0.1);
+    s += getObisRow(buffer, px, sx, obis167, "Active Power", "W", 1.0);
+
+    s += "</table>";
+
+    return s;
+}
+void Webserver_SML_Analysis()
+{
+  server.send(200, "text/html", analyzeSML(telegram_receive_buffer, TELEGRAM_LENGTH));
+}
+
+
 void Webserver_MeterValue_Num2()
 {
   String MeterValueNum = "<html><head><title>SMGWLite - Alternative Amount Meter Value</title> " + String(HTML_STYLE) + "</head><body>"+String(MeterValue_Num2())+"</body></html>";
@@ -763,6 +897,7 @@ void Webserver_UrlConfig()
   // -- Set up required URL handlers on the web server.
   server.on("/", Webserver_HandleRoot);
   server.on("/showTelegram", Webserver_ShowTelegram);
+  server.on("/showSMLAnalysis", Webserver_SML_Analysis);
   server.on("/showTelegramRaw", Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue", Webserver_ShowLastMeterValue);
   server.on("/showCert", Webserver_ShowCert);
@@ -1963,6 +2098,7 @@ void Webserver_HandleRoot()
   s += (activate_IEC_Parser_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
   <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
+  <li><a href='showSMLAnalysis'>Show SML Analysis</a></li>
 </ul>
 
 <h3>Backend Config</h3>
