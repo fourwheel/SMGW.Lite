@@ -74,7 +74,7 @@ const char wifiInitialApPassword[] = "password";
 // Telegramm Vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
-#define TELEGRAM_LENGTH 550
+#define TELEGRAM_LENGTH 1024
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegramm in ms
 size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
@@ -92,6 +92,7 @@ struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes
   uint32_t meter_value; // 4 Bytes
+  // uint32_t obis280;
   uint32_t temperature; // 4 Bytes
   uint32_t solar;       // 4 Bytes
 };
@@ -164,7 +165,7 @@ void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-int32_t MeterValue_get_from_SML_telegram();
+bool MeterValue_get_from_SML_telegram();
 int32_t MeterValue_get_from_IEC_telegram();
 void OTA_setup();
 void Param_configSaved();
@@ -175,7 +176,7 @@ String Time_getFormattedTime();
 unsigned long Time_getEpochTime();
 int Time_getMinutes();
 bool Telegram_prefix_suffix_correct();
-void Telegram_saveCompleteTelegram();
+
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
@@ -248,7 +249,7 @@ IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Of
 IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
 IotWebConfNumberParameter telegram_suffix_object = IotWebConfNumberParameter("Suffix Begin", "telegram_suffix", telegram_suffix, NUMBER_LEN, "100", "1..TELEGRAM_LENGTH", "min='100' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, true);
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, true);
 
 IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
@@ -275,37 +276,64 @@ IotWebConfTextParameter DebugMeterValueFromOtherClientIP_object = IotWebConfText
 
 IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
 
-// const char HTML_STYLE[] PROGMEM = R"rawliteral(
-//   <style>
-//     html, body { overflow-x: auto; max-width: 100%; }
-//     body { font-family: sans-serif; margin: 1em;   column-width: 600px; column-gap: 40px;}
-//     table { display: block; overflow-x: auto; white-space: nowrap; border-collapse: collapse; max-width: 100%;   }
-//     th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
-//     ul { list-style-type: square; padding-left: 20px; }
-//     li { margin-bottom: 0.3em; }
-//     a { color: #0066cc; text-decoration: none; }
-//     a:hover { text-decoration: underline; }
-//     font[color="red"] { color: red; }
-//   </style>
-// )rawliteral";
 const char HTML_STYLE[] PROGMEM = R"rawliteral(
-  <style>
-    html, body { overflow-x: auto; max-width: 100%; background: #fdfdfd; }
-    body { font-family: sans-serif; margin: 1em; }
-    /* Flex-Container for the tables */
-    .container { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-    table { border-collapse: collapse; min-width: 300px; background: white; margin-bottom: 1em; }
-    th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
-    th { background: #eee; }
-    ul { list-style-type: square; padding-left: 20px; }
-    li { margin-bottom: 0.3em; }
-    a { color: #0066cc; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .err { color: red; font-weight: bold; }
-    .ok { color: green; font-weight: bold; }
-  </style>
-)rawliteral";
+<style>
+  html, body { 
+    background: #fdfdfd; 
+    margin: 0; 
+    padding: 15px;
+    box-sizing: border-box;
+  }
+  
+  body { 
+    font-family: sans-serif; 
+    /* Aktiviert das 3-Spalten-Layout */
+    column-count: 3;
+    column-gap: 25px;
+    column-rule: 1px solid #eee; /* Optionale Trennlinie */
+  }
 
+  /* Fallback für Handys: Nur eine Spalte */
+  @media (max-width: 900px) {
+    body { column-count: 1; }
+  }
+
+  /* WICHTIG: Hält zusammengehörige Blöcke in einer Spalte fest */
+  h2, h3, table, ul, p, div {
+    break-inside: avoid;
+    display: block;
+    max-width: 100%;
+    overflow-x: auto; 
+  }
+
+  table { 
+    border-collapse: collapse; 
+    width: 100%; 
+    background: white; 
+    margin-bottom: 1.2em;
+    font-size: 0.85em; /* Etwas kleiner für die schmalen Spalten */
+  }
+
+  th, td { 
+    border: 1px solid #ccc; 
+    padding: 5px 8px; 
+    text-align: left;
+    word-break: break-word; 
+  }
+
+  th { background: #eee; }
+  ul { padding-left: 1.5em; margin-bottom: 1.2em; }
+  li { margin-bottom: 0.3em; }
+  a { color: #0066cc; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .section {
+  display: inline-block; /* Wichtig: Behandelt das DIV wie ein einzelnes Paket */
+  width: 100%;           /* Nutzt die volle Spaltenbreite */
+  break-inside: avoid;   /* Standard-Befehl gegen Spaltenbruch */
+  margin-bottom: 20px;   /* Abstand zur nächsten Sektion in der Spalte */
+}
+</style>
+)rawliteral";
 unsigned long Time_getEpochTime()
 {
   return static_cast<unsigned long>(time(nullptr));
@@ -436,8 +464,6 @@ String Log_StatusCodeToString(int statusCode)
     return "Telegram Buffer overflow";
   case 3002:
     return "Telegram timeout";
-  case 3003:
-    return "Telegram too big for buffer";
   case 4000:
     return "Connection to server failed (Cert!?)";
   case 5000:
@@ -461,7 +487,7 @@ String Log_StatusCodeToString(int statusCode)
   case 8004:
     return "No Cert received";
   }
-  if (statusCode < 200)
+  if (statusCode < 1000)
   {
     return "# values transmitted";
   }
@@ -509,9 +535,15 @@ String Log_EntryToString(int i)
 String Log_BufferToString(int showNumber)
 {
   int showed_number = 0;
-  String logString = "<html><head><title>SMGWLite - Log Buffer</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  String logString;
+  if(showNumber > 10)
+  {
+  logString = "<html><head><title>SMGWLite - Log Buffer</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   logString += String(HTML_STYLE);
-  logString += "</head><body><table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
+  logString += "</head><body>";
+  }
+
+  logString += "<table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First Loop: more recent; from logIndex down to 0)
   for (int i = logIndex; i >= 0; i--)
@@ -640,7 +672,7 @@ String analyzeSML(uint8_t* buffer, size_t length) {
     String s = "<meta charset='UTF-8'>";
     s += String(HTML_STYLE); 
     s += "<title>SML Live Analysis</title>";
-    s += "<h2>SML Live Analysis</h2>";
+    s += "<div class='section'><h2>SML Live Analysis</h2>";
     
     // 1. Find Prefix and Suffix
     int px = -1;
@@ -690,7 +722,7 @@ String analyzeSML(uint8_t* buffer, size_t length) {
     s += getObisRow(buffer, px, sx, obis280, "Delivery (2.8.0)", "Wh", 0.1);
     s += getObisRow(buffer, px, sx, obis167, "Active Power", "W", 1.0);
 
-    s += "</table>";
+    s += "</table></div>";
 
     return s;
 }
@@ -766,7 +798,7 @@ void Webserver_TestBackendConnection()
   WiFiClientSecure client;
   client.setCACert(FullCert);
 
-  String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body>";
+  String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body><div class='section'>";
 
   if (client.connect(backend_host.c_str(), 443))
   {
@@ -820,6 +852,7 @@ void Webserver_TestBackendConnection()
   {
     res += "<br>ID & Token invalid!";
   }
+  res += "</div></body></html>";
   server.send(200, "text/html", res);
 }
 void Webserver_HandleCertUpload()
@@ -1108,46 +1141,115 @@ void Webclient_Send_Log_to_backend_wrapper()
   xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
 }
 
-bool Telegram_prefix_suffix_correct()
-{
-  int prefix = atoi(telegram_prefix);
-  int suffix = atoi(telegram_suffix);
 
-  if (suffix == 0)
-  {
-    Log_AddEntry(1203);
-    Serial.println("Suffix Must not be 0");
-    return false;
-  }
 
-  if (telegram_receive_buffer[suffix] == 0x1B && telegram_receive_buffer[suffix + 1] == 0x1B && telegram_receive_buffer[suffix + 2] == 0x1B && telegram_receive_buffer[suffix + 3] == 0x1B && telegram_receive_buffer[prefix] == 0x1B && telegram_receive_buffer[prefix + 1] == 0x1B && telegram_receive_buffer[prefix + 2] == 0x1B && telegram_receive_buffer[prefix + 3] == 0x1B)
-    return true;
-  else
-  {
-    Log_AddEntry(1204);
+/**
+ * Internal Helper: SML CRC16 (X25) Algorithm
+ *  * This function is written bei Gemini3
+ */
+// uint16_t internal_SML_CRC16(uint8_t* data, size_t len) {
+//     uint16_t crc = 0xFFFF;
+//     for (size_t i = 0; i < len; i++) {
+//         crc ^= data[i];
+//         for (int j = 0; j < 8; j++) {
+//             if (crc & 0x0001) crc = (crc >> 1) ^ 0x8408;
+//             else crc >>= 1;
+//         }
+//     }
+//     return crc ^ 0xFFFF;
+// }
+
+/**
+ * Internal Helper: Extracting specific OBIS values
+ *  * This function is written bei Gemini3
+ */
+bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* result) {
+    for (int i = px; i < sx - 12; i++) {
+        if (memcmp(&buffer[i], code, 6) == 0) {
+            for (int j = i + 6; j < i + 25; j++) {
+                if ((buffer[j] & 0xF0) == 0x50) { 
+                    uint8_t typeByte = buffer[j + 2];
+                    int vLen = (typeByte & 0x0F) - 1;
+                    int vStart = j + 3;
+                    if (vStart + vLen > sx) return false;
+
+                    uint32_t raw = 0;
+                    for (int k = 0; k < vLen; k++) raw = (raw << 8) | buffer[vStart + k];
+                    *result = raw;
+                    return true;
+                }
+            }
+        }
+    }
     return false;
-  }
 }
 
-int32_t MeterValue_get_from_SML_telegram()
-{
-  int offset = atoi(telegram_offset);
-  int length = atoi(telegram_length);
-  int32_t meter_value = -1;
+/**
+ * Main Processing Function
+ * Validates integrity and parses registers.
+ * Returns true if the telegram is structurally sound and data is extracted.
+ * This function is written bei Gemini3
+ */
+bool MeterValue_get_from_SML_telegram(uint8_t* buffer, size_t length) {
+    // 1. Locate Prefix
+    int px = -1;
+    for (int i = 0; i < (int)length - 4; i++) {
+        if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b) {
+            px = i; break;
+        }
+    }
+    if (px == -1) return false;
 
-  if (!Telegram_prefix_suffix_correct())
-  {
-    return -2;
-  }
+    // 2. Locate Suffix
+    int sx = -1;
+    for (int i = px; i < (int)length - 5; i++) {
+        if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b && buffer[i+4] == 0x1a) {
+            sx = i; break;
+        }
+    }
+    if (sx == -1) return false;
 
-  for (int i = 0; i < length; i++)
-  {
-    int shift = length - 1 - i;
-    meter_value += telegram_receive_buffer[offset + i] << 8 * shift;
-  }
-  return meter_value;
+    // DEACTIVATED
+    // // 3. Integrity Check (CRC16)
+    // int crcDataLength = (sx + 6) - px; 
+    // uint16_t computedCRC = internal_SML_CRC16(&buffer[px], crcDataLength);
+    // uint16_t receivedCRC = (buffer[sx + 6] << 8) | buffer[sx + 7];
+
+    // // CASE 1: Meter sent a CRC (not 0). Check if it matches.
+    // if (receivedCRC != 0) {
+    //     if (receivedCRC != computedCRC) {
+    //         // CRC is present but WRONG -> Data is corrupt.
+    //        return false; 
+    //     }
+    // } 
+    // CASE 2: receivedCRC is 0. 
+    // Most meters like Iskra send 0x0000 if CRC is disabled. 
+    // We proceed and trust the structural integrity (Prefix/Suffix).
+
+    // 4. Extract OBIS Data
+    uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff};
+    uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff};
+
+    uint32_t temp180 = 0, temp280 = 0;
+    bool found180 = obisExtractor(buffer, px, sx, obis180, &temp180);
+    bool found280 = obisExtractor(buffer, px, sx, obis280, &temp280);
+
+    // Final Validation: Only update globals if values were found
+    // Modification if 2.8.0 is optional or missing
+    if (found180) {
+        resetMeterValue(LastMeterValue);               // reset LastMeterValue
+        LastMeterValue.meter_value = temp180;
+        // Only update 2.8.0 if it was actually found in this telegram
+        if (found280) {
+            // LastMeterValue.obis280 = temp280;
+        }
+        return true; // Return true because the main reading (1.8.0) is valid
+    }
+
+    return false; 
 }
 
+/* This funciton is written by ChatGPT*/
 int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
   // Create a temporary null-terminated string
   char telegram_str[length + 1];
@@ -1367,31 +1469,7 @@ int32_t MeterValue_get_from_remote()
   return meter_value_i32;
 }
 
-void Telegram_saveCompleteTelegram()
-{
-  size_t telegramLength = telegram_receive_bufferIndex + 3; // length + additional bytes
-  if (telegramLength > TELEGRAM_LENGTH)
-  {
-    Log_AddEntry(3003);
-    return;
-  }
 
-  
-  TelegramSizeUsed = telegramLength;
-  timestamp_telegram = Time_getEpochTime();
-  int32_t meter_value = MeterValue_get_from_SML_telegram();
-  // if (timestamp_telegram >= PrevMeterValue.timestamp + 10 && meter_value != PrevMeterValue.meter_value)
-  // {
-  //   PrevMeterValue = LastMeterValue;
-  // }
-  resetMeterValue(LastMeterValue);               // reset LastMeterValue
-  LastMeterValue.meter_value = meter_value;      // get meter value from telegram
-  LastMeterValue.timestamp = timestamp_telegram; // save timestamp
-  if (temperature_object.isChecked())
-  {
-    LastMeterValue.temperature = current_temperature;
-  }
-}
 
 void Telegram_ResetReceiveBuffer()
 {
@@ -1415,21 +1493,6 @@ void handle_Telegram_receive()
   {
     uint8_t incomingByte = mySerial.read();
     lastByteTime = millis(); // update time of last byte
-    // check if additional bytes must be read
-    if (readingExtraBytes)
-    {
-      extraBytes[extraIndex++] = incomingByte;
-
-      if (extraIndex == 3)
-      {
-        if(Telegram_prefix_suffix_correct())
-        {
-          Telegram_saveCompleteTelegram();
-        }
-        Telegram_ResetReceiveBuffer();
-      }
-      continue;
-    }
 
     // Save Byte in Buffer
     if (telegram_receive_bufferIndex < TELEGRAM_LENGTH)
@@ -1444,35 +1507,29 @@ void handle_Telegram_receive()
       continue;
     }
 
-    // Check for start signature
-    if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) &&
-        memcmp(telegram_receive_buffer, SML_SIGNATURE_START, sizeof(SML_SIGNATURE_START)) == 0)
-    {
-
-      // Check for end signature
-      if (telegram_receive_bufferIndex >= sizeof(SML_SIGNATURE_START) + sizeof(SML_SIGNATURE_END))
-      {
-        if (memcmp(&telegram_receive_buffer[telegram_receive_bufferIndex - sizeof(SML_SIGNATURE_END)], SML_SIGNATURE_END, sizeof(SML_SIGNATURE_END)) == 0)
-        {
-          // signatur check positive, wait for additional bytes
-          readingExtraBytes = true;
-        }
-      }
-    }
   }
 
   // check for timeout
   if (telegram_receive_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {
-    // Serial.println("Error: Timeout!");
-    // Log_AddEntry(3002);
 
-    // Quick And Dirty Integration for IEC Protocoll
+    // IEC
     if(activate_IEC_Parser_object.isChecked())
     {
-      LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, TELEGRAM_LENGTH);
+      LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, telegram_receive_bufferIndex);
     }
-    
+    // SML
+    else
+    {
+      if(MeterValue_get_from_SML_telegram(telegram_receive_buffer, telegram_receive_bufferIndex) == true)
+      {
+        LastMeterValue.timestamp = Time_getEpochTime();
+      }
+    }
+    if (temperature_object.isChecked())
+      {
+        LastMeterValue.temperature = current_temperature;
+      }
     Telegram_ResetReceiveBuffer();
   }
 }
@@ -2010,16 +2067,7 @@ void Webserver_HandleRoot()
   s += thingName;
   s += R"rawliteral(</title>)rawliteral";
   s += HTML_STYLE;
-  s += R"rawliteral(<style>
-    body { font-family: sans-serif; margin: 1em; }
-    table { border-collapse: collapse; width: 100%; max-width: 7<00px; }
-    th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
-    ul { list-style-type: square; padding-left: 20px; }
-    li { margin-bottom: 0.3em; }
-    a { color: #0066cc; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    font[color="red"] { color: red; }
-  </style>
+  s += R"rawliteral(
 </head>
 <body>
 
@@ -2082,25 +2130,13 @@ void Webserver_HandleRoot()
 </ul>
 
 <h3>Telegram Parse Config</h3>
-<ul>
-  <li><i>Prefix Begin (usually 0):</i> )rawliteral";
-  s += String(atoi(telegram_prefix));
-  s += R"rawliteral(</li>
-  <li><i>Meter Value Offset:</i> )rawliteral";
-  s += String(atoi(telegram_offset));
-  s += R"rawliteral(</li>
-  <li><i>Meter Value Length:</i> )rawliteral";
-  s += String(atoi(telegram_length));
-  s += R"rawliteral(</li>
-  <li><i>Suffix Begin:</i> )rawliteral";
-  s += String(atoi(telegram_suffix));
-  s += R"rawliteral(</li><li><i>IEC Parser:</i> )rawliteral";
-  s += (activate_IEC_Parser_object.isChecked() ? "activated" : "deactivated");
+<ul><li><i>Telegram Protocol Parser:</i> )rawliteral";
+  s += (activate_IEC_Parser_object.isChecked() ? "IEC" : "SML");
   s += R"rawliteral(</li>
   <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
   <li><a href='showSMLAnalysis'>Show SML Analysis</a></li>
 </ul>
-
+<div class="section">
 <h3>Backend Config</h3>
 <ul>
   <li><i>Backend Endpoint:</i> )rawliteral";
@@ -2137,7 +2173,7 @@ void Webserver_HandleRoot()
   <li><a href='sendMeterValues_Task'>Send Meter Values to Backend</a></li>
   <li><a href='sendboth_Task'>Send Meter Values and Status Report to Backend</a></li>
 </ul>
-
+</div>
 <h3>Taf Config</h3>
 <ul>
   <li><i>Taf 7:</i> )rawliteral";
@@ -2231,10 +2267,11 @@ s += R"rawliteral()</h3>
 <ul>
   <li><a href='showLogBuffer'>Show entire Logbuffer</a></li>
   <li><a href='resetLogBuffer'>Reset Log</a></li>
+  <div class="log-section">
 )rawliteral";
   s += Log_BufferToString(10);
   s += R"rawliteral(
-
+  </div>
 </body>
 </html>
 )rawliteral";
@@ -2298,8 +2335,6 @@ void Webserver_ShowTelegram()
   s += "<br>Last Byte received @ " + String(millis()-lastByteTime) + "ms ago<br>";
   s += "<br>Last Complete Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
     
-  if (!Telegram_prefix_suffix_correct())
-    s += "<br><font color=red>incomplete telegram</font>";
   s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th></tr>";
 
 
