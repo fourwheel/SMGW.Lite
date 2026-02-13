@@ -802,14 +802,14 @@ void Webserver_TestBackendConnection()
 
   if (client.connect(backend_host.c_str(), 443))
   {
-    res += "Host reachable,<br>Cert correct";
+    res += "&#9989; Host reachable,<br>&#9989; Cert correct";
   }
   else
   {
     client.setInsecure(); // If Cert not accepted, try without
     if (client.connect(backend_host.c_str(), 443))
     {
-      res += "Host reachable<br>Cert not working.";
+      res += "&#9989;Host reachable<br>&#10060;Cert not working.";
     }
     else
     {
@@ -846,11 +846,11 @@ void Webserver_TestBackendConnection()
   // check response code
   if (response.indexOf("200") != -1) //
   {
-    res += "<br>ID & Token valid.";
+    res += "<br>&#9989; ID & Token valid.";
   }
   else
   {
-    res += "<br>ID & Token invalid!";
+    res += "<br>&#10060; ID & Token invalid!";
   }
   res += "</div></body></html>";
   server.send(200, "text/html", res);
