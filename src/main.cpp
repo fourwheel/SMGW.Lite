@@ -143,6 +143,7 @@ unsigned long wifi_reconnection_time = 0;
 unsigned long last_wifi_retry = 0;
 unsigned long last_wifi_check;
 bool wifi_connected;
+int IPlastOctet = -1;
 
 unsigned long last_remote_meter_value = 0;
 
@@ -1671,6 +1672,9 @@ void Webclient_send_meter_values_to_backend()
   header += String(ESP.getFreeHeap());
   header += "&transmittedValues=";
   header += String(MeterValue_Num());
+  header += "&IP=";
+  header += String(IPlastOctet);
+  
 
   header += " HTTP/1.1\r\n";
 
@@ -1825,6 +1829,10 @@ void handle_check_wifi_connection()
       wifi_connected = true;
       wifi_reconnection_time = millis();
       call_backend_successfull = false;
+      
+
+      IPAddress localIP = WiFi.localIP();
+      IPlastOctet = localIP[3];
 
       if (firstTime == true)
       {
