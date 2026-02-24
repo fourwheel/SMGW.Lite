@@ -146,7 +146,6 @@ foreach ($data["values"] as $item) {
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
 	`id`, 
-	`timestamp_server`,
 	`timestamp_server2`, 
 	`timestamp_client`, 
 	`meter_value`, 
@@ -155,7 +154,6 @@ foreach ($data["values"] as $item) {
 	VALUES (
 	NULL, 
 	'".$data['ID']."', 
-	'".date('Y-m-d H:i:s', $current_time)."', 
 	".$current_time.",
 	'".$item["timestamp"]."', 
 	'".($item['meter'])."', 
