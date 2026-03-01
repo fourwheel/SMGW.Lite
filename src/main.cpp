@@ -402,7 +402,6 @@ void MeterValue_init_Buffer()
 
 bool b_send_log_to_backend = false;
 
-bool firstTime = true;
 String Log_StatusCodeToString(int statusCode)
 {
   switch (statusCode)
@@ -1836,14 +1835,8 @@ void handle_check_wifi_connection()
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
 
-      // if (firstTime == true)
-      // {
-      //   firstTime = false;
-      // }
-      // else
-      {
-        b_send_log_to_backend = true;
-      }
+
+      Webclient_Send_Log_to_backend_wrapper();
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
