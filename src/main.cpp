@@ -1574,6 +1574,8 @@ void Webclient_send_log_to_backend()
   logHeader += backend_ID;
   logHeader += "&token=";
   logHeader += String(backend_token);
+  logHeader += "&IP=";
+  logHeader += String(IPlastOctet);
   logHeader += " HTTP/1.1\r\nHost: ";
   logHeader += backend_host;
   logHeader += "\r\n";
@@ -1834,11 +1836,11 @@ void handle_check_wifi_connection()
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
 
-      if (firstTime == true)
-      {
-        firstTime = false;
-      }
-      else
+      // if (firstTime == true)
+      // {
+      //   firstTime = false;
+      // }
+      // else
       {
         b_send_log_to_backend = true;
       }
