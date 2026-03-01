@@ -363,7 +363,7 @@ void LogBuffer_reset()
   {
     logBuffer[i].timestamp = 0;
     logBuffer[i].uptime = 0;
-    logBuffer[i].statusCode = 0;
+    logBuffer[i].statusCode = -1;
   }
   logIndex = -1;
 }
@@ -373,7 +373,7 @@ void Log_AddEntry(int statusCode)
   // Remember, it is a ringbuffer and overwrites oldest entries
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
 
-  unsigned long uptimeSeconds = millis() / 60000; // Uptime in seconds
+  unsigned long uptimeSeconds = millis() / 60000; // Uptime in minutes
 
   logBuffer[logIndex].timestamp = Time_getEpochTime();
   logBuffer[logIndex].uptime = uptimeSeconds;
@@ -519,7 +519,7 @@ String Time_formatTimestamp(unsigned long timestamp)
 }
 String Log_EntryToString(int i)
 {
-  if (logBuffer[i].statusCode == 0 && logBuffer[i].timestamp == 0 && logBuffer[i].uptime == 0)
+  if (logBuffer[i].statusCode == -1) //0 && logBuffer[i].timestamp == 0 && logBuffer[i].uptime == 0)
     return ""; // don't show empty entries
   String logString = "<tr><td>";
   logString += String(i) + "</td><td>";
@@ -1023,6 +1023,7 @@ void Webserver_UrlConfig()
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
+  LogBuffer_reset();
   Log_AddEntry(1001);
   Serial.begin(115200);
 
