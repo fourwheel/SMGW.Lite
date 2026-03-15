@@ -137,6 +137,7 @@ const int LOG_BUFFER_SIZE = 100;
 // Tasks vars
 int watermark_meter_buffer = 0;
 int watermark_log_buffer = 0;
+int watermark_telegram = 0;
 
 // Wifi Vars
 unsigned long wifi_reconnection_time = 0;
@@ -1019,7 +1020,13 @@ void Webserver_UrlConfig()
     }
   });
 }
-
+void telegramTask(void * pvParameters) {
+    for(;;) { 
+        handle_Telegram_receive();
+        vTaskDelay(pdMS_TO_TICKS(10)); 
+        watermark_telegram = uxTaskGetStackHighWaterMark(NULL);
+    }
+}
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
@@ -1059,6 +1066,15 @@ void setup()
   
   // Use modulo to get a number between 0 and 59 for the static delay
   staticDelay = lastTwoBytes % 60;
+  vTaskPrioritySet(NULL, 3);
+  xTaskCreate(
+        telegramTask,          // function name
+        "TelegramBot",         // tetx name for debugging
+        2048,                  // Stack size in bytes
+        NULL,                  // parameters
+        0,                     // Priority (1 = low, higher = more important)
+        NULL                   // Task-Handle (optional)
+    );
 }
 void Param_setup()
 {
@@ -1111,6 +1127,11 @@ void OTA_setup()
   ArduinoOTA
       .onStart([]()
                {
+        // // 1. stop Telegram-Task
+        // if (telegramTaskHandle != NULL) {
+        //     vTaskSuspend(telegramTaskHandle);
+        // }
+        // Serial.println("OTA Start: telegram task was paused");
       String type;
       if (ArduinoOTA.getCommand() == U_FLASH)
         type = "sketch";
@@ -1478,6 +1499,7 @@ void Telegram_ResetReceiveBuffer()
   readingExtraBytes = false;
   extraIndex = 0;
 }
+
 
 void handle_Telegram_receive()
 {
@@ -1991,7 +2013,7 @@ void loop()
   iotWebConf.doLoop();
   ArduinoOTA.handle();
   handle_temperature();
-  handle_Telegram_receive();
+  // handle_Telegram_receive();
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
@@ -2234,6 +2256,10 @@ void Webserver_HandleRoot()
   <li>Water Mark Logs: )rawliteral";
   s += String(watermark_log_buffer);
   s += R"rawliteral(</li>
+  <li>Water Mark Telegram: )rawliteral";
+  s += String( watermark_telegram);
+  s += R"rawliteral(</li>  
+ 
   <li>Uptime (min): )rawliteral";
   s += Time_formatUptime();
   s += R"rawliteral(</li>
