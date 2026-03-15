@@ -8,6 +8,11 @@ include("valid_clients.php");
 $id = $_GET['ID'] ?? '';
 $token = $_GET['token'] ?? '';
 
+if($token == "header")
+{
+  $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
+}
+
 // check if client is valid
 if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
     http_response_code(403);
@@ -54,7 +59,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     $temperature = unpack("L", substr($rawData, $offset + 8, 4))[1];
 	
 	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
-	
+	if($meter_solar == 4294967295) $meter_solar = NULL;
 	if($meter == 0) continue;
 	#if($temperature > 200) $temperature = -3;
 	$value_count++;
@@ -75,7 +80,7 @@ http_response_code(200);
 echo "Data received and processed successfully.";
 
 
-if($value_count > 5) 
+if(false && $data["ID"] == "AB4") 
 {
 	// create log filename with date and ID
 	$filename = date("y-m-d-H-i-s") . "-".$data["ID"].".txt";

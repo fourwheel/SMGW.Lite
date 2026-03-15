@@ -820,12 +820,18 @@ void Webserver_TestBackendConnection()
     }
   }
 
-  // reach backend with token and ID
-  String url = backend_path + "?backend_test=true&ID=" + String(backend_ID) + "&token=" + String(backend_token);
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + backend_host + "\r\n" +
-               "Connection: close\r\n\r\n");
+  // // reach backend with token and ID
+  // String url = backend_path + "?backend_test=true&ID=" + String(backend_ID) + "&token=" + String(backend_token);
+  // client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+  //              "Host: " + backend_host + "\r\n" +
+  //              "Connection: close\r\n\r\n");
 
+  String url = String(backend_path) + "?backend_test=true&token=header&ID=" + String(backend_ID);
+
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+             "Host: " + String(backend_host) + "\r\n" +
+             "X-Auth-Token: " + String(backend_token) + "\r\n" +  // Der Token wandert hierhin
+             "Connection: close\r\n\r\n");
   unsigned long timeout = millis();
   while (client.available() == 0)
   {
@@ -1594,13 +1600,13 @@ void Webclient_send_log_to_backend()
   logHeader += "log.php";
   logHeader += "?ID=";
   logHeader += backend_ID;
-  logHeader += "&token=";
-  logHeader += String(backend_token);
+  logHeader += "&token=header";
   logHeader += "&IP=";
   logHeader += String(IPlastOctet);
   logHeader += " HTTP/1.1\r\nHost: ";
   logHeader += backend_host;
   logHeader += "\r\n";
+  logHeader += "X-Auth-Token: " + String(backend_token) + "\r\n";
   logHeader += "Content-Type: application/octet-stream\r\n";
   logHeader += "Content-Length: " + String(logBufferSize) + "\r\n";
   logHeader += "Connection: close\r\n\r\n";
@@ -1685,8 +1691,7 @@ void Webclient_send_meter_values_to_backend()
   header += backend_path;
   header += "?ID=";
   header += backend_ID;
-  header += "&token=";
-  header += String(backend_token);
+  header += "&token=header";
   header += "&uptime=";
   header += String(millis() / 60000);
   header += "&time=";
@@ -1705,6 +1710,7 @@ void Webclient_send_meter_values_to_backend()
   header += "Host: ";
   header += backend_host;
   header += "\r\n";
+  header += "X-Auth-Token: " + String(backend_token) + "\r\n";
   header += "Content-Type: application/octet-stream\r\n";
   header += "Content-Length: " + String(bufferSize) + "\r\n";
   header += "Connection: close\r\n\r\n";
