@@ -91,11 +91,15 @@ unsigned long timestamp_telegram;                 // timestamp of telegram
 struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes
-  uint32_t meter_value; // 4 Bytes
-  // uint32_t obis280;
+  uint32_t meter_value_180; // 4 Bytes
+  // preparation for 280
+  // uint32_t meter_value_280;
   uint32_t temperature; // 4 Bytes
   uint32_t solar;       // 4 Bytes
 };
+// preparation for 280
+// work around as long as not implennted in back end
+uint32_t meter_value_280;
 MeterValue *MeterValues = nullptr;        // initiaize with nullptr
 MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
 MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
@@ -581,7 +585,7 @@ void MeterValues_clear_Buffer()
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
     MeterValues[m].timestamp = 0;
-    MeterValues[m].meter_value = 0;
+    MeterValues[m].meter_value_180 = 0;
     MeterValues[m].temperature = 0;
     MeterValues[m].solar = 0;
   }
@@ -748,7 +752,7 @@ void Webserver_ShowMeterValues()
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    if (MeterValues[m].timestamp == 0 && MeterValues[m].meter_value == 0) // don't show empty entries
+    if (MeterValues[m].timestamp == 0/* && MeterValues[m].meter_value_180 == 0*/) // don't show empty entries
     {
       if (first)
       {
@@ -757,7 +761,7 @@ void Webserver_ShowMeterValues()
       }
       continue; // skip empty entries 
     }
-    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(Time_formatTimestamp(MeterValues[m].timestamp)) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
+    MeterValues_string += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td><td>" + String(Time_formatTimestamp(MeterValues[m].timestamp)) + "</td><td>" + String(MeterValues[m].timestamp) + "</td><td>" + String(MeterValues[m].meter_value_180) + "</td><td>" + String(MeterValues[m].temperature) + "</td><td>" + String(MeterValues[m].solar) + "</td></tr>";
   }
   MeterValues_string += "</table>";
   server.send(200, "text/html", MeterValues_string);
@@ -1266,10 +1270,13 @@ bool MeterValue_get_from_SML_telegram(uint8_t* buffer, size_t length) {
     // Modification if 2.8.0 is optional or missing
     if (found180) {
         resetMeterValue(LastMeterValue);               // reset LastMeterValue
-        LastMeterValue.meter_value = temp180;
+        LastMeterValue.meter_value_180 = temp180;
         // Only update 2.8.0 if it was actually found in this telegram
         if (found280) {
-            // LastMeterValue.obis280 = temp280;
+            // LastMeterValue.meter_value_280 = temp280;
+            // preparation for 280
+            // work around until implented in back end
+            meter_value_280 = temp280;
         }
         return true; // Return true because the main reading (1.8.0) is valid
     }
@@ -1476,25 +1483,25 @@ int32_t MeterValue_get_from_remote()
   }
 
   // Werte extrahieren
-  int32_t meter_value_i32 = doc["meter_value"] | -4;
+  int32_t meter_value_180_i32 = doc["meter_value_180"] | -4;
   int32_t timestamp = doc["timestamp"] | 0;
 
-  Serial.print(F("Meter Value: "));
-  Serial.println(meter_value_i32);
+  Serial.print(F("Meter Value 180: "));
+  Serial.println(meter_value_180_i32);
   Serial.print(F("Timestamp: "));
   Serial.println(timestamp);
-  // if (timestamp >= PrevMeterValue.timestamp + 10 && meter_value_i32 != PrevMeterValue.meter_value)
+  // if (timestamp >= PrevMeterValue.timestamp + 10 && meter_value_180_i32 != PrevMeterValue.meter_value_180)
   // {
   //   PrevMeterValue = LastMeterValue;
   // }
   resetMeterValue(LastMeterValue);                 // reset LastMeterValue
-  LastMeterValue.meter_value = doc["meter_value"]; // save meter value
+  LastMeterValue.meter_value_180 = doc["meter_value_180"]; // save meter value 180
   LastMeterValue.timestamp = doc["timestamp"];     // save timestamp
   LastMeterValue.temperature = doc["temperature"]; // save temperature
   LastMeterValue.solar = doc["solar"];             // no solar value from remote
   client.stop();
   timestamp_telegram = timestamp;
-  return meter_value_i32;
+  return meter_value_180_i32;
 }
 
 
@@ -1545,7 +1552,7 @@ void handle_Telegram_receive()
     // IEC
     if(activate_IEC_Parser_object.isChecked())
     {
-      LastMeterValue.meter_value = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, telegram_receive_bufferIndex);
+      LastMeterValue.meter_value_180 = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, telegram_receive_bufferIndex);
     }
     // SML
     else
@@ -1756,14 +1763,15 @@ bool MeterValue_store(bool override)
     myStrom_get_Meter_value();
   }
 
-  if (LastMeterValue.meter_value <= 0)
+  if (LastMeterValue.meter_value_180 <= 0)
   {
     Log_AddEntry(1200);
     return false;
   }
 
   if (((override == false && millis() - last_meter_value_successful < 900000) || (override == true && millis() - last_meter_value_successful < 60000)) // if last successful meter value read less than 15 minutes ago or override is true
-    && LastMeterValue.meter_value == PrevMeterValue.meter_value
+    && LastMeterValue.meter_value_180 == PrevMeterValue.meter_value_180
+    // preparation for 280
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
@@ -1784,7 +1792,7 @@ bool MeterValue_store(bool override)
   }
   Serial.println("where to write: " + String(write_i));
 
-  if (MeterValues[write_i].timestamp == 0 && MeterValues[write_i].meter_value == 0 && MeterValues[write_i].temperature == 0)
+  if (MeterValues[write_i].timestamp == 0 && MeterValues[write_i].meter_value_180 == 0 && MeterValues[write_i].temperature == 0)
   {
     // if place where wo want to write is full we assume entire buffer is used
     meter_value_buffer_full = false;
@@ -1917,9 +1925,9 @@ void handle_call_backend()
 // void dynTaf()
 // {
 //   int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;;
-//   if (dT > 0 && LastMeterValue.meter_value > PrevMeterValue.meter_value)
+//   if (dT > 0 && LastMeterValue.meter_value_180 > PrevMeterValue.meter_value_180)
 //   {
-//     currentPower = (float)(360 * (LastMeterValue.meter_value - PrevMeterValue.meter_value)) / (dT);
+//     currentPower = (float)(360 * (LastMeterValue.meter_value_180 - PrevMeterValue.meter_value_180)) / (dT);
 //     if(currentPower > LastPower * int(tafdyn_multiplicator) || currentPower < LastPower / int(tafdyn_multiplicator) || abs(currentPower-LastPower) >= int(tafdyn_absolute))
 //     {
 //       MeterValue_store(false);
@@ -2107,13 +2115,16 @@ void Webserver_HandleRoot()
 
 <h2>Last Meter Value</h2>
 <table>
-  <tr><th>Time</th><th>Meter Value</th><th>Temperature</th><th>Solar</th></tr>
+  <tr><th>Time</th><th>Meter Value 180</th><th>Meter Value 280</th><th>Temperature</th><th>Solar</th></tr>
   <tr>
     <td>)rawliteral";
   s += String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago";
   s += R"rawliteral(</td>
     <td>)rawliteral";
-  s += String(LastMeterValue.meter_value);
+  s += String(LastMeterValue.meter_value_180);
+  s += R"rawliteral(</td>
+    <td>)rawliteral";
+  s += String(/* Work around LastMeterValue.*/meter_value_280);
   s += R"rawliteral(</td>
     <td>)rawliteral";
   s += String(LastMeterValue.temperature / 100.0) + " °C";
@@ -2412,7 +2423,7 @@ void Webserver_ShowLastMeterValue()
 
   JsonDocument jsonDoc; // Heap-basiert
 
-  jsonDoc["meter_value"] = LastMeterValue.meter_value;
+  jsonDoc["meter_value_180"] = LastMeterValue.meter_value_180;
   jsonDoc["timestamp"] = LastMeterValue.timestamp;
   jsonDoc["temperature"] = LastMeterValue.temperature;
   jsonDoc["solar"] = LastMeterValue.solar;
