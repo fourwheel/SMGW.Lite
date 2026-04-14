@@ -1198,17 +1198,31 @@ void Webclient_Send_Log_to_backend_wrapper()
 bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* result) {
     for (int i = px; i < sx - 12; i++) {
         if (memcmp(&buffer[i], code, 6) == 0) {
-            for (int j = i + 6; j < i + 25; j++) {
-                if ((buffer[j] & 0xF0) == 0x50) { 
+            
+            // Suche nach dem Scaler-Tag 0x52 als Anker
+            for (int j = i + 6; j < i + 40 && j < sx; j++) {
+                if (buffer[j] == 0x52) {
+                    
+                    // Wir überspringen den Scaler-Wert (j+1) und schauen auf das Typ-Byte (j+2)
                     uint8_t typeByte = buffer[j + 2];
-                    int vLen = (typeByte & 0x0F) - 1;
-                    int vStart = j + 3;
-                    if (vStart + vLen > sx) return false;
+                    uint8_t typeGroup = typeByte & 0xF0;
+                    
+                    // Akzeptiere 0x5x (Signed) und 0x6x (Unsigned)
+                    if (typeGroup == 0x50 || typeGroup == 0x60) {
+                        int vLen = (typeByte & 0x0F) - 1;
+                        int vStart = j + 3;
 
-                    uint32_t raw = 0;
-                    for (int k = 0; k < vLen; k++) raw = (raw << 8) | buffer[vStart + k];
-                    *result = raw;
-                    return true;
+                        if (vStart + vLen > sx || vLen <= 0 || vLen > 8) continue;
+
+                        uint64_t raw64 = 0;
+                        for (int k = 0; k < vLen; k++) {
+                            raw64 = (raw64 << 8) | buffer[vStart + k];
+                        }
+
+                        // Rückgabe des exakten Rohwerts ohne jede Verrechnung
+                        *result = (uint32_t)raw64;
+                        return true;
+                    }
                 }
             }
         }
