@@ -620,7 +620,6 @@ void Webserver_LocationHrefHome(int delay)
   server.send(200, "text/html", call);
 }
 
-#include <Arduino.h>
 
 /**
  * SML CRC16 (X25) Algorithm
@@ -824,17 +823,11 @@ void Webserver_TestBackendConnection()
     }
   }
 
-  // // reach backend with token and ID
-  // String url = backend_path + "?backend_test=true&ID=" + String(backend_ID) + "&token=" + String(backend_token);
-  // client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-  //              "Host: " + backend_host + "\r\n" +
-  //              "Connection: close\r\n\r\n");
-
   String url = String(backend_path) + "?backend_test=true&token=header&ID=" + String(backend_ID);
 
   client.print(String("GET ") + url + " HTTP/1.1\r\n" +
              "Host: " + String(backend_host) + "\r\n" +
-             "X-Auth-Token: " + String(backend_token) + "\r\n" +  // Der Token wandert hierhin
+             "X-Auth-Token: " + String(backend_token) + "\r\n" +  // Token in header
              "Connection: close\r\n\r\n");
   unsigned long timeout = millis();
   while (client.available() == 0)
@@ -1175,21 +1168,7 @@ void Webclient_Send_Log_to_backend_wrapper()
 
 
 
-/**
- * Internal Helper: SML CRC16 (X25) Algorithm
- *  * This function is written bei Gemini3
- */
-// uint16_t internal_SML_CRC16(uint8_t* data, size_t len) {
-//     uint16_t crc = 0xFFFF;
-//     for (size_t i = 0; i < len; i++) {
-//         crc ^= data[i];
-//         for (int j = 0; j < 8; j++) {
-//             if (crc & 0x0001) crc = (crc >> 1) ^ 0x8408;
-//             else crc >>= 1;
-//         }
-//     }
-//     return crc ^ 0xFFFF;
-// }
+
 
 /**
  * Internal Helper: Extracting specific OBIS values
