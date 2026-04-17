@@ -129,7 +129,7 @@ SemaphoreHandle_t Sema_Backend; // Mutex / Sempahore for backend call
 unsigned long last_call_backend = 0;
 
 // Temperature Vars
-#define ONE_WIRE_BUS 2
+#define ONE_WIRE_BUS 4
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 unsigned long last_temperature = 0;
