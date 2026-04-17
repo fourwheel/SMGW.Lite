@@ -235,10 +235,6 @@ char tafdyn_absolute[NUMBER_LEN];
 char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
-char telegram_offset[NUMBER_LEN];
-char telegram_length[NUMBER_LEN];
-char telegram_prefix[NUMBER_LEN];
-char telegram_suffix[NUMBER_LEN];
 char activate_IEC_Parser[STRING_LEN];
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
 
@@ -263,36 +259,32 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys = IotWebConfParameterGroup("groupSys", "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug = IotWebConfParameterGroup("groupDebug", "Debug Helpers");
 
-IotWebConfNumberParameter telegram_offset_object = IotWebConfNumberParameter("Offset", "telegram_offset_object", telegram_offset, NUMBER_LEN, "20", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfNumberParameter telegram_length_object = IotWebConfNumberParameter("Length", "telegram_length_object", telegram_length, NUMBER_LEN, "8", "1..TELEGRAM_LENGTH", "min='1' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfNumberParameter telegram_prefix_object = IotWebConfNumberParameter("Prefix Begin", "telegram_prefix", telegram_prefix, NUMBER_LEN, "0", "1..TELEGRAM_LENGTH", "min='0' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfNumberParameter telegram_suffix_object = IotWebConfNumberParameter("Suffix Begin", "telegram_suffix", telegram_suffix, NUMBER_LEN, "100", "1..TELEGRAM_LENGTH", "min='100' max='TELEGRAM_LENGTH' step='1'");
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, true);
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
 
 IotWebConfTextParameter backend_endpoint_object = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
-IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, true);
+IotWebConfCheckboxParameter led_blink_object = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
 IotWebConfTextParameter backend_ID_object = IotWebConfTextParameter("backend ID", "backend_ID", backend_ID, ID_LEN);
 IotWebConfTextParameter backend_token_object = IotWebConfTextParameter("backend token", "backend_token", backend_token, STRING_LEN);
 
 IotWebConfCheckboxParameter taf7_b_object = IotWebConfCheckboxParameter("Taf 7 activated", "b_taf7", b_taf7, STRING_LEN, true);
 IotWebConfNumberParameter taf7_param_object = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "60...1", "min='1' max='60' step='1'");
 IotWebConfCheckboxParameter taf14_b_object = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
-IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "20", "1..100 s", "min='1' max='100' step='1'");
+IotWebConfNumberParameter taf14_param_object = IotWebConfNumberParameter("Taf 14 Meter Intervall (s)", "taf14_param", taf14_param, NUMBER_LEN, "60", "1..100 s", "min='1' max='100' step='1'");
 IotWebConfCheckboxParameter tafdyn_b_object = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
 IotWebConfNumberParameter tafdyn_absolute_object = IotWebConfNumberParameter("Dyn Taf absolute Delta", "tafdyn_absolute", tafdyn_absolute, NUMBER_LEN, "100", "Power Delta in Watts", "min='10' max='10000' step='1'");
 IotWebConfNumberParameter tafdyn_multiplicator_object = IotWebConfNumberParameter("Dyn Taf multiplicator ", "tafdyn_multiplicator", tafdyn_multiplicator, NUMBER_LEN, "2", "Power n bigger or 1/n smaller", "min='1' max='10' step='0.1'");
-IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "5", "", "");
+IotWebConfNumberParameter backend_call_minute_object = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "2", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
 IotWebConfTextParameter mystrom_PV_IP_object = IotWebConfTextParameter("MyStrom PV IP", "mystrom_PV_IP", mystrom_PV_IP, STRING_LEN);
-IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, true);
-IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, false);
+IotWebConfCheckboxParameter temperature_object = IotWebConfCheckboxParameter("Temperatur Sensor", "temperature_checkbock", temperature_checkbock, STRING_LEN, false);
+IotWebConfCheckboxParameter UseSslCert_object = IotWebConfCheckboxParameter("Wirk-PKI (Use SSL Cert)", "UseSslCertValue", UseSslCertValue, STRING_LEN, true);
 
 IotWebConfCheckboxParameter DebugSetOffline_object = IotWebConfCheckboxParameter("Set Device offline (Pretend no Wifi)", "DebugWifi", DebugSetOfflineValue, STRING_LEN, false);
 IotWebConfCheckboxParameter DebugFromOtherClient_object = IotWebConfCheckboxParameter("Get Meter Value from other SMGWLite Client", "DebugFromOtherClient", DebugMeterValueFromOtherClient, STRING_LEN, false);
 IotWebConfTextParameter DebugMeterValueFromOtherClientIP_object = IotWebConfTextParameter("IP to get Meter Values From", "DebugMeterValueFromOtherClientIP", DebugMeterValueFromOtherClientIP, STRING_LEN);
 
-IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "200", "1...1000", "min='1' max='1000' step='1'");
+IotWebConfNumberParameter Meter_Value_Buffer_Size_object = IotWebConfNumberParameter("Meter_Value_Buffer_Size", "Meter_Value_Buffer_Size", Meter_Value_Buffer_Size_Char, NUMBER_LEN, "1000", "1...1000", "min='1' max='1000' step='1'");
 
 const char HTML_STYLE[] PROGMEM = R"rawliteral(
 <style>
@@ -1093,10 +1085,7 @@ void setup()
 }
 void Param_setup()
 {
-  groupTelegram.addItem(&telegram_offset_object);
-  groupTelegram.addItem(&telegram_length_object);
-  groupTelegram.addItem(&telegram_prefix_object);
-  groupTelegram.addItem(&telegram_suffix_object);
+
   groupTelegram.addItem(&activate_IEC_Parser_object);
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
@@ -2407,11 +2396,6 @@ void Webserver_ShowTelegram()
     {
       signature_7101 = 9999;
       color = "bgcolor=959018";
-    }
-    else if (i >= atoi(telegram_offset) && i < atoi(telegram_offset) + atoi(telegram_length))
-    {
-
-      color = "bgcolor=cccccc";
     }
     else
       color = "";
