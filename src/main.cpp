@@ -22,6 +22,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
+#include <IotWebConfMultipleWifi.h>
 #include <SPIFFS.h>
 #if defined(ESP32)
 #include <WiFi.h>
@@ -243,6 +244,17 @@ char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "123";
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
+
+iotwebconf::ChainedWifiParameterGroup chainedWifiParameterGroups[] = {
+  iotwebconf::ChainedWifiParameterGroup("wifi1")
+};
+
+iotwebconf::MultipleWifiAddition multipleWifiAddition(
+  &iotWebConf,
+  chainedWifiParameterGroups,
+  sizeof(chainedWifiParameterGroups)  / sizeof(chainedWifiParameterGroups[0]));
+
+iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 IotWebConfParameterGroup groupTelegram = IotWebConfParameterGroup("groupTelegram", "Telegram Param");
 IotWebConfParameterGroup groupBackend = IotWebConfParameterGroup("groupBackend", "Backend Config");
@@ -1123,6 +1135,7 @@ void Param_setup()
 
   // -- Initializing the configuration.
   iotWebConf.skipApStartup();
+  multipleWifiAddition.init();
   iotWebConf.init();
 }
 void OTA_setup()
