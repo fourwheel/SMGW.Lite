@@ -1896,7 +1896,8 @@ void handle_temperature()
     else if (read_temperature == false && millis() - last_temperature > 1000)
     {
       last_temperature = millis();
-      current_temperature = (Temp_sensors.getTempCByIndex(0) * 100);
+      float max_temp = 5000; // if sensor fails it returns -127, so we set a maximum to avoid wrong readings
+      current_temperature = max(max_temp, (Temp_sensors.getTempCByIndex(0) * 100));
       read_temperature = true;
     }
   }
