@@ -34,12 +34,19 @@ if(isset($_GET['PV_included']) && $_GET['PV_included'] == "true")
 	$PV_included = true;
 } 
 
+$v280_included = false;;
+if(isset($_GET['280_included']) && $_GET['280_included'] == "true") 
+{
+	$v280_included = true;
+} 
+
 // read binary data from the request body
 $rawData = file_get_contents('php://input');
 
 // calculate entry size
 $entrySize = 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes)
 if($PV_included) $entrySize = 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4)
+if($v280_included) $entrySize = 4 + 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4) + meter_280 (4)
 
 $dataCount = strlen($rawData) / $entrySize;
 
@@ -52,6 +59,7 @@ if ($dataCount != floor($dataCount)) {
 
 $value_count = 0;
 $meter_solar = NULL;
+$obis280 = NULL;
 for ($i = 0; $i < $dataCount; $i++) {
     $offset = $i * $entrySize;
     $timestamp = unpack("L", substr($rawData, $offset, 4))[1];
@@ -59,6 +67,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     $temperature = unpack("L", substr($rawData, $offset + 8, 4))[1];
 	
 	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
+	if($v280_included) $obis280 = unpack("L", substr($rawData, $offset + 16, 4))[1];
 	if($meter_solar == 4294967295) $meter_solar = NULL;
 	if($meter == 0) continue;
 	#if($temperature > 200) $temperature = -3;
@@ -67,7 +76,8 @@ for ($i = 0; $i < $dataCount; $i++) {
         "timestamp" => $timestamp,
         "meter" => $meter,
         "temperature" => $temperature,
-		"meter_solar" => $meter_solar,		
+		"meter_solar" => $meter_solar,
+		"obis280" => $obis280		
     ];
 }
 
@@ -147,6 +157,7 @@ foreach ($data["values"] as $item) {
 	$item['temperature'] = $item['temperature']/100;
 
 	if(!isset($item['meter_solar'])) $item['meter_solar'] = 0;
+	if(!isset($item['obis280'])) $item['obis280'] = 0;
 	
 	$sql4 = "INSERT INTO `sml_v1` (
 	`i`, 
@@ -155,7 +166,9 @@ foreach ($data["values"] as $item) {
 	`timestamp_client`, 
 	`meter_value`, 
 	`meter_value_PV`, 
-	`temperature`) 
+	`temperature`,
+	`obis280`
+	) 
 	VALUES (
 	NULL, 
 	'".$data['ID']."', 
@@ -163,7 +176,8 @@ foreach ($data["values"] as $item) {
 	'".$item["timestamp"]."', 
 	'".($item['meter'])."', 
 	'".($item["meter_solar"])."',
-	'".$item['temperature']."')";
+	'".$item['temperature']."',
+	'".($item["obis280"])."')";
 
 
 	$result4 = mysqli_query($_link, $sql4);

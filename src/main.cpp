@@ -93,17 +93,14 @@ struct MeterValue
 {
   uint32_t timestamp;   // 4 Bytes
   uint32_t meter_value_180; // 4 Bytes
-  // preparation for 280
-  // uint32_t meter_value_280;
   uint32_t temperature; // 4 Bytes
   uint32_t solar;       // 4 Bytes
+  uint32_t meter_value_280;
 };
-// preparation for 280
-// work around as long as not implennted in back end
-uint32_t meter_value_280;
+
 MeterValue *MeterValues = nullptr;        // initiaize with nullptr
-MeterValue LastMeterValue = {0, 0, 0, 0}; // initialize last meter value
-MeterValue PrevMeterValue = {0, 0, 0, 0}; // initialize last meter value
+MeterValue LastMeterValue = {0, 0, 0, 0, 0}; // initialize last meter value
+MeterValue PrevMeterValue = {0, 0, 0, 0, 0}; // initialize last meter value
 
 bool MeterValue_trigger_override = false;
 bool MeterValue_trigger_non_override = false;
@@ -590,6 +587,7 @@ void MeterValues_clear_Buffer()
   {
     MeterValues[m].timestamp = 0;
     MeterValues[m].meter_value_180 = 0;
+    MeterValues[m].meter_value_280 = 0;
     MeterValues[m].temperature = 0;
     MeterValues[m].solar = 0;
   }
@@ -1268,10 +1266,8 @@ bool MeterValue_get_from_SML_telegram(uint8_t* buffer, size_t length) {
         LastMeterValue.meter_value_180 = temp180;
         // Only update 2.8.0 if it was actually found in this telegram
         if (found280) {
-            // LastMeterValue.meter_value_280 = temp280;
-            // preparation for 280
-            // work around until implented in back end
-            meter_value_280 = temp280;
+            LastMeterValue.meter_value_280 = temp280;
+
         }
         return true; // Return true because the main reading (1.8.0) is valid
     }
@@ -1699,6 +1695,7 @@ void Webclient_send_meter_values_to_backend()
   header += "&time=";
   header += String(Time_getFormattedTime());
   header += "&PV_included=true";
+  header += "&280_included=true";
   header += "&heap=";
   header += String(ESP.getFreeHeap());
   header += "&transmittedValues=";
@@ -1766,7 +1763,7 @@ bool MeterValue_store(bool override)
 
   if (((override == false && millis() - last_meter_value_successful < 900000) || (override == true && millis() - last_meter_value_successful < 60000)) // if last successful meter value read less than 15 minutes ago or override is true
     && LastMeterValue.meter_value_180 == PrevMeterValue.meter_value_180
-    // preparation for 280
+    && LastMeterValue.meter_value_280 == PrevMeterValue.meter_value_280
     && LastMeterValue.solar == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
@@ -2120,7 +2117,7 @@ void Webserver_HandleRoot()
   s += String(LastMeterValue.meter_value_180);
   s += R"rawliteral(</td>
     <td>)rawliteral";
-  s += String(/* Work around LastMeterValue.*/meter_value_280);
+  s += String(LastMeterValue.meter_value_280);
   s += R"rawliteral(</td>
     <td>)rawliteral";
   s += String(LastMeterValue.temperature / 100.0) + " °C";
