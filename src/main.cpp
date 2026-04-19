@@ -305,7 +305,8 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys",           "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+// activate_IEC_Parser_object removed — protocol is now auto-detected by trying
+// SML first, then IEC. No manual override needed.
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -701,9 +702,6 @@ String Log_StatusCodeToString(int statusCode)
   case 3000: return "Complete Telegram received";
   case 3001: return "Telegram Buffer overflow";
   case 3002: return "Telegram timeout";
-  case 3003: return "SML Protocoll";
-  case 3004: return "IEC Protocoll";
-  
   case 4000: return "Connection to server failed (Cert!?)";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
@@ -1144,7 +1142,7 @@ void Webserver_UrlConfig()
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefHome(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
   server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefHome(); });
   server.on("/sendboth_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendLog_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendStatus_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
   server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefHome(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
@@ -1223,7 +1221,6 @@ void setup()
 
 void Param_setup()
 {
-  groupTelegram.addItem(&activate_IEC_Parser_object);
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -1342,7 +1339,6 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
 // Tracks which protocol was last successfully detected
 enum class TelegramProtocol { UNKNOWN, SML, IEC };
 TelegramProtocol last_detected_protocol = TelegramProtocol::UNKNOWN;
-TelegramProtocol prev_detected_protocol = TelegramProtocol::UNKNOWN;
 
 // Returns a human-readable string for the detected protocol
 String Telegram_protocol_to_string(TelegramProtocol p)
@@ -1581,12 +1577,7 @@ void handle_Telegram_receive()
       parsed = Telegram_parse_IEC(telegram_receive_buffer, telegram_receive_bufferIndex);
       if (parsed) last_detected_protocol = TelegramProtocol::IEC;
     }
-    if(last_detected_protocol != prev_detected_protocol){
-      if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
-      else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddEntry(3004);
 
-      prev_detected_protocol = last_detected_protocol;
-    }
     if (parsed && temperature_object.isChecked())
       LastMeterValue.temperature = current_temperature;
 
@@ -1596,7 +1587,7 @@ void handle_Telegram_receive()
 
 void Webclient_send_log_to_backend()
 {
-  Serial.println("Send Log to Backend");
+  Serial.println("send_status_report");
   Log_AddEntry(1019);
   WiFiClientSecure client;
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
@@ -1827,17 +1818,6 @@ void handle_check_wifi_connection()
       call_backend_successfull = false;
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
-
-      // Re-init buffer on first WiFi connect when in auto mode.
-      // At startup getFreeHeap() is too high (WiFi stack not yet allocated).
-      // Now that WiFi is up the heap reading is realistic.
-      // Only re-init if no values have been stored yet to avoid data loss.
-      if (atoi(Meter_Value_Buffer_Size_Char) <= 0 && MeterValue_Num() == 0)
-      {
-        Serial.println("Auto-mode: re-sizing buffer now that WiFi heap is allocated.");
-        MeterValue_init_Buffer();
-      }
-
       Webclient_Send_Log_to_backend_wrapper();
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
@@ -2173,9 +2153,9 @@ void Webserver_HandleRoot()
   <li>Static Delay: )rawliteral";
   s += String(staticDelay);
   s += R"rawliteral( s</li>
-  <li><a href='sendLog_Task'>Send Log Files to backend</a></li>
-  <li><a href='sendMeterValues_Task'>Send Meter Values to backend</a></li>
-  <li><a href='sendboth_Task'>Send Both to backend</a></li>
+  <li><a href='sendStatus_Task'>Send Status Report</a></li>
+  <li><a href='sendMeterValues_Task'>Send Meter Values</a></li>
+  <li><a href='sendboth_Task'>Send Both</a></li>
 </ul>
 </div>
 
