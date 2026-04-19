@@ -180,7 +180,7 @@ usort($entries, fn($a, $b) => $a["timestamp"] <=> $b["timestamp"]);
 // touching the database. Files are written to the log/ subdirectory.
 // CSV columns: timestamp;meter;temperature;meter_solar;obis280
 // ---------------------------------------------------------------------------
-$enable_file_log = true; // set to true to enable
+$enable_file_log = false; // set to true to enable
 $log_id          = "BF1"; // only log entries from this client ID
 
 if ($enable_file_log && $id === $log_id && count($entries) > 0) {
