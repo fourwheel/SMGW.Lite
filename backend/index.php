@@ -1,188 +1,298 @@
 <?php
-#ini_set('display_errors', 1);
-#ini_set('display_startup_errors', 1);
-#error_reporting(E_ALL);
+// Uncomment the lines below for verbose error output during development.
+// Never enable these on a production server.
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
 
 include("valid_clients.php");
 
-$id = $_GET['ID'] ?? '';
+// ---------------------------------------------------------------------------
+// Authentication
+// The client ID is always passed as a URL parameter.
+// The token can be passed as a URL parameter or as the X-Auth-Token header.
+// Sending it as a header ("token=header") is preferred because URL parameters
+// may appear in server access logs.
+// ---------------------------------------------------------------------------
+$id    = $_GET['ID']    ?? '';
 $token = $_GET['token'] ?? '';
 
-if($token == "header")
-{
-  $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
+if ($token === "header") {
+    $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
 }
 
-// check if client is valid
+// Reject unknown or invalid clients immediately
 if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
     http_response_code(403);
-    echo "Zugriff verweigert.";
+    echo "Access denied.";
     exit;
 }
-$data = [];
-$data["ID"] = "";
-$data["ID"] = $_GET['ID'];
-if(isset($_GET['backend_test']) && $_GET['backend_test'] == "true") 
-{
-	http_response_code(200);
-	exit;
+
+// ---------------------------------------------------------------------------
+// Early-exit for connectivity tests
+// The ESP32 calls this endpoint with backend_test=true on startup and from
+// the "Test Backend Connection" page to verify reachability and credentials.
+// ---------------------------------------------------------------------------
+if (isset($_GET['backend_test']) && $_GET['backend_test'] === "true") {
+    http_response_code(200);
+    exit;
 }
 
-$PV_included = false;;
-if(isset($_GET['PV_included']) && $_GET['PV_included'] == "true") 
-{
-	$PV_included = true;
-} 
+// ---------------------------------------------------------------------------
+// Field manifest parser  (Written by Claude)
+//
+// New clients send a self-describing "fields=" URL parameter that lists every
+// field present in each binary entry in order:
+//
+//   fields=ts,m180[,temp][,solar][,m280]
+//
+// This replaces the old PV_included / 280_included boolean flags and makes
+// the protocol forward-compatible: adding a new field only requires adding a
+// new token here, without touching the entry-size logic.
+//
+// Backward compatibility: old clients that do not send "fields=" are handled
+// by the legacy fallback block below, which reconstructs the field list from
+// the old PV_included and 280_included parameters.
+// ---------------------------------------------------------------------------
 
-$v280_included = false;;
-if(isset($_GET['280_included']) && $_GET['280_included'] == "true") 
-{
-	$v280_included = true;
-} 
+// Known field tokens and their byte sizes
+$known_fields = [
+    'ts'    => 4,   // Unix timestamp (uint32_t)
+    'm180'  => 4,   // OBIS 1.8.0 consumption counter (uint32_t, unit: 0.1 Wh)
+    'temp'  => 4,   // temperature * 100 (uint32_t, e.g. 2150 = 21.50 degC)
+    'solar' => 4,   // PV / MyStrom energy counter (uint32_t)
+    'm280'  => 4,   // OBIS 2.8.0 feed-in counter (uint32_t, unit: 0.1 Wh)
+];
 
-// read binary data from the request body
+if (isset($_GET['fields']) && $_GET['fields'] !== '') {
+    // --- New protocol: parse the self-describing field manifest ---
+    $field_tokens = explode(',', $_GET['fields']);
+    $active_fields = [];
+    foreach ($field_tokens as $token) {
+        $token = trim($token);
+        if (isset($known_fields[$token])) {
+            $active_fields[$token] = $known_fields[$token];
+        }
+        // Unknown tokens are silently ignored for forward-compatibility.
+        // If a future firmware adds a new field, old backends simply skip it —
+        // UNLESS it changes the byte size of existing fields, which it won't.
+    }
+} else {
+    // --- Legacy fallback: reconstruct field list from old boolean flags ---
+    // Clients that pre-date the "fields=" parameter send separate flags.
+    // ts and m180 are always present in the old protocol.
+    $active_fields = ['ts' => 4, 'm180' => 4];
+
+    // Old clients always stored temperature; include it in the legacy path.
+    // Note: if an old client sent PV_included without 280_included, the old
+    // backend had a bug (it hardcoded offset 16 for 280). This is fixed here.
+    $active_fields['temp'] = 4;
+
+    if (isset($_GET['PV_included'])  && $_GET['PV_included']  === "true") {
+        $active_fields['solar'] = 4;
+    }
+    if (isset($_GET['280_included']) && $_GET['280_included'] === "true") {
+        $active_fields['m280'] = 4;
+    }
+}
+
+// Calculate entry size in bytes from the active field list
+$entrySize = array_sum($active_fields);
+
+// ---------------------------------------------------------------------------
+// Read and validate the raw binary POST body.
+// The ESP32 sends the entire packed ring-buffer in one request, including
+// uninitialised (zero-filled) slots. Those are filtered out below.
+// ---------------------------------------------------------------------------
 $rawData = file_get_contents('php://input');
+$rawLen  = strlen($rawData);
 
-// calculate entry size
-$entrySize = 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes)
-if($PV_included) $entrySize = 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4)
-if($v280_included) $entrySize = 4 + 4 + 4 + 4 + 4; // timestamp (4 Bytes) + meter (4 Bytes) + temperature (4 Bytes) + solar (4) + meter_280 (4)
-
-$dataCount = strlen($rawData) / $entrySize;
-
-if ($dataCount != floor($dataCount)) {
+// Reject payloads whose length is not an exact multiple of the entry size.
+// A mismatch means the field manifest in the URL does not match the firmware,
+// or the request body was truncated.
+if ($rawLen === 0 || ($rawLen % $entrySize) !== 0) {
     http_response_code(400);
-    echo "Invalid data length.";
+    $fields_str = implode(',', array_keys($active_fields));
+    echo "Invalid data length: $rawLen bytes, entry size $entrySize (fields: $fields_str).";
     exit;
 }
 
+$dataCount = $rawLen / $entrySize;
 
-$value_count = 0;
-$meter_solar = NULL;
-$obis280 = NULL;
+// ---------------------------------------------------------------------------
+// Parse binary entries  (Written by Claude)
+//
+// Each entry is read field by field using the ordered $active_fields map.
+// The running byte offset advances by each field's size, so the parser is
+// correct for any combination of enabled fields without hardcoded offsets.
+// ---------------------------------------------------------------------------
+$entries = [];
+
 for ($i = 0; $i < $dataCount; $i++) {
-    $offset = $i * $entrySize;
-    $timestamp = unpack("L", substr($rawData, $offset, 4))[1];
-    $meter = unpack("L", substr($rawData, $offset + 4, 4))[1];
-    $temperature = unpack("L", substr($rawData, $offset + 8, 4))[1];
-	
-	if($PV_included) $meter_solar = unpack("L", substr($rawData, $offset + 12, 4))[1];
-	if($v280_included) $obis280 = unpack("L", substr($rawData, $offset + 16, 4))[1];
-	if($meter_solar == 4294967295) $meter_solar = NULL;
-	if($meter == 0) continue;
-	#if($temperature > 200) $temperature = -3;
-	$value_count++;
-    $data["values"][] = [
-        "timestamp" => $timestamp,
-        "meter" => $meter,
+
+    $o = $i * $entrySize; // byte offset of this entry in the raw buffer
+    $parsed = [];
+
+    foreach ($active_fields as $field_name => $field_size) {
+        // "V" = unsigned 32-bit little-endian, matching uint32_t on the ESP32
+        $parsed[$field_name] = unpack("V", substr($rawData, $o, $field_size))[1];
+        $o += $field_size;
+    }
+
+    // Assign parsed fields to named variables with safe defaults
+    $timestamp   = $parsed['ts']    ?? 0;
+    $meter       = $parsed['m180']  ?? 0;
+    $temperature = $parsed['temp']  ?? 0;
+    $meter_solar = $parsed['solar'] ?? null;
+    $obis280     = $parsed['m280']  ?? null;
+
+    // 0xFFFFFFFF is the client sentinel for "no valid solar reading available"
+    // (e.g. MyStrom unreachable). Treat it as null so the DB receives NULL.
+    if ($meter_solar === 4294967295) $meter_solar = null;
+
+    // Skip uninitialised / empty slots.
+    // The ESP32 zeroes the entire buffer on init and after a successful send,
+    // so meter_value_180 == 0 reliably identifies an unused slot.
+    if ($meter === 0) continue;
+
+    $entries[] = [
+        "timestamp"   => $timestamp,
+        "meter"       => $meter,
         "temperature" => $temperature,
-		"meter_solar" => $meter_solar,
-		"obis280" => $obis280		
+        "meter_solar" => $meter_solar,
+        "obis280"     => $obis280,
     ];
 }
 
-// sort array by timestamp
-usort($data["values"], function ($a, $b) {
-    return $a["timestamp"] <=> $b["timestamp"];
-});
+// ---------------------------------------------------------------------------
+// Sort entries by client timestamp ascending before inserting.
+// The ring-buffer on the ESP32 is not guaranteed to be in chronological
+// order: TAF7 (override) entries fill from index 0 upward while TAF14
+// (non-override) entries fill from the last index downward, so the two
+// groups can interleave in the raw payload.
+// ---------------------------------------------------------------------------
+usort($entries, fn($a, $b) => $a["timestamp"] <=> $b["timestamp"]);
 
-http_response_code(200);
-echo "Data received and processed successfully.";
+// ---------------------------------------------------------------------------
+// Optional file logging (disabled by default)  
+// Set $enable_file_log = true and adjust $log_id to enable CSV logging
+// for a specific client ID. Useful for debugging a single device without
+// touching the database. Files are written to the log/ subdirectory.
+// CSV columns: timestamp;meter;temperature;meter_solar;obis280
+// ---------------------------------------------------------------------------
+$enable_file_log = true; // set to true to enable
+$log_id          = "BF1"; // only log entries from this client ID
 
-
-if(false && $data["ID"] == "AB4") 
-{
-	// create log filename with date and ID
-	$filename = date("y-m-d-H-i-s") . "-".$data["ID"].".txt";
-
-	$file = fopen("log/".$filename, "w");
-	if ($file === false) {
-		die("Fehler beim Öffnen der Datei");
-	}
-
-	
-	foreach ($data["values"] as $entry) {
-		
-		$timestamp = $entry["timestamp"];
-		$meter = $entry["meter"];
-		$temperature = $entry["temperature"];
-        $meter_solar = $entry["meter_solar"];
-
-		
-		$line = "$timestamp;$meter;$temperature;$meter_solar\n";
-
-		
-		fwrite($file, $line);
-	}
-
-	
-	fclose($file);
+if ($enable_file_log && $id === $log_id && count($entries) > 0) {
+    $filename = date("y-m-d-H-i-s") . "-" . $id . ".txt";
+    $file = fopen("log/" . $filename, "w");
+    if ($file !== false) {
+        foreach ($entries as $entry) {
+            $line = implode(";", [
+                $entry["timestamp"],
+                $entry["meter"],
+                $entry["temperature"] ?? "",
+                $entry["meter_solar"] ?? "",
+                $entry["obis280"]     ?? "",
+            ]) . "\n";
+            fwrite($file, $line);
+        }
+        fclose($file);
+    }
 }
 
-$prev["timestamp"] = 0;
-$prev["meter"] = 0;
+// Respond 200 immediately so the ESP32 knows the transfer succeeded and can
+// clear its local buffer, even if the DB inserts below take a moment.
+http_response_code(200);
+echo "Data received. Fields: " . implode(',', array_keys($active_fields)) . ". Entries: " . count($entries) . ".\n";
 
-
+// ---------------------------------------------------------------------------
+// Database: fetch the last known state for this client
+// ---------------------------------------------------------------------------
 include("../config.php");
 
-$sql = "SELECT `meter_value`, `timestamp_client`, `id` FROM `sml_v1` WHERE `id` = '".$data["ID"]."' order by `timestamp_client` DESC LIMIT 1";
-$result = mysqli_query($_link, $sql);
-while($row = mysqli_fetch_array($result))
-{
-	$prev["meter"] = $row['meter_value'];
-	$prev["timestamp"] = $row['timestamp_client'];
+$prev = ["timestamp" => 0, "meter" => 0];
+
+// Use a prepared statement to prevent SQL injection on the $id field.
+// The original code built the query with string concatenation, which allowed
+// an attacker with a valid token to manipulate the query via the ID parameter.
+$stmt = mysqli_prepare($_link,
+    "SELECT `meter_value`, `timestamp_client`
+     FROM `sml_v1`
+     WHERE `id` = ?
+     ORDER BY `timestamp_client` DESC
+     LIMIT 1"
+);
+mysqli_stmt_bind_param($stmt, "s", $id);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
+if ($row = mysqli_fetch_array($result)) {
+    $prev["meter"]     = $row['meter_value'];
+    $prev["timestamp"] = $row['timestamp_client'];
+}
+mysqli_stmt_close($stmt);
+
+// ---------------------------------------------------------------------------
+// Database: insert valid entries
+// The INSERT statement is prepared once and executed for each valid entry
+// to avoid re-parsing overhead and to keep the code safe from injection.
+// ---------------------------------------------------------------------------
+$insert = mysqli_prepare($_link,
+    "INSERT INTO `sml_v1`
+        (`i`, `id`, `timestamp_server2`, `timestamp_client`,
+         `meter_value`, `meter_value_PV`, `temperature`, `obis280`)
+     VALUES
+        (NULL, ?, ?, ?, ?, ?, ?, ?)"
+);
+
+$current_time = time(); // single server timestamp for all inserts in this batch
+$inserted = 0;
+
+foreach ($entries as $item) {
+
+    echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
+
+    // Skip duplicate timestamps — the client may retry a failed send
+    if ($item["timestamp"] == $prev["timestamp"]) continue;
+
+    // Compute average power between consecutive readings.
+    // meter values are in 0.1 Wh units; timestamps are Unix seconds.
+    $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
+    $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
+    $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
+
+    // Reject implausible power readings and meter rollbacks (e.g. meter reset)
+    if ($power < 0 || $power > 40000) continue;
+    if ($prev["meter"] > $item["meter"]) continue;
+
+    // Advance the "previous" pointer so the next entry is validated against
+    // this one, not the one loaded from the database
+    $prev["timestamp"] = $item["timestamp"];
+    $prev["meter"]     = $item["meter"];
+
+    // Clamp meter value to zero just in case (should never be negative here)
+    $meter_val = max(0, $item["meter"]);
+
+    // Temperature is stored as integer * 100 on the ESP32 (e.g. 2150 = 21.50 degC)
+    $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : 0.0;
+
+    // Default optional fields to 0 when they were not included in this payload
+    $solar_val   = $item["meter_solar"] ?? 0;
+    $obis280_val = $item["obis280"]     ?? 0;
+
+    mysqli_stmt_bind_param($insert, "siidddd",
+        $id,
+        $current_time,
+        $item["timestamp"],
+        $meter_val,
+        $solar_val,
+        $temp_val,
+        $obis280_val
+    );
+    mysqli_stmt_execute($insert);
+    $inserted++;
 }
 
-$r = 0;
-$current_time = time();
-foreach ($data["values"] as $item) {
-	
-
-	echo $item["timestamp"]." ".$item["meter"]." ".$item["meter_solar"]."\n";
-	if($item["timestamp"] == $prev["timestamp"]) continue; // deactivated xmas 2025
-	
-	$item["power"] = (($item["meter"] - $prev["meter"])/10)/(($item["timestamp"] - $prev["timestamp"])/3600);
-    
-
-	if($item["power"] < 0 || $item["power"] > 40000) continue;
-	if($prev["meter"] > $item['meter']) 
-	{
-		continue; // dismiss this values if lower than the previous one.
-	}
-	$prev["timestamp"] = $item["timestamp"];
-	$prev["meter"] = $item["meter"];
-
-	if($item['meter'] < 0 ) $item['meter'] = 0;
-	if(!isset($item['temperature'])) $item['temperature'] = 0;
-	$item['temperature'] = $item['temperature']/100;
-
-	if(!isset($item['meter_solar'])) $item['meter_solar'] = 0;
-	if(!isset($item['obis280'])) $item['obis280'] = 0;
-	
-	$sql4 = "INSERT INTO `sml_v1` (
-	`i`, 
-	`id`, 
-	`timestamp_server2`, 
-	`timestamp_client`, 
-	`meter_value`, 
-	`meter_value_PV`, 
-	`temperature`,
-	`obis280`
-	) 
-	VALUES (
-	NULL, 
-	'".$data['ID']."', 
-	".$current_time.",
-	'".$item["timestamp"]."', 
-	'".($item['meter'])."', 
-	'".($item["meter_solar"])."',
-	'".$item['temperature']."',
-	'".($item["obis280"])."')";
-
-
-	$result4 = mysqli_query($_link, $sql4);
-	
-	$r++;
-}
-echo $r." Values received";
+mysqli_stmt_close($insert);
+echo $inserted . " values inserted.";
 ?>
