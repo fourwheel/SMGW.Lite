@@ -43,6 +43,23 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <DallasTemperature.h>
 #include "Arduino.h"
 
+// ---------------------------------------------------------------------------
+// Serial debug macros
+// Build with -DSERIAL_DEBUG (env:esp32c3_debug) to enable Serial output.
+// In the release build (env:esp32c3) all DLOG* calls compile to nothing.
+// OTA progress/error output intentionally uses Serial directly so it always
+// works regardless of this flag.
+// ---------------------------------------------------------------------------
+#ifdef SERIAL_DEBUG
+  #define DLOG(x)    Serial.print(x)
+  #define DLOGLN(x)  Serial.println(x)
+  #define DLOGF(...) Serial.printf(__VA_ARGS__)
+#else
+  #define DLOG(x)    do {} while(0)
+  #define DLOGLN(x)  do {} while(0)
+  #define DLOGF(...) do {} while(0)
+#endif
+
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
@@ -160,6 +177,12 @@ int meter_value_NON_override_i   = Meter_Value_Buffer_Size - 1;
 float currentPower, LastPower = 0.0;
 
 int staticDelay = 0;
+
+// Cached integer versions of config string params — updated in Param_configSaved() and setup().
+// Avoids calling atoi() on every loop() tick.
+int cached_taf7_param          = 15;
+int cached_taf14_param         = 60;
+int cached_backend_call_minute = 2;
 
 // Backend vars
 bool call_backend_successfull = true;
@@ -643,7 +666,7 @@ void MeterValue_init_Buffer()
   MeterValueBuffer = new uint8_t[total];
   if (!MeterValueBuffer)
   {
-    Serial.println("MeterValue buffer allocation failed!");
+    DLOGLN("MeterValue buffer allocation failed!");
     Log_AddEntry(1002);
     return;
   }
@@ -657,13 +680,13 @@ void MeterValue_init_Buffer()
   meter_value_buffer_overflow = false;
   meter_value_buffer_full     = false;
 
-  Serial.printf("MeterValue buffer init: %d slots x %d bytes = %d bytes total (%s)\n",
-                Meter_Value_Buffer_Size, (int)MeterValue_EntrySize(), (int)total,
-                meter_value_buffer_is_auto ? "auto" : "manual");
-  Serial.printf("  Fields: ts,m180%s%s%s\n",
-                config_temperature_enabled ? ",temp"  : "",
-                config_solar_enabled       ? ",solar" : "",
-                config_obis280_enabled     ? ",m280"  : "");
+  DLOGF("MeterValue buffer init: %d slots x %d bytes = %d bytes total (%s)\n",
+        Meter_Value_Buffer_Size, (int)MeterValue_EntrySize(), (int)total,
+        meter_value_buffer_is_auto ? "auto" : "manual");
+  DLOGF("  Fields: ts,m180%s%s%s\n",
+        config_temperature_enabled ? ",temp"  : "",
+        config_solar_enabled       ? ",solar" : "",
+        config_obis280_enabled     ? ",m280"  : "");
 }
 
 bool b_send_log_to_backend = false;
@@ -961,7 +984,9 @@ void Webserver_MeterValue_Num2()
 // ---------------------------------------------------------------------------
 void Webserver_ShowMeterValues()
 {
-  String s = "<html><head><title>SMGWLite - Meter Values</title>" + String(HTML_STYLE) + "</head><body>";
+  String s;
+  s.reserve(Meter_Value_Buffer_Size * 80 + 1024); // ~80 chars per data row + header
+  s = "<html><head><title>SMGWLite - Meter Values</title>" + String(HTML_STYLE) + "</head><body>";
 
   // Show active fields and entry size so the table header always matches
   s += "<p>Entry size: " + String(MeterValue_EntrySize()) + " bytes | ";
@@ -1011,7 +1036,7 @@ void Webclient_splitHostAndPath(const String &url, String &host, String &path)
 String backend_host;
 String backend_path;
 
-char *FullCert = new char[2000];
+char FullCert[2000];
 
 void Webserver_SetCert()
 {
@@ -1189,10 +1214,13 @@ void setup()
   Log_AddEntry(1001);
   Serial.begin(115200);
   mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
-  Serial.println();
-  Serial.println("Starting up...Hello!");
+  DLOGLN();
+  DLOGLN("Starting up...Hello!");
 
   Param_setup();
+  cached_taf7_param          = max(1, atoi(taf7_param));
+  cached_taf14_param         = max(1, atoi(taf14_param));
+  cached_backend_call_minute = max(1, atoi(backend_call_minute));
   Led_update_Blink();
   Webserver_UrlConfig();
   OTA_setup();
@@ -1207,8 +1235,8 @@ void setup()
 
   configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
   Temp_sensors.begin();
-  Serial.print("Temp sensors found: ");
-  Serial.println(Temp_sensors.getDeviceCount());
+  DLOG("Temp sensors found: ");
+  DLOGLN(Temp_sensors.getDeviceCount());
 
   uint8_t mac[6];
   WiFi.macAddress(mac);
@@ -1399,9 +1427,10 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
  */
 bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
 {
-  char telegram_str[length + 1];
-  memcpy(telegram_str, buffer, length);
-  telegram_str[length] = '\0';
+  static char telegram_str[TELEGRAM_LENGTH + 1];
+  size_t copy_len = (length <= TELEGRAM_LENGTH) ? length : TELEGRAM_LENGTH;
+  memcpy(telegram_str, buffer, copy_len);
+  telegram_str[copy_len] = '\0';
 
   // Extract OBIS 1.8.0 (consumption) — required
   const char *obis180 = strstr(telegram_str, "1-0:1.8.0");
@@ -1454,12 +1483,12 @@ void myStrom_get_Meter_value()
 {
   if (!mystrom_PV_object.isChecked()) { LastMeterValue.solar = 0; return; }
 
-  Serial.println(F("myStrom_get_Meter_value Connecting..."));
+  DLOGLN(F("myStrom_get_Meter_value Connecting..."));
   WiFiClient client;
   client.setTimeout(1000);
-  if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); Serial.println(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = -1; return; }
+  if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = -1; return; }
 
-  Serial.println(F("myStrom_get_Meter_value Connected!"));
+  DLOGLN(F("myStrom_get_Meter_value Connected!"));
   client.println(F("GET /report HTTP/1.0"));
   client.print(F("Host: ")); client.println(mystrom_PV_IP);
   client.println(F("Connection: close"));
@@ -1483,17 +1512,17 @@ void myStrom_get_Meter_value()
 
 int32_t MeterValue_get_from_remote()
 {
-  Serial.println("MeterValue_get_from_remote Connecting...");
+  DLOGLN("MeterValue_get_from_remote Connecting...");
   WiFiClient client;
   client.setTimeout(2000);
-  if (!client.connect(DebugMeterValueFromOtherClientIP, 80)) { Serial.println(F("Connection failed")); return -1; }
+  if (!client.connect(DebugMeterValueFromOtherClientIP, 80)) { DLOGLN(F("Connection failed")); return -1; }
 
-  Serial.println(F("Connected!"));
+  DLOGLN(F("Connected!"));
   client.println(F("GET /showLastMeterValue HTTP/1.0"));
   client.print(F("Host: ")); client.println(F(DebugMeterValueFromOtherClientIP));
   client.println(F("Connection: close"));
   client.println();
-  Serial.println(F("Request sent"));
+  DLOGLN(F("Request sent"));
 
   String fullResponse = "";
   unsigned long startTime = millis();
@@ -1502,26 +1531,26 @@ int32_t MeterValue_get_from_remote()
     if (client.available()) fullResponse += (char)client.read();
     else
     {
-      if (millis() - startTime > 5000) { Serial.println(F("Timeout while reading response")); break; }
+      if (millis() - startTime > 5000) { DLOGLN(F("Timeout while reading response")); break; }
       delay(10);
     }
   }
 
   int bodyIndex = fullResponse.indexOf("\r\n\r\n");
-  if (bodyIndex == -1) { Serial.println(F("No HTTP body found")); return -2; }
+  if (bodyIndex == -1) { DLOGLN(F("No HTTP body found")); return -2; }
 
   String body = fullResponse.substring(bodyIndex + 4);
   body.trim();
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, body);
-  if (error) { Serial.print(F("deserializeJson() failed: ")); Serial.println(error.f_str()); return -3; }
+  if (error) { DLOG(F("deserializeJson() failed: ")); DLOGLN(error.f_str()); return -3; }
 
   int32_t meter_value_180_i32 = doc["meter_value_180"] | -4;
   int32_t timestamp           = doc["timestamp"] | 0;
 
-  Serial.print(F("Meter Value 180: ")); Serial.println(meter_value_180_i32);
-  Serial.print(F("Timestamp: "));      Serial.println(timestamp);
+  DLOG(F("Meter Value 180: ")); DLOGLN(meter_value_180_i32);
+  DLOG(F("Timestamp: "));      DLOGLN(timestamp);
 
   resetMeterValue(LastMeterValue);
   LastMeterValue.meter_value_180 = doc["meter_value_180"];
@@ -1596,17 +1625,17 @@ void handle_Telegram_receive()
 
 void Webclient_send_log_to_backend()
 {
-  Serial.println("Send Log to Backend");
+  DLOGLN("Send Log to Backend");
   Log_AddEntry(1019);
   WiFiClientSecure client;
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { Serial.println("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
-  if (!logDataBuffer) { Serial.println("Log buffer allocation failed"); return; }
+  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); return; }
   memcpy(logDataBuffer, logBuffer, logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
@@ -1616,7 +1645,7 @@ void Webclient_send_log_to_backend()
   logHeader += "Content-Type: application/octet-stream\r\n";
   logHeader += "Content-Length: " + String(logBufferSize) + "\r\n";
   logHeader += "Connection: close\r\n\r\n";
-  Serial.println(logHeader);
+  DLOGLN(logHeader);
 
   client.print(logHeader);
   client.write(logDataBuffer, logBufferSize);
@@ -1627,8 +1656,8 @@ void Webclient_send_log_to_backend()
     if (client.available())
     {
       String line = client.readStringUntil('\n');
-      Serial.println(line);
-      if (line.startsWith("HTTP/1.1 200")) { Serial.println("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; break; }
+      DLOGLN(line);
+      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; break; }
       else b_send_log_to_backend = true;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1654,10 +1683,10 @@ void Webclient_send_meter_values_to_backend()
 {
   Log_AddEntry(1005);
   Log_AddEntry(MeterValue_Num());
-  Serial.println("call_backend_V2");
+  DLOGLN("call_backend_V2");
   last_call_backend = millis();
 
-  if (MeterValue_Num() == 0) { Serial.println("Zero Values to transmit"); Log_AddEntry(0); call_backend_successfull = true; return; }
+  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); Log_AddEntry(0); call_backend_successfull = true; return; }
 
   call_backend_successfull = false;
 
@@ -1665,7 +1694,7 @@ void Webclient_send_meter_values_to_backend()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { Serial.println("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
 
   // Content-Length = total buffer size including empty/unused slots.
   // The backend skips slots where meter_value_180 == 0.
@@ -1697,10 +1726,10 @@ void Webclient_send_meter_values_to_backend()
     if (client.available())
     {
       String line = client.readStringUntil('\n');
-      Serial.println(line);
+      DLOGLN(line);
       if (line.startsWith("HTTP/1.1 200"))
       {
-        Serial.println("MeterValues successfully sent");
+        DLOGLN("MeterValues successfully sent");
         call_backend_successfull = true;
         MeterValues_clear_Buffer();
         last_call_backend = millis();
@@ -1729,7 +1758,7 @@ void Webclient_send_meter_values_to_backend()
 // ---------------------------------------------------------------------------
 bool MeterValue_store(bool override)
 {
-  if (ESP.getFreeHeap() < 1000) { Log_AddEntry(1015); Serial.println("Not enough free heap to store another value"); return false; }
+  if (ESP.getFreeHeap() < 1000) { Log_AddEntry(1015); DLOGLN("Not enough free heap to store another value"); return false; }
 
   if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
 
@@ -1752,7 +1781,7 @@ bool MeterValue_store(bool override)
   //   override (TAF7)      -> ascending from front
   //   non-override (TAF14) -> descending from back
   int write_i = override ? meter_value_override_i : meter_value_NON_override_i;
-  Serial.println("where to write: " + String(write_i));
+  DLOGLN("where to write: " + String(write_i));
 
   // Check if the target slot is still empty — empty means free space remains
   meter_value_buffer_full = !MeterValue_slot_empty(write_i);
@@ -1796,7 +1825,7 @@ bool MeterValue_store(bool override)
   {
     Log_AddEntry(1016);
     MeterValue_trigger_non_override = false; // prevent immediate re-trigger
-    Serial.println("Buffer full, no space to write new value!");
+    DLOGLN("Buffer full, no space to write new value!");
     return false;
   }
 
@@ -1820,7 +1849,7 @@ void handle_check_wifi_connection()
     else if (current_wifi_status == WL_CONNECTED && !wifi_connected)
     {
       Log_AddEntry(1008);
-      Serial.println("Connection has returned: Resetting Backend Timer, starting OTA");
+      DLOGLN("Connection has returned: Resetting Backend Timer, starting OTA");
       ArduinoOTA.begin();
       wifi_connected         = true;
       wifi_reconnection_time = millis();
@@ -1854,8 +1883,9 @@ void handle_temperature()
     else if (read_temperature == false && millis() - last_temperature > 1000)
     {
       last_temperature = millis();
-      float max_temp = 5000; // if sensor fails it returns -127, so we cap at a reasonable maximum
-      current_temperature = max(max_temp, (Temp_sensors.getTempCByIndex(0) * 100));
+      float raw_temp = Temp_sensors.getTempCByIndex(0) * 100;
+      if (raw_temp > -10000) // filter out -127°C sensor error (-12700 in raw units)
+        current_temperature = (int)raw_temp;
       read_temperature = true;
     }
   }
@@ -1866,7 +1896,7 @@ void handle_call_backend()
   if (wifi_connected && millis() - wifi_reconnection_time > 60000)
   {
     if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
-        ((Time_getMinutes()) % atoi(backend_call_minute) == 0 &&
+        ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
           millis() - last_call_backend > 60000))
     {
@@ -1928,7 +1958,7 @@ void handle_MeterValue_trigger()
 {
   if (MeterValue_trigger_override == false &&
       taf7_b_object.isChecked() &&
-      ((Time_getEpochTime() - 1) % (atoi(taf7_param) * 60) < 15) &&
+      ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15) &&
       (millis() - last_taf7_meter_value > 45000) &&
       (millis() - last_meter_value_successful >= 20000))
   {
@@ -1939,8 +1969,8 @@ void handle_MeterValue_trigger()
   else if (MeterValue_trigger_override == false &&
            MeterValue_trigger_non_override == false &&
            taf14_b_object.isChecked() &&
-           millis() - last_meter_value_successful >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)) &&
-           millis() - last_taf14_meter_value      >= 1000UL * max(1UL, (unsigned long)atoi(taf14_param)))
+           millis() - last_meter_value_successful >= 1000UL * (unsigned long)cached_taf14_param &&
+           millis() - last_taf14_meter_value      >= 1000UL * (unsigned long)cached_taf14_param)
   {
     if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_AddEntry(1206); }
     else { Log_AddEntry(1011); MeterValue_trigger_non_override = true; }
@@ -2275,7 +2305,9 @@ void Webserver_ShowCert()
 
 void Webserver_ShowTelegram_Raw()
 {
-  String s = "<div class='block'>Receive Buffer</div><textarea name='cert' rows='10' cols='80'>";
+  String s;
+  s.reserve(TELEGRAM_LENGTH * 12 + 512); // 3 textarea blocks * ~4 chars/byte + headers
+  s = "<div class='block'>Receive Buffer</div><textarea name='cert' rows='10' cols='80'>";
   for (int i = 0; i < TELEGRAM_LENGTH; i++) { if (i > 0) s += " "; s += String(telegram_receive_buffer[i]); }
   s += "</textarea><br><br><div class='block'>Receive Buffer Hex</div><textarea name='cert' rows='10' cols='80'>";
   for (int i = 0; i < TELEGRAM_LENGTH; i++) { if (i > 0) s += " "; s += String(telegram_receive_buffer[i], HEX); }
@@ -2293,7 +2325,9 @@ void Webserver_ShowTelegram()
 {
   if (iotWebConf.handleCaptivePortal()) return;
 
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  String s;
+  s.reserve(TELEGRAM_LENGTH * 45 + 1024); // ~45 chars per table row + header overhead
+  s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>SMGWLite - Show Telegram</title>" + String(HTML_STYLE);
   s += "<br>Last Byte received @ " + String(millis() - lastByteTime) + "ms ago<br>";
   s += "<br>Last Complete Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
@@ -2340,10 +2374,14 @@ void Webserver_ShowLastMeterValue()
 
 void Param_configSaved()
 {
-  Serial.println("Configuration was updated.");
+  DLOGLN("Configuration was updated.");
   Led_update_Blink();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);
+
+  cached_taf7_param          = max(1, atoi(taf7_param));
+  cached_taf14_param         = max(1, atoi(taf14_param));
+  cached_backend_call_minute = max(1, atoi(backend_call_minute));
 
   // Re-initialise the packed ring-buffer because the feature flags or the
   // budget may have changed. All currently buffered values are lost.
