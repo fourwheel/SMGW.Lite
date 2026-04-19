@@ -210,8 +210,8 @@ void resetMeterValue(MeterValue &val);
 int MeterValue_Num();
 int MeterValue_Num2();
 int32_t MeterValue_get_from_remote();
-bool MeterValue_get_from_SML_telegram();
-int32_t MeterValue_get_from_IEC_telegram();
+bool Telegram_parse_SML(uint8_t* buffer, size_t length);
+bool Telegram_parse_IEC(uint8_t* buffer, size_t length);
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
@@ -701,6 +701,9 @@ String Log_StatusCodeToString(int statusCode)
   case 3000: return "Complete Telegram received";
   case 3001: return "Telegram Buffer overflow";
   case 3002: return "Telegram timeout";
+  case 3003: return "SML Protocoll";
+  case 3004: return "IEC Protocoll";
+  
   case 4000: return "Connection to server failed (Cert!?)";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
@@ -1141,7 +1144,7 @@ void Webserver_UrlConfig()
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefHome(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
   server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefHome(); });
   server.on("/sendboth_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendStatus_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendLog_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
   server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefHome(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
@@ -1320,13 +1323,43 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Protocol detection and unified parser  (Written by Claude)
+//
+// Both parsers now share the same signature:
+//   bool Telegram_parse_*(uint8_t* buffer, size_t length)
+//   Returns: true  = meter value successfully extracted into LastMeterValue
+//            false = telegram not recognised or parse error
+//
+// Protocol detection heuristics:
+//   SML: starts with 0x1b 0x1b 0x1b 0x1b (binary escape sequence)
+//   IEC: starts with '/' (ASCII 0x2F) — IEC 62056-21 mode C identifier
+//
+// The detected protocol is stored in last_detected_protocol for display
+// in the webserver "Telegram Parse Config" section.
+// ---------------------------------------------------------------------------
+
+// Tracks which protocol was last successfully detected
+enum class TelegramProtocol { UNKNOWN, SML, IEC };
+TelegramProtocol last_detected_protocol = TelegramProtocol::UNKNOWN;
+TelegramProtocol prev_detected_protocol = TelegramProtocol::UNKNOWN;
+
+// Returns a human-readable string for the detected protocol
+String Telegram_protocol_to_string(TelegramProtocol p)
+{
+  switch (p) {
+    case TelegramProtocol::SML: return "SML (detected)";
+    case TelegramProtocol::IEC: return "IEC 62056-21 (detected)";
+    default:                    return "Unknown (no valid telegram yet)";
+  }
+}
+
 /**
- * Main Processing Function
- * Validates integrity and parses registers.
- * Returns true if the telegram is structurally sound and data is extracted.
- * This function is written by Gemini3
+ * SML parser — extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
+ * This function is written by Gemini3, signature unified by Claude.
  */
-bool MeterValue_get_from_SML_telegram(uint8_t* buffer, size_t length) {
+bool Telegram_parse_SML(uint8_t* buffer, size_t length)
+{
   // 1. Locate Prefix
   int px = -1;
   for (int i = 0; i < (int)length - 4; i++) {
@@ -1353,38 +1386,69 @@ bool MeterValue_get_from_SML_telegram(uint8_t* buffer, size_t length) {
   if (found180) {
     resetMeterValue(LastMeterValue);
     LastMeterValue.meter_value_180 = temp180;
+    LastMeterValue.timestamp       = Time_getEpochTime();
     if (found280) LastMeterValue.meter_value_280 = temp280;
     return true;
   }
   return false;
 }
 
-/* This function is written by ChatGPT */
-int32_t MeterValue_get_from_IEC_telegram(uint8_t *buffer, size_t length) {
+/**
+ * IEC 62056-21 parser — extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
+ * This function is written by ChatGPT, extended and signature unified by Claude.
+ */
+bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
+{
   char telegram_str[length + 1];
   memcpy(telegram_str, buffer, length);
   telegram_str[length] = '\0';
 
-  const char *obis = strstr(telegram_str, "1-0:1.8.0");
-  if (!obis) return 1;
+  // Extract OBIS 1.8.0 (consumption) — required
+  const char *obis180 = strstr(telegram_str, "1-0:1.8.0");
+  if (!obis180) return false;
 
-  const char *openParen = strchr(obis, '(');
+  const char *openParen = strchr(obis180, '(');
   const char *star      = (openParen) ? strchr(openParen, '*') : nullptr;
-  if (!openParen || !star || openParen > star) return 2;
+  if (!openParen || !star || openParen > star) return false;
 
   char valueStr[16];
   size_t len = star - openParen - 1;
-  if (len >= sizeof(valueStr)) return 3;
+  if (len >= sizeof(valueStr)) return false;
 
   strncpy(valueStr, openParen + 1, len);
   valueStr[len] = '\0';
-
   for (int i = 0; valueStr[i]; i++) if (valueStr[i] == ',') valueStr[i] = '.';
 
-  LastMeterValue.timestamp = Time_getEpochTime();
-  float kWh = atof(valueStr);
-  return (int32_t)(kWh * 10000.0);
+  float kWh180 = atof(valueStr);
+  if (kWh180 <= 0.0f) return false; // implausible value
+
+  resetMeterValue(LastMeterValue);
+  LastMeterValue.meter_value_180 = (uint32_t)(kWh180 * 10000.0f);
+  LastMeterValue.timestamp       = Time_getEpochTime();
+
+  // Extract OBIS 2.8.0 (feed-in / delivery) — optional
+  const char *obis280 = strstr(telegram_str, "1-0:2.8.0");
+  if (obis280)
+  {
+    const char *p280 = strchr(obis280, '(');
+    const char *s280 = (p280) ? strchr(p280, '*') : nullptr;
+    if (p280 && s280 && p280 < s280)
+    {
+      char v280[16];
+      size_t l280 = s280 - p280 - 1;
+      if (l280 < sizeof(v280))
+      {
+        strncpy(v280, p280 + 1, l280);
+        v280[l280] = '\0';
+        for (int i = 0; v280[i]; i++) if (v280[i] == ',') v280[i] = '.';
+        LastMeterValue.meter_value_280 = (uint32_t)(atof(v280) * 10000.0f);
+      }
+    }
+  }
+
+  return true;
 }
+
 
 void myStrom_get_Meter_value()
 {
@@ -1504,13 +1568,26 @@ void handle_Telegram_receive()
 
   if (telegram_receive_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {
-    if (activate_IEC_Parser_object.isChecked())
-      LastMeterValue.meter_value_180 = MeterValue_get_from_IEC_telegram(telegram_receive_buffer, telegram_receive_bufferIndex);
+    // Try SML parser first. If it finds the SML prefix+suffix, it is
+    // authoritative and IEC is not attempted.
+    // If SML finds no valid frame, fall through to the IEC parser.
+    bool parsed = Telegram_parse_SML(telegram_receive_buffer, telegram_receive_bufferIndex);
+    if (parsed)
+    {
+      last_detected_protocol = TelegramProtocol::SML;
+    }
     else
-      if (MeterValue_get_from_SML_telegram(telegram_receive_buffer, telegram_receive_bufferIndex))
-        LastMeterValue.timestamp = Time_getEpochTime();
+    {
+      parsed = Telegram_parse_IEC(telegram_receive_buffer, telegram_receive_bufferIndex);
+      if (parsed) last_detected_protocol = TelegramProtocol::IEC;
+    }
+    if(last_detected_protocol != prev_detected_protocol){
+      if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
+      else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddEntry(3004);
 
-    if (temperature_object.isChecked())
+      prev_detected_protocol = last_detected_protocol;
+    }
+    if (parsed && temperature_object.isChecked())
       LastMeterValue.temperature = current_temperature;
 
     Telegram_ResetReceiveBuffer();
@@ -1519,7 +1596,7 @@ void handle_Telegram_receive()
 
 void Webclient_send_log_to_backend()
 {
-  Serial.println("send_status_report");
+  Serial.println("Send Log to Backend");
   Log_AddEntry(1019);
   WiFiClientSecure client;
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
@@ -2059,8 +2136,8 @@ void Webserver_HandleRoot()
 
 <h3>Telegram Parse Config</h3>
 <ul>
-  <li><i>Protocol Parser:</i> )rawliteral";
-  s += (activate_IEC_Parser_object.isChecked() ? "IEC" : "SML");
+  <li><i>Protocol (auto-detected):</i> )rawliteral";
+  s += Telegram_protocol_to_string(last_detected_protocol);
   s += R"rawliteral(</li>
   <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
   <li><a href='showSMLAnalysis'>Show SML Analysis</a></li>
@@ -2096,9 +2173,9 @@ void Webserver_HandleRoot()
   <li>Static Delay: )rawliteral";
   s += String(staticDelay);
   s += R"rawliteral( s</li>
-  <li><a href='sendStatus_Task'>Send Status Report</a></li>
-  <li><a href='sendMeterValues_Task'>Send Meter Values</a></li>
-  <li><a href='sendboth_Task'>Send Both</a></li>
+  <li><a href='sendLog_Task'>Send Log Files to backend</a></li>
+  <li><a href='sendMeterValues_Task'>Send Meter Values to backend</a></li>
+  <li><a href='sendboth_Task'>Send Both to backend</a></li>
 </ul>
 </div>
 
@@ -2279,23 +2356,8 @@ void Param_configSaved()
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);
 
-  // If there are pending values in the buffer, send them to the backend
-  // before re-initialising. A re-init changes the entry size when feature
-  // flags change, which would make existing entries unreadable.
-  // Sending first ensures no data is lost on a config change.
-  // The send runs in a background FreeRTOS task and acquires its own
-  // semaphore, so calling MeterValue_init_Buffer() directly after is safe —
-  // the buffer data is already copied into the send task's scope.
-  if (MeterValue_Num() > 0 && wifi_connected)
-  {
-    Serial.println("Config saved: flushing pending values before buffer re-init.");
-    Webclient_Send_Meter_Values_to_backend_wrapper();
-  }
-
-  // Re-initialise with the new feature flags and/or KB budget.
-  // If WiFi is not available, pending values are unfortunately lost —
-  // there is no way to reinterpret existing entries after the entry size
-  // changes, so re-init is the only safe option.
+  // Re-initialise the packed ring-buffer because the feature flags or the
+  // budget may have changed. All currently buffered values are lost.
   MeterValue_init_Buffer();
 }
 
