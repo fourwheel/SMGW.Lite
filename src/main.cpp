@@ -452,6 +452,15 @@ struct LogEntry
 LogEntry logBuffer[LOG_BUFFER_SIZE];
 int logIndex = -1;
 
+// ---------------------------------------------------------------------------
+// Log suppression — consecutive duplicate filtering
+// Status codes listed here are suppressed when they repeat back-to-back.
+// The first occurrence is always written; subsequent identical codes are
+// dropped until a different code is logged.
+// ---------------------------------------------------------------------------
+const int LOG_SUPPRESS_IDS[] = {1201, 1206, 1022};
+int last_logged_statusCode = -1; // last code actually written to the buffer
+
 void LogBuffer_reset()
 {
   for (int i = 0; i < LOG_BUFFER_SIZE; ++i)
@@ -461,17 +470,26 @@ void LogBuffer_reset()
     logBuffer[i].statusCode = -1;
   }
   logIndex = -1;
+  last_logged_statusCode = -1;
 }
 
 void Log_AddEntry(int statusCode)
 {
-  // Increase log index — ring-buffer, overwrites oldest entries
+  // Suppress consecutive duplicates for known noisy status codes.
+  // Check if this code is in the suppression list.
+  bool suppressable = false;
+  for (size_t i = 0; i < sizeof(LOG_SUPPRESS_IDS) / sizeof(LOG_SUPPRESS_IDS[0]); i++)
+  {
+    if (statusCode == LOG_SUPPRESS_IDS[i]) { suppressable = true; break; }
+  }
+  if (suppressable && statusCode == last_logged_statusCode) return;
+  last_logged_statusCode = statusCode;
+
+  // Advance ring-buffer write pointer, overwriting oldest entry on wrap.
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
 
-  unsigned long uptimeSeconds = millis() / 60000; // uptime in minutes
-
   logBuffer[logIndex].timestamp  = Time_getEpochTime();
-  logBuffer[logIndex].uptime     = uptimeSeconds;
+  logBuffer[logIndex].uptime     = millis(); // ms since boot — monotonic tiebreaker for same-second entries
   logBuffer[logIndex].statusCode = statusCode;
 }
 
@@ -629,6 +647,14 @@ int MeterValue_calc_max_slots_for_display()
 // Tracks whether auto (reference) budget or a manual KB value is active.
 bool meter_value_buffer_is_auto = false;
 
+// Tracks the KB config value and feature flags at the time of the last
+// MeterValue_init_Buffer() call — used by Param_configSaved() to detect
+// whether a layout-relevant setting actually changed.
+int  last_init_buffer_kb   = -1;   // -1 = not yet initialised
+bool last_init_temp        = false;
+bool last_init_solar       = false;
+bool last_init_280         = false;
+
 void MeterValue_init_Buffer()
 {
   // Apply runtime feature flags first — MeterValue_EntrySize() depends on them.
@@ -687,6 +713,13 @@ void MeterValue_init_Buffer()
         config_temperature_enabled ? ",temp"  : "",
         config_solar_enabled       ? ",solar" : "",
         config_obis280_enabled     ? ",m280"  : "");
+
+  // Record the settings used for this init so Param_configSaved() can
+  // detect whether a layout-relevant change actually happened.
+  last_init_buffer_kb = atoi(Meter_Value_Buffer_Size_Char);
+  last_init_temp      = config_temperature_enabled;
+  last_init_solar     = config_solar_enabled;
+  last_init_280       = config_obis280_enabled;
 }
 
 bool b_send_log_to_backend = false;
@@ -698,6 +731,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1001: return "setup()";
   case 1002: return "Memory Allocation failed";
   case 1003: return "Config saved";
+  case 1004: return "Buffer layout changed, re-initialising";
   case 1005: return "call_backend()";
   case 1006: return "Taf 6 meter reading trigger";
   case 1008: return "WiFi returned";
@@ -1628,6 +1662,7 @@ void Webclient_send_log_to_backend()
   DLOGLN("Send Log to Backend");
   Log_AddEntry(1019);
   WiFiClientSecure client;
+  client.setHandshakeTimeout(10); // 10 s SSL handshake timeout (takes seconds)
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
@@ -1651,7 +1686,8 @@ void Webclient_send_log_to_backend()
   client.write(logDataBuffer, logBufferSize);
   free(logDataBuffer);
 
-  while (client.connected() || client.available())
+  unsigned long log_deadline = millis() + 15000;
+  while ((client.connected() || client.available()) && millis() < log_deadline)
   {
     if (client.available())
     {
@@ -1691,13 +1727,16 @@ void Webclient_send_meter_values_to_backend()
   call_backend_successfull = false;
 
   WiFiClientSecure client;
+  client.setTimeout(10000); // 10 s read timeout for readStringUntil()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
 
-  // Content-Length = total buffer size including empty/unused slots.
-  // The backend skips slots where meter_value_180 == 0.
+  // Send the full buffer including empty (zero) slots in the middle.
+  // The backend skips slots where meter_value_180 == 0, so the wire format
+  // is always Meter_Value_Buffer_Size * entrySize bytes regardless of how
+  // many slots are actually filled.
   size_t bufferSize = (size_t)Meter_Value_Buffer_Size * MeterValue_EntrySize();
 
   String header  = "POST " + String(backend_path);
@@ -1719,9 +1758,10 @@ void Webclient_send_meter_values_to_backend()
   header += "Connection: close\r\n\r\n";
 
   client.print(header);
-  client.write(MeterValueBuffer, bufferSize); // send packed buffer directly — no extra malloc/memcpy needed
+  client.write(MeterValueBuffer, bufferSize);
 
-  while (client.connected() || client.available())
+  unsigned long mv_deadline = millis() + 15000;
+  while ((client.connected() || client.available()) && millis() < mv_deadline)
   {
     if (client.available())
     {
@@ -1734,6 +1774,7 @@ void Webclient_send_meter_values_to_backend()
         MeterValues_clear_Buffer();
         last_call_backend = millis();
         Log_AddEntry(1021);
+        break; // don't wait for the rest of the response — we have what we need
       }
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1801,7 +1842,9 @@ bool MeterValue_store(bool override)
 
     if (override)
     {
-      // TAF7: advance write pointer upward; wrap around on overflow
+      // TAF7: advance write pointer upward; wrap around on overflow.
+      // Intentionally overwrites TAF14 data when the buffer is full —
+      // TAF7 (timed snapshots) has higher priority than TAF14 (interval readings).
       meter_value_override_i++;
       if (meter_value_override_i >= Meter_Value_Buffer_Size)
       {
@@ -1900,6 +1943,7 @@ void handle_call_backend()
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
           millis() - last_call_backend > 60000))
     {
+      last_call_backend = millis(); // prevent loop() from spawning another task before this one starts
       Webclient_Send_Meter_Values_to_backend_wrapper();
       if (b_send_log_to_backend == true) Webclient_Send_Log_to_backend_wrapper();
     }
@@ -2087,8 +2131,14 @@ void Webserver_HandleRoot()
     int maxMinutes_taf7  = (maxSlots > 0 && atoi(taf7_param)  > 0) ? (maxSlots * atoi(taf7_param))  : 0;
     int maxMinutes_taf14 = (maxSlots > 0 && atoi(taf14_param) > 0) ? (maxSlots * atoi(taf14_param) / 60) : 0;
     s += String(maxSlots) + " slots";
-    s += " &nbsp;|&nbsp; TAF7: ~" + String(maxMinutes_taf7 / 60) + "h" + String(maxMinutes_taf7 % 60) + "min";
-    s += " &nbsp;|&nbsp; TAF14: ~" + String(maxMinutes_taf14 / 60) + "h" + String(maxMinutes_taf14 % 60) + "min";
+    { int d = maxMinutes_taf7 / 1440, h = (maxMinutes_taf7 % 1440) / 60, m = maxMinutes_taf7 % 60;
+      s += " &nbsp;|&nbsp; TAF7: ~";
+      if (d > 0) s += String(d) + "d";
+      s += String(h) + "h" + String(m) + "min"; }
+    { int d = maxMinutes_taf14 / 1440, h = (maxMinutes_taf14 % 1440) / 60, m = maxMinutes_taf14 % 60;
+      s += " &nbsp;|&nbsp; TAF14: ~";
+      if (d > 0) s += String(d) + "d";
+      s += String(h) + "h" + String(m) + "min"; }
   }
   s += R"rawliteral(</li>
   <li>Wire format: )rawliteral";
@@ -2383,9 +2433,31 @@ void Param_configSaved()
   cached_taf14_param         = max(1, atoi(taf14_param));
   cached_backend_call_minute = max(1, atoi(backend_call_minute));
 
-  // Re-initialise the packed ring-buffer because the feature flags or the
-  // budget may have changed. All currently buffered values are lost.
-  MeterValue_init_Buffer();
+  // Only re-initialise the ring-buffer (which clears all pending values!)
+  // when a setting that affects the binary layout actually changed.
+  // Saving unrelated settings must not silently discard buffered meter data.
+  bool layout_changed =
+    (config_temperature_object.isChecked() != last_init_temp)  ||
+    (config_solar_object.isChecked()       != last_init_solar) ||
+    (config_280_object.isChecked()         != last_init_280)   ||
+    (atoi(Meter_Value_Buffer_Size_Char)    != last_init_buffer_kb);
+
+  if (layout_changed)
+  {
+    
+    // Flush pending values synchronously before the buffer is cleared.
+    // Called directly (no task) so the send is guaranteed to complete
+    // before MeterValue_init_Buffer() wipes the data.
+    // Take the semaphore with a timeout so we don't block indefinitely
+    // if a backend task happens to be running at the same moment.
+    if (MeterValue_Num() > 0 && xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(15000)))
+    {
+      Webclient_send_meter_values_to_backend();
+      xSemaphoreGive(Sema_Backend);
+    }
+    Log_AddEntry(1004);
+    MeterValue_init_Buffer();
+  }
 }
 
 void Led_update_Blink()

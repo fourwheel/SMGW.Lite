@@ -35,6 +35,7 @@ function getStatusDescription(int $statusCode): string
         case 1001: return "setup()";
         case 1002: return "Memory allocation failed";
         case 1003: return "Config saved";
+        case 1004: return "Buffer layout changed, re-initialising";
 
         // --- Backend calls ---
         case 1005: return "call_backend()";
@@ -125,8 +126,13 @@ for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
     ];
 }
 
-// Sort descending by client timestamp
-usort($logEntries, fn($a, $b) => $b['timestamp'] <=> $a['timestamp']);
+// Sort descending by timestamp; use uptime (ms since boot) as tiebreaker
+// for entries that share the same second.
+usort($logEntries, function($a, $b) {
+    if ($a['timestamp'] !== $b['timestamp'])
+        return $b['timestamp'] <=> $a['timestamp'];
+    return $b['uptime'] <=> $a['uptime'];
+});
 
 // ---------------------------------------------------------------------------
 // Write log file
@@ -134,7 +140,7 @@ usort($logEntries, fn($a, $b) => $b['timestamp'] <=> $a['timestamp']);
 // Use a prepared statement-style approach for the filename: only allow safe
 // characters from the validated $id (already checked against valid_clients).
 $logFile    = "log/" . date("y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "_log.txt";
-$logContent = "Timestamp (UTC)      \tUptime (min)\tCode\tDescription\n";
+$logContent = "Timestamp (UTC)      \tUptime (ms) \tCode\tDescription\n";
 $logContent .= str_repeat("-", 80) . "\n";
 
 foreach ($logEntries as $entry) {
