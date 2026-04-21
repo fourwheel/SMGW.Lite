@@ -2091,20 +2091,27 @@ void Webserver_HandleRoot()
 <p>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.</p>
 
 <h2>Last Meter Value</h2>
-<table>
-  <tr><th>Time</th><th>Meter 1.8.0</th><th>Meter 2.8.0</th><th>Temperature</th><th>Solar</th></tr>
-  <tr>
-    <td>)rawliteral";
-  s += String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago";
-  s += R"rawliteral(</td><td>)rawliteral";
-  s += String(LastMeterValue.meter_value_180);
-  s += R"rawliteral(</td><td>)rawliteral";
-  s += String(LastMeterValue.meter_value_280);
-  s += R"rawliteral(</td><td>)rawliteral";
-  s += String(LastMeterValue.temperature / 100.0) + " °C";
-  s += R"rawliteral(</td><td>)rawliteral";
-  s += String(LastMeterValue.solar);
-  s += R"rawliteral(</td></tr></table>
+<p><small>Green = included in wire format</small></p>
+<table>)rawliteral";
+  {
+    // W = in wire (light green), N = not in wire
+    const char* W = " style='background:#e6ffe6'";
+    const char* N = "";
+    const char* w280  = config_obis280_enabled     ? W : N;
+    const char* wTemp = config_temperature_enabled ? W : N;
+    const char* wSol  = config_solar_enabled        ? W : N;
+    s += String("<tr><th") + N    + ">Time</th>"
+       + "<th" + N    + ">Meter 1.8.0</th>"
+       + "<th" + N  + ">Meter 2.8.0</th>"
+       + "<th" + N + ">Temperature</th>"
+       + "<th" + N  + ">Solar</th></tr>";
+    s += String("<tr><td") + W    + ">" + String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago</td>"
+       + "<td" + W    + ">" + String(LastMeterValue.meter_value_180) + "</td>"
+       + "<td" + w280  + ">" + String(LastMeterValue.meter_value_280) + "</td>"
+       + "<td" + wTemp + ">" + String(LastMeterValue.temperature / 100.0) + " \xc2\xb0""C</td>"
+       + "<td" + wSol  + ">" + String(LastMeterValue.solar) + "</td></tr>";
+  }
+  s += R"rawliteral(</table>
 
 <p><a href='StoreMeterValue'>Store Meter Value Now (Taf6)</a></p>
 
