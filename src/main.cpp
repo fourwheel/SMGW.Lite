@@ -198,7 +198,7 @@ bool read_temperature           = false;
 int current_temperature         = 123;
 
 // Log vars
-const int LOG_BUFFER_SIZE = 100;
+const int LOG_BUFFER_SIZE = 200;
 
 // Task watermark vars
 int watermark_meter_buffer = 0;
@@ -775,7 +775,7 @@ String Log_StatusCodeToString(int statusCode)
   }
   if (statusCode < 1000)
   {
-    return "# values transmitted";
+    return "# meter slot";
   }
   return "Unknown status code";
 }
@@ -1897,9 +1897,9 @@ void handle_check_wifi_connection()
       wifi_connected         = true;
       wifi_reconnection_time = millis();
       call_backend_successfull = false;
+      b_send_log_to_backend  = true; // send after the 60 s reconnect delay, not immediately
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
-      Webclient_Send_Log_to_backend_wrapper();
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
@@ -2101,7 +2101,7 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</td><td>)rawliteral";
   s += String(LastMeterValue.meter_value_280);
   s += R"rawliteral(</td><td>)rawliteral";
-  s += String(LastMeterValue.temperature / 100.0) + " degC";
+  s += String(LastMeterValue.temperature / 100.0) + " °C";
   s += R"rawliteral(</td><td>)rawliteral";
   s += String(LastMeterValue.solar);
   s += R"rawliteral(</td></tr></table>
