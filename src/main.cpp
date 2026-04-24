@@ -117,7 +117,7 @@ struct MeterValue
   uint32_t timestamp;        // Unix epoch, seconds
   uint32_t meter_value_180;  // OBIS 1.8.0 consumption counter, unit: 0.1 Wh
   uint32_t temperature;      // temperature * 100 (e.g. 2150 = 21.50 degC)
-  uint32_t solar;            // PV / MyStrom energy counter
+  uint32_t solar;            // MyStrom / solar energy counter
   uint32_t meter_value_280;  // OBIS 2.8.0 feed-in counter, unit: 0.1 Wh
 };
 
@@ -368,8 +368,8 @@ IotWebConfNumberParameter   Meter_Value_Buffer_Size_object   = IotWebConfNumberP
 // clears the buffer — the UI warns the user if values are pending.
 // ---------------------------------------------------------------------------
 IotWebConfCheckboxParameter config_temperature_object = IotWebConfCheckboxParameter("Store Temperature in buffer", "config_temperature", config_temperature_char, STRING_LEN, false);
-IotWebConfCheckboxParameter config_solar_object       = IotWebConfCheckboxParameter("Store Solar / PV in buffer",  "config_solar",       config_solar_char,       STRING_LEN, false);
-IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParameter("Store OBIS 2.8.0 in buffer",  "config_280",         config_280_char,         STRING_LEN, false);
+IotWebConfCheckboxParameter config_solar_object       = IotWebConfCheckboxParameter("Store myStrom in buffer",  "config_solar",       config_solar_char,       STRING_LEN, false);
+IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParameter("Store Infeed (2.8.0) in buffer",  "config_280",         config_280_char,         STRING_LEN, false);
 
 const char HTML_STYLE[] PROGMEM = R"rawliteral(
 <style>
@@ -503,7 +503,7 @@ size_t MeterValue_EntrySize()
 {
   size_t s = 4 + 4; // timestamp + meter_value_180 (always present)
   if (config_temperature_enabled) s += 4; // optional: temperature
-  if (config_solar_enabled)       s += 4; // optional: solar / PV
+  if (config_solar_enabled)       s += 4; // optional: myStrom
   if (config_obis280_enabled)     s += 4; // optional: OBIS 2.8.0
   return s;
 }
@@ -1026,10 +1026,10 @@ void Webserver_ShowMeterValues()
   s += "<p>Entry size: " + String(MeterValue_EntrySize()) + " bytes | ";
   s += MeterValue_BuildFieldsParam() + "</p>";
 
-  s += "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Meter 1.8.0</th>";
-  if (config_temperature_enabled) s += "<th>Temp</th>";
-  if (config_solar_enabled)       s += "<th>Solar</th>";
-  if (config_obis280_enabled)     s += "<th>OBIS 2.8.0</th>";
+  s += "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Consumption (1.8.0)</th>";
+  if (config_temperature_enabled) s += "<th>Temperature</th>";
+  if (config_solar_enabled)       s += "<th>myStrom (solar)</th>";
+  if (config_obis280_enabled)     s += "<th>Infeed (2.8.0)</th>";
   s += "</tr>";
 
   int count = 1;
@@ -2101,10 +2101,10 @@ void Webserver_HandleRoot()
     const char* wTemp = config_temperature_enabled ? W : N;
     const char* wSol  = config_solar_enabled        ? W : N;
     s += String("<tr><th") + N    + ">Time</th>"
-       + "<th" + N    + ">Meter 1.8.0</th>"
-       + "<th" + N  + ">Meter 2.8.0</th>"
+       + "<th" + N    + ">Consumption (1.8.0)</th>"
+       + "<th" + N  + ">Infeed (2.8.0)</th>"
        + "<th" + N + ">Temperature</th>"
-       + "<th" + N  + ">Solar</th></tr>";
+       + "<th" + N  + ">MyStrom (solar)</th></tr>";
     s += String("<tr><td") + W    + ">" + String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago</td>"
        + "<td" + W    + ">" + String(LastMeterValue.meter_value_180) + "</td>"
        + "<td" + w280  + ">" + String(LastMeterValue.meter_value_280) + "</td>"
@@ -2160,10 +2160,10 @@ void Webserver_HandleRoot()
   <li>Temperature in buffer: )rawliteral";
   s += String(config_temperature_enabled ? "yes" : "no");
   s += R"rawliteral(</li>
-  <li>Solar in buffer: )rawliteral";
+  <li>MyStrom / Solar in buffer: )rawliteral";
   s += String(config_solar_enabled ? "yes" : "no");
   s += R"rawliteral(</li>
-  <li>OBIS 2.8.0 in buffer: )rawliteral";
+  <li>Infeed (2.8.0) in buffer: )rawliteral";
   s += String(config_obis280_enabled ? "yes" : "no");
   s += R"rawliteral(</li>
   <li>i override: )rawliteral";
@@ -2276,7 +2276,7 @@ void Webserver_HandleRoot()
   <li><i>Temperature Sensor:</i> )rawliteral";
   s += (temperature_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
-  <li><i>MyStrom:</i> )rawliteral";
+  <li><i>MyStrom (solar):</i> )rawliteral";
   s += (mystrom_PV_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
   <li><i>MyStrom IP:</i> )rawliteral";
