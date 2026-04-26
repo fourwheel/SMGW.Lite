@@ -1,159 +1,164 @@
 <?php
-
+// ---------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------
 include("valid_clients.php");
 
-$id = $_GET['ID'] ?? '';
+$id    = $_GET['ID']    ?? '';
 $token = $_GET['token'] ?? '';
 
-// check if client is valid
+if ($token === "header") {
+    $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
+}
+
+// Reject unknown or invalid clients immediately
 if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
     http_response_code(403);
-    echo "Zugriff verweigert.";
+    echo "Access denied.";
     exit;
 }
-$data = [];
-$data["ID"] = "";
-$data["ID"] = $_GET['ID'];
 
-// Datei, in der der Log-Buffer gespeichert wird
-$logFile = "log/" . date("y-m-d-H-i-s") . "-".$data["ID"]."_log.txt";
+// ---------------------------------------------------------------------------
+// Status code descriptions
+// Kept in sync with Log_StatusCodeToString() in main.cpp.
+// Codes < 1000: number of meter values transmitted (handled separately below).
+// ---------------------------------------------------------------------------
+function getStatusDescription(int $statusCode): string
+{
+    // Codes below 1000 carry a dynamic value (number of transmitted meter values)
+    if ($statusCode >= 0 && $statusCode < 1000) {
+        return "# values transmitted: $statusCode";
+    }
 
+    switch ($statusCode) {
+        // --- System ---
+        case 1001: return "setup()";
+        case 1002: return "Memory allocation failed";
+        case 1003: return "Config saved";
+        case 1004: return "Buffer layout changed, re-initialising";
 
-// Rohdaten des Log-Buffers aus der Anfrage lesen
-$inputData = file_get_contents("php://input");
+        // --- Backend calls ---
+        case 1005: return "call_backend()";
+        case 1012: return "call backend trigger";
+        case 1019: return "Sending Log";
+        case 1020: return "Sending Log successful";
+        case 1021: return "call_backend successful";
 
-// Struktur des Log-Eintrags definieren (entsprechend der C++-Struktur)
-$logEntrySize = 3 * 4; // 3 Felder, je 4 Byte (unsigned long, int)
-$logEntries = [];
+        // --- TAF triggers ---
+        case 1006: return "TAF 6 meter reading trigger";
+        case 1010: return "TAF 7 meter reading trigger";
+        case 1011: return "TAF 14 meter reading trigger";
+        case 1014: return "TAF 7-900s meter reading trigger";
+        case 1018: return "Dynamic TAF trigger";
+        case 1022: return "TAF 14 trigger not possible, buffer full";
 
-// Statuscode-Beschreibungen
-function getStatusDescription($statusCode) {
-   switch ($statusCode)
-  {
-  case 1001:
-    return "setup()";
-  case 1002:
-    return "Memory Allocation failed";
-  case 1003:
-    return "Config saved";
-  case 1005:
-    return "call_backend()";
-  case 1006:
-    return "Taf 6 meter reading trigger";
-  case 1008:
-    return "WiFi returned";
-  case 1009:
-    return "WiFi lost";
-  case 1010:
-    return "Taf 7 meter reading trigger";
-  case 1011:
-    return "Taf 14 meter reading trigger";
-  case 1012:
-    return "call backend trigger";
-  case 1013:
-    return "MeterValues_clear_Buffer()";
-  case 1014:
-    return "Taf 7-900s meter reading trigger";
-  case 1015:
-    return "not enough heap to store value";
-  case 1016:
-    return "Buffer full, cannot store non-override value";
-  case 1017:
-    return "Meter Value stored";
-  case 1018:
-    return "dynamic Taf trigger";
-  case 1019:
-    return "Sending Log";
-  case 1020:
-    return "Sending Log successful";
-  case 1021:
-    return "call_backend successful";
+        // --- Meter value buffer ---
+        case 1013: return "MeterValues_clear_Buffer()";
+        case 1015: return "Not enough heap to store value";
+        case 1016: return "Buffer full, cannot store non-override value";
+        case 1017: return "Meter value stored";
+        case 1206: return "Buffer full, cannot store non-override value";
 
-  case 1022:
-    return "taf14 trigger not possible, buffer full";
+        // --- Meter value validation ---
+        case 1200: return "Meter value <= 0";
+        case 1201: return "Current meter value = previous meter value";
+        case 1203: return "Suffix must not be 0";
+        case 1204: return "Prefix/suffix not correct";
+        case 1205: return "Error: buffer size exceeded";
 
-  case 1200:
-    return "meter value <= 0";
-  case 1201:
-    return "current Meter value = previous meter value";
-  case 1203:
-    return "Suffix Must not be 0";
-  case 1204:
-    return "prefix suffix not correct";
-  case 1205:
-    return "Error Buffer Size Exceeded";
-  case 1206:
-    return "Buffer Full, cannot store non-override value";
-  case 3000:
-    return "Complete Telegram received";
-  case 3001:
-    return "Telegram Buffer overflow";
-  case 3002:
-    return "Telegram timeout";
-  case 3003:
-    return "Telegram too big for buffer";
-  case 4000:
-    return "Connection to server failed (Cert!?)";
-  case 5000:
-    return "myStrom_get_Meter_value Connection failed";
-  case 5001:
-    return "Failed to connect to myStrom";
-  case 5002:
-    return "myStrom_get_Meter_value deserializeJson() failed";
-  case 7000:
-    return "Stopping Wifi, Backendcall unsuccessfull";
-  case 7001:
-    return "Restarting Wifi";
-  case 8000:
-    return "Spiffs not mounted";
-  case 8001:
-    return "Error reading cert file";
-  case 8002:
-    return "Cert saved";
-  case 8003:
-    return "Error reading cert file";
-  case 8004:
-    return "No Cert received";
-  default: return "Unknown status code";
-  }
-}
+        // --- WiFi ---
+        case 1008: return "WiFi returned";
+        case 1009: return "WiFi lost";
+        case 7000: return "Stopping WiFi, backend call unsuccessful";
+        case 7001: return "Restarting WiFi";
 
+        // --- Telegram / serial ---
+        case 3000: return "Complete telegram received";
+        case 3001: return "Telegram buffer overflow";
+        case 3002: return "Telegram timeout";
+        case 3003: return "Protocol detected: SML";
+        case 3004: return "Protocol detected: IEC 62056-21";
 
-// Binärdaten in lesbares Format umwandeln
-for ($i = 0; $i < strlen($inputData); $i += $logEntrySize) {
-    $entryData = substr($inputData, $i, $logEntrySize);
-    if (strlen($entryData) === $logEntrySize) {
-        $timestamp = unpack("L", substr($entryData, 0, 4))[1]; // unsigned long
-        $uptime = unpack("L", substr($entryData, 4, 4))[1];    // unsigned long
-        $statusCode = unpack("l", substr($entryData, 8, 4))[1]; // int
-        $logEntries[] = [
-            'timestamp' => date("Y-m-d H:i:s", $timestamp),
-            'uptime' => $uptime,
-            'statusCode' => $statusCode,
-			'description' => getStatusDescription($statusCode),
-        ];
+        // --- Backend connection ---
+        case 4000: return "Connection to server failed (certificate?)";
+        case 4001: return "Error transmitting Buffer Chunk";
+
+        // --- MyStrom / PV ---
+        case 5000: return "myStrom: connection failed";
+        case 5001: return "myStrom: failed to connect";
+        case 5002: return "myStrom: deserializeJson() failed";
+
+        // --- SPIFFS / certificates ---
+        case 8000: return "SPIFFS not mounted";
+        case 8001: return "Error reading cert file";
+        case 8002: return "Cert saved";
+        case 8003: return "Error writing cert file";
+        case 8004: return "No cert received";
+
+        default:   return "Unknown status code ($statusCode)";
     }
 }
 
-// Log-Einträge in menschenlesbarem Format speichern
-$logContent = "Timestamp\tUptime (s)\tStatus Code\n";
-$logContent .= "-----------------------------------------\n";
+// ---------------------------------------------------------------------------
+// Parse binary log buffer
+// Matches the LogEntry struct in main.cpp:
+//   unsigned long timestamp  (4 bytes, little-endian unsigned)
+//   unsigned long uptime     (4 bytes, little-endian unsigned)
+//   int           statusCode (4 bytes, little-endian signed)
+// ---------------------------------------------------------------------------
+$inputData    = file_get_contents("php://input");
+$logEntrySize = 12; // 3 x 4 bytes
+$logEntries   = [];
 
-// Extrahiere die Timestamps in ein separates Array
-$timestamps = array_column($logEntries, 'timestamp');
+for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
+    $entry      = substr($inputData, $i, $logEntrySize);
+    $timestamp  = unpack("V", substr($entry, 0, 4))[1]; // unsigned 32-bit little-endian
+    $uptime     = unpack("V", substr($entry, 4, 4))[1];
+    $statusCode = unpack("l", substr($entry, 8, 4))[1]; // signed 32-bit little-endian
 
-// Sortiere nach Timestamp absteigend, aber stabil
-array_multisort($timestamps, SORT_DESC, SORT_STRING, $logEntries);
+    // Skip uninitialised entries (statusCode == -1 is the sentinel set by LogBuffer_reset())
+    if ($statusCode === -1) continue;
+
+    $logEntries[] = [
+        'timestamp'   => $timestamp,
+        'uptime'      => $uptime,
+        'statusCode'  => $statusCode,
+        'description' => getStatusDescription($statusCode),
+    ];
+}
+
+// Sort descending by timestamp; use uptime (ms since boot) as tiebreaker
+// for entries that share the same second.
+usort($logEntries, function($a, $b) {
+    if ($a['timestamp'] !== $b['timestamp'])
+        return $b['timestamp'] <=> $a['timestamp'];
+    return $b['uptime'] <=> $a['uptime'];
+});
+
+// ---------------------------------------------------------------------------
+// Write log file
+// ---------------------------------------------------------------------------
+// Use a prepared statement-style approach for the filename: only allow safe
+// characters from the validated $id (already checked against valid_clients).
+$logFile    = "log/" . date("y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "_log.txt";
+$logContent = "Timestamp (UTC)      \tUptime (ms) \tCode\tDescription\n";
+$logContent .= str_repeat("-", 80) . "\n";
 
 foreach ($logEntries as $entry) {
-    $logContent .= $entry['timestamp'] . "\t" . $entry['uptime'] . "\t\t" . $entry['statusCode'] . "\t\t" . $entry['description'] . "\n";
+    $ts   = ($entry['timestamp'] > 0) ? date("Y-m-d H:i:s", $entry['timestamp']) : "---";
+    $logContent .= sprintf("%-20s\t%-12d\t%d\t%s\n",
+        $ts,
+        $entry['uptime'],
+        $entry['statusCode'],
+        $entry['description']
+    );
 }
-// Log-Daten in die Datei schreiben
-if (file_put_contents($logFile, $logContent)) {
+
+if (file_put_contents($logFile, $logContent) !== false) {
     http_response_code(200);
-    echo "Log buffer saved successfully.";
+    echo "Log saved (" . count($logEntries) . " entries).";
 } else {
     http_response_code(500);
-    echo "Failed to save log buffer.";
+    echo "Failed to save log file.";
 }
 ?>
