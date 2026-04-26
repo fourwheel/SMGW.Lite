@@ -246,24 +246,55 @@ $insert = mysqli_prepare($_link,
 );
 
 $current_time = time(); // single server timestamp for all inserts in this batch
-$inserted = 0;
+$inserted  = 0;
+$diag_rows = []; // collects all entries with validation result for diagnostic log
 
 foreach ($entries as $item) {
 
     echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
 
+    $rejection = null;
+
     // Skip duplicate timestamps — the client may retry a failed send
-    if ($item["timestamp"] == $prev["timestamp"]) continue;
+    if ($item["timestamp"] == $prev["timestamp"]) {
+        $rejection = "duplicate_timestamp";
+    }
 
-    // Compute average power between consecutive readings.
-    // meter values are in 0.1 Wh units; timestamps are Unix seconds.
-    $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
-    $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
-    $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
+    if ($rejection === null) {
+        // Compute average power between consecutive readings.
+        // meter values are in 0.1 Wh units; timestamps are Unix seconds.
+        $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
+        $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
+        $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
 
-    // Reject implausible power readings and meter rollbacks (e.g. meter reset)
-    if ($power < 0 || $power > 40000) continue;
-    if ($prev["meter"] > $item["meter"]) continue;
+        if ($prev["meter"] > $item["meter"]) {
+            $rejection = "meter_rollback(prev=" . $prev["meter"] . ")";
+        } elseif ($power < 0 || $power > 40000) {
+            $rejection = "power_out_of_range(" . round($power) . "W)";
+        }
+    } else {
+        $power = 0;
+        $delta_energy = 0;
+        $delta_time   = 0;
+    }
+
+    // Record row for diagnostic log regardless of outcome
+    $diag_rows[] = [
+        'ts'        => $item["timestamp"],
+        'ts_fmt'    => date("Y-m-d H:i:s", $item["timestamp"]),
+        'meter'     => $item["meter"],
+        'solar'     => $item["meter_solar"] ?? "",
+        'temp'      => isset($item["temperature"]) ? round($item["temperature"] / 100.0, 2) : "",
+        'power_w'   => round($power),
+        'prev_ts'   => $prev["timestamp"],
+        'prev_m'    => $prev["meter"],
+        'status'    => $rejection ?? "OK",
+    ];
+
+    if ($rejection !== null) {
+        // do not advance prev, do not insert
+        continue;
+    }
 
     // Advance the "previous" pointer so the next entry is validated against
     // this one, not the one loaded from the database
@@ -295,4 +326,37 @@ foreach ($entries as $item) {
 
 mysqli_stmt_close($insert);
 echo $inserted . " values inserted.";
+
+// ---------------------------------------------------------------------------
+// Diagnostic log — written whenever at least one entry was rejected.
+// File: log/YYYY-MM-DD-HH-ii-ss-{ID}-diag.tsv
+// Columns: timestamp_utc | ts_unix | meter | solar | temp_c | power_w |
+//          prev_ts | prev_meter | status
+// ---------------------------------------------------------------------------
+$rejected_count = count($diag_rows) - $inserted;
+if ($rejected_count > 0) {
+    $diag_file = "log/" . date("y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "-diag.tsv";
+    $fh = fopen($diag_file, "w");
+    if ($fh) {
+        fwrite($fh, "timestamp_utc\t\tts_unix\t\tmeter\t\tsolar\t\ttemp_c\tpower_w\tprev_ts\t\tprev_meter\tstatus\n");
+        fwrite($fh, str_repeat("-", 120) . "\n");
+        foreach ($diag_rows as $r) {
+            $mark = ($r['status'] !== "OK") ? ">>> " : "    ";
+            fwrite($fh, sprintf("%s%-20s\t%d\t\t%d\t\t%s\t\t%s\t%d\t%d\t\t%d\t\t%s\n",
+                $mark,
+                $r['ts_fmt'],
+                $r['ts'],
+                $r['meter'],
+                $r['solar'],
+                $r['temp'],
+                $r['power_w'],
+                $r['prev_ts'],
+                $r['prev_m'],
+                $r['status']
+            ));
+        }
+        fwrite($fh, "\nSummary: " . count($diag_rows) . " received, $inserted inserted, $rejected_count rejected.\n");
+        fclose($fh);
+    }
+}
 ?>

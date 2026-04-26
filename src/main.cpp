@@ -63,10 +63,20 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-const char thingName[] = "SMGWLite";
+char thingName[20] = "SMGWLite"; // mutable — staticDelay suffix appended in setup()
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
+
+// ---------------------------------------------------------------------------
+// Zero-touch deployment — pre-configured WiFi credentials.
+// These are used on first boot (or after a factory reset) when no credentials
+// are stored in flash yet. Once the user saves the config page, the stored
+// values take priority and these defines are ignored.
+// ---------------------------------------------------------------------------
+#define WIFI_DEFAULT_SSID        "WIFI_SSID_PLACEHOLDER"
+#define WIFI_DEFAULT_PASSWORD    "WIFI_PASSWORD_PLACEHOLDER"
+#define WIFI_DEFAULT_AP_PASSWORD "WIFI_AP_PASSWORD_PLACEHOLDER"   // ≥8 chars; required by IotWebConf for skipApStartup
 
 #define STRING_LEN 128
 #define ID_LEN 4
@@ -77,11 +87,7 @@ const char wifiInitialApPassword[] = "password";
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
-#ifndef D2
-#define D2 3
-#endif
-
-#define CONFIG_PIN D2
+#define CONFIG_PIN 5
 
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
@@ -458,7 +464,7 @@ int logIndex = -1;
 // The first occurrence is always written; subsequent identical codes are
 // dropped until a different code is logged.
 // ---------------------------------------------------------------------------
-const int LOG_SUPPRESS_IDS[] = {1201, 1206, 1022};
+const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022};
 int last_logged_statusCode = -1; // last code actually written to the buffer
 
 void LogBuffer_reset()
@@ -1247,11 +1253,46 @@ void setup()
   LogBuffer_reset();
   Log_AddEntry(1001);
   Serial.begin(115200);
+#ifdef SERIAL_DEBUG
+  // USB-CDC needs time to enumerate before the host monitor connects.
+  // Without this delay the first log lines are lost.
+  unsigned long _t = millis();
+  while (!Serial && millis() - _t < 3000) delay(10);
+#endif
   mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
   DLOGLN();
   DLOGLN("Starting up...Hello!");
 
-  Param_setup();
+  // Compute staticDelay before Param_setup() so the suffix is visible in the
+  // AP SSID (IotWebConf reads thingName during init() inside Param_setup()).
+  {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    uint16_t lastTwoBytes = (mac[4] << 8) | mac[5];
+    staticDelay = lastTwoBytes % 60;
+    snprintf(thingName, sizeof(thingName), "SMGWLite-%d", staticDelay);
+  }
+
+  // Zero-touch: seed WiFi credentials so the device connects on first boot
+  // without requiring the AP config portal. Stored values (if any) win.
+  Param_setup(); // calls iotWebConf.init() — loads stored config from NVS
+
+  // Zero-touch: if no SSID is stored yet (first boot / after flash erase),
+  // write the default credentials directly and persist them to NVS so the
+  // device connects immediately without going through the AP config portal.
+  if (strlen(iotWebConf.getWifiSsidParameter()->valueBuffer) == 0)
+  {
+    // IotWebConf's mustStayInApMode() requires BOTH the WiFi SSID AND the
+    // AP password to be non-empty before it honours skipApStartup().
+    strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,
+            WIFI_DEFAULT_SSID, IOTWEBCONF_WORD_LEN);
+    strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer,
+            WIFI_DEFAULT_PASSWORD, IOTWEBCONF_WORD_LEN);
+    strncpy(iotWebConf.getApPasswordParameter()->valueBuffer,
+            WIFI_DEFAULT_AP_PASSWORD, IOTWEBCONF_PASSWORD_LEN);
+    iotWebConf.saveConfig();
+    DLOGLN("Zero-touch: default WiFi + AP credentials written to NVS.");
+  }
   cached_taf7_param          = max(1, atoi(taf7_param));
   cached_taf14_param         = max(1, atoi(taf14_param));
   cached_backend_call_minute = max(1, atoi(backend_call_minute));
@@ -1272,12 +1313,7 @@ void setup()
   DLOG("Temp sensors found: ");
   DLOGLN(Temp_sensors.getDeviceCount());
 
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
-  uint16_t lastTwoBytes = (mac[4] << 8) | mac[5];
-  // Spread backend call times across devices using the MAC address as a seed,
-  // so not all devices on the same network call the server simultaneously.
-  staticDelay = lastTwoBytes % 60;
+  // staticDelay already set above (before Param_setup)
 
   vTaskPrioritySet(NULL, 3);
   xTaskCreate(telegramTask, "TelegramBot", 2048, NULL, 0, NULL);
