@@ -70,13 +70,10 @@ const char wifiInitialApPassword[] = "password";
 
 // ---------------------------------------------------------------------------
 // Zero-touch deployment — pre-configured WiFi credentials.
-// These are used on first boot (or after a factory reset) when no credentials
-// are stored in flash yet. Once the user saves the config page, the stored
-// values take priority and these defines are ignored.
+// Credentials are defined in wifi_credentials.h (gitignored).
+// Copy src/wifi_credentials.h.example to src/wifi_credentials.h and fill in your values.
 // ---------------------------------------------------------------------------
-#define WIFI_DEFAULT_SSID        "WIFI_SSID_PLACEHOLDER"
-#define WIFI_DEFAULT_PASSWORD    "WIFI_PASSWORD_PLACEHOLDER"
-#define WIFI_DEFAULT_AP_PASSWORD "WIFI_AP_PASSWORD_PLACEHOLDER"   // ≥8 chars; required by IotWebConf for skipApStartup
+#include "wifi_credentials.h"
 
 #define STRING_LEN 128
 #define ID_LEN 4
@@ -1774,11 +1771,31 @@ void Webclient_send_meter_values_to_backend()
 
   if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
 
-  // Send the full buffer including empty (zero) slots in the middle.
-  // The backend skips slots where meter_value_180 == 0, so the wire format
-  // is always Meter_Value_Buffer_Size * entrySize bytes regardless of how
-  // many slots are actually filled.
-  size_t bufferSize = (size_t)Meter_Value_Buffer_Size * MeterValue_EntrySize();
+  // Determine which byte ranges of the buffer actually contain data.
+  //
+  // Buffer layout:
+  //   [0 .. override_i-1]              TAF7  entries (ascending from front)
+  //   [override_i .. NON_override_i]   empty gap
+  //   [NON_override_i+1 .. Size-1]     TAF14 entries (descending from back)
+  //
+  // When the buffer is full/overflowed the two pointers have crossed and
+  // there is no gap — send the entire buffer as one contiguous block.
+  const size_t entrySize = MeterValue_EntrySize();
+  size_t taf7_bytes, taf14_offset, taf14_bytes;
+
+  if (meter_value_buffer_full || meter_value_buffer_overflow)
+  {
+    taf7_bytes   = (size_t)Meter_Value_Buffer_Size * entrySize;
+    taf14_offset = 0;
+    taf14_bytes  = 0;
+  }
+  else
+  {
+    taf7_bytes   = (size_t)meter_value_override_i * entrySize;
+    taf14_offset = (size_t)(meter_value_NON_override_i + 1) * entrySize;
+    taf14_bytes  = (size_t)(Meter_Value_Buffer_Size - 1 - meter_value_NON_override_i) * entrySize;
+  }
+  size_t totalPayload = taf7_bytes + taf14_bytes;
 
   String header  = "POST " + String(backend_path);
   header += "?ID=" + String(backend_ID);
@@ -1795,26 +1812,32 @@ void Webclient_send_meter_values_to_backend()
   header += "Host: " + backend_host + "\r\n";
   header += "X-Auth-Token: " + String(backend_token) + "\r\n";
   header += "Content-Type: application/octet-stream\r\n";
-  header += "Content-Length: " + String(bufferSize) + "\r\n";
+  header += "Content-Length: " + String(totalPayload) + "\r\n";
   header += "Connection: close\r\n\r\n";
 
   client.print(header);
 
-  // Send the binary buffer in 1 KB chunks so partial TLS writes don't silently
+  // Send filled ranges in 1 KB chunks so partial TLS writes don't silently
   // drop the tail. WiFiClientSecure::write() may return less than requested.
-  {
+  // sendRange() logs 4001 and returns false if write() returns 0 (connection
+  // lost mid-transfer). Abort without clearing the buffer so data is retried.
+  auto sendRange = [&](const uint8_t* data, size_t len) -> bool {
     const size_t CHUNK = 1024;
     size_t offset = 0;
-    bool write_ok = true;
-    while (offset < bufferSize && write_ok)
+    while (offset < len)
     {
-      size_t toSend = min(CHUNK, bufferSize - offset);
-      size_t sent   = client.write(MeterValueBuffer + offset, toSend);
-      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); write_ok = false; break; }
+      size_t toSend = min(CHUNK, len - offset);
+      size_t sent   = client.write(data + offset, toSend);
+      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); return false; }
       offset += sent;
     }
-    if (!write_ok) { client.stop(); return; }
-  }
+    return true;
+  };
+
+  // TAF7 range (front of buffer), then TAF14 range (back of buffer).
+  // The backend sorts all entries by timestamp, so the order here doesn't matter.
+  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); return; }
+  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); return; }
 
   unsigned long mv_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < mv_deadline)
