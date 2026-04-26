@@ -180,8 +180,9 @@ usort($entries, fn($a, $b) => $a["timestamp"] <=> $b["timestamp"]);
 // touching the database. Files are written to the log/ subdirectory.
 // CSV columns: timestamp;meter;temperature;meter_solar;obis280
 // ---------------------------------------------------------------------------
-$enable_file_log = false; // set to true to enable
-$log_id          = "BF1"; // only log entries from this client ID
+$enable_file_log  = false; // set to true to enable
+$log_id           = "BF1"; // only log entries from this client ID
+$enable_entry_log = false; // set to true to echo each entry (timestamp meter solar) — verbose, increases response size
 
 if ($enable_file_log && $id === $log_id && count($entries) > 0) {
     $filename = date("y-m-d-H-i-s") . "-" . $id . ".txt";
@@ -251,7 +252,7 @@ $diag_rows = []; // collects all entries with validation result for diagnostic l
 
 foreach ($entries as $item) {
 
-    echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
+    if ($enable_entry_log) echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
 
     $rejection = null;
 
@@ -334,6 +335,25 @@ foreach ($entries as $item) {
 
 mysqli_stmt_close($insert);
 echo $inserted . " values inserted.";
+
+// ---------------------------------------------------------------------------
+// Call stats log — one line per request, appended to a monthly file.
+// File: log/stats-YYYY-MM.tsv
+// Columns: timestamp_server | client_id | payload_bytes | entry_size |
+//          entries_received | inserted | rejected | fields
+// ---------------------------------------------------------------------------
+$stats_file = "log/stats-" . date("Y-m") . ".tsv";
+$stats_line = implode("\t", [
+    date("Y-m-d H:i:s"),
+    $id,
+    $rawLen,
+    $entrySize,
+    count($diag_rows),
+    $inserted,
+    count($diag_rows) - $inserted,
+    implode(',', array_keys($active_fields)),
+]) . "\n";
+file_put_contents($stats_file, $stats_line, FILE_APPEND | LOCK_EX);
 
 // ---------------------------------------------------------------------------
 // Diagnostic log — written whenever at least one entry was rejected.
