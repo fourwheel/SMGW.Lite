@@ -81,6 +81,7 @@ function getStatusDescription(int $statusCode): string
 
         // --- Backend connection ---
         case 4000: return "Connection to server failed (certificate?)";
+        case 4001: return "Error transmitting Buffer Chunk";
 
         // --- MyStrom / PV ---
         case 5000: return "myStrom: connection failed";

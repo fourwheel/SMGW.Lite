@@ -768,6 +768,7 @@ String Log_StatusCodeToString(int statusCode)
   case 3004: return "IEC Protocoll";
   
   case 4000: return "Connection to server failed (Cert!?)";
+        case 4001: return "Error transmitting Buffer Chunk";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
@@ -1024,19 +1025,21 @@ void Webserver_MeterValue_Num2()
 // ---------------------------------------------------------------------------
 void Webserver_ShowMeterValues()
 {
-  String s;
-  s.reserve(Meter_Value_Buffer_Size * 80 + 1024); // ~80 chars per data row + header
-  s = "<html><head><title>SMGWLite - Meter Values</title>" + String(HTML_STYLE) + "</head><body>";
+  // Use chunked streaming to avoid building a large String in heap.
+  // Each row is sent immediately; only ~300 bytes are needed at a time.
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
 
-  // Show active fields and entry size so the table header always matches
+  // Header
+  String s = "<html><head><title>SMGWLite - Meter Values</title>" + String(HTML_STYLE) + "</head><body>";
   s += "<p>Entry size: " + String(MeterValue_EntrySize()) + " bytes | ";
   s += MeterValue_BuildFieldsParam() + "</p>";
-
   s += "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Consumption (1.8.0)</th>";
   if (config_temperature_enabled) s += "<th>Temperature</th>";
   if (config_solar_enabled)       s += "<th>myStrom (solar)</th>";
   if (config_obis280_enabled)     s += "<th>Infeed (2.8.0)</th>";
   s += "</tr>";
+  server.sendContent(s);
 
   int count = 1;
   bool first = true;
@@ -1046,19 +1049,21 @@ void Webserver_ShowMeterValues()
     MeterValue_read(m, ts, m180, temp, solar, m280);
     if (ts == 0 && m180 == 0) // skip empty slots
     {
-      if (first) { first = false; s += "<tr><td>-----</td></tr>"; }
+      if (first) { first = false; server.sendContent("<tr><td>-----</td></tr>"); }
       continue;
     }
-    s += "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td>";
-    s += "<td>" + String(Time_formatTimestamp(ts)) + "</td><td>" + String(ts) + "</td>";
-    s += "<td>" + String(m180) + "</td>";
-    if (config_temperature_enabled) s += "<td>" + String(temp)  + "</td>";
-    if (config_solar_enabled)       s += "<td>" + String(solar) + "</td>";
-    if (config_obis280_enabled)     s += "<td>" + String(m280)  + "</td>";
-    s += "</tr>";
+    String row = "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td>";
+    row += "<td>" + String(Time_formatTimestamp(ts)) + "</td><td>" + String(ts) + "</td>";
+    row += "<td>" + String(m180) + "</td>";
+    if (config_temperature_enabled) row += "<td>" + String(temp)  + "</td>";
+    if (config_solar_enabled)       row += "<td>" + String(solar) + "</td>";
+    if (config_obis280_enabled)     row += "<td>" + String(m280)  + "</td>";
+    row += "</tr>";
+    server.sendContent(row);
   }
-  s += "</table>";
-  server.send(200, "text/html", s);
+
+  server.sendContent("</table></body></html>");
+  server.sendContent(""); // signal end of chunked response
 }
 
 void Webserver_ShowLogBuffer()
@@ -1794,7 +1799,22 @@ void Webclient_send_meter_values_to_backend()
   header += "Connection: close\r\n\r\n";
 
   client.print(header);
-  client.write(MeterValueBuffer, bufferSize);
+
+  // Send the binary buffer in 1 KB chunks so partial TLS writes don't silently
+  // drop the tail. WiFiClientSecure::write() may return less than requested.
+  {
+    const size_t CHUNK = 1024;
+    size_t offset = 0;
+    bool write_ok = true;
+    while (offset < bufferSize && write_ok)
+    {
+      size_t toSend = min(CHUNK, bufferSize - offset);
+      size_t sent   = client.write(MeterValueBuffer + offset, toSend);
+      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); write_ok = false; break; }
+      offset += sent;
+    }
+    if (!write_ok) { client.stop(); return; }
+  }
 
   unsigned long mv_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < mv_deadline)
