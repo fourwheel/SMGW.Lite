@@ -1282,18 +1282,45 @@ void setup()
   // Zero-touch: if no SSID is stored yet (first boot / after flash erase),
   // write the default credentials directly and persist them to NVS so the
   // device connects immediately without going through the AP config portal.
-  if (strlen(iotWebConf.getWifiSsidParameter()->valueBuffer) == 0)
   {
-    // IotWebConf's mustStayInApMode() requires BOTH the WiFi SSID AND the
-    // AP password to be non-empty before it honours skipApStartup().
-    strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,
-            WIFI_DEFAULT_SSID, IOTWEBCONF_WORD_LEN);
-    strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer,
-            WIFI_DEFAULT_PASSWORD, IOTWEBCONF_WORD_LEN);
-    strncpy(iotWebConf.getApPasswordParameter()->valueBuffer,
-            WIFI_DEFAULT_AP_PASSWORD, IOTWEBCONF_PASSWORD_LEN);
-    iotWebConf.saveConfig();
-    DLOGLN("Zero-touch: default WiFi + AP credentials written to NVS.");
+    bool needsSave = false;
+
+    // WiFi — IotWebConf's mustStayInApMode() requires BOTH the WiFi SSID AND
+    // the AP password to be non-empty before it honours skipApStartup().
+    if (strlen(iotWebConf.getWifiSsidParameter()->valueBuffer) == 0)
+    {
+      strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,
+              WIFI_DEFAULT_SSID, IOTWEBCONF_WORD_LEN);
+      strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer,
+              WIFI_DEFAULT_PASSWORD, IOTWEBCONF_WORD_LEN);
+      strncpy(iotWebConf.getApPasswordParameter()->valueBuffer,
+              WIFI_DEFAULT_AP_PASSWORD, IOTWEBCONF_PASSWORD_LEN);
+      needsSave = true;
+      DLOGLN("Zero-touch: WiFi credentials written.");
+    }
+
+    // Backend — set defaults if not yet configured
+    if (strlen(backend_endpoint) == 0)
+    {
+      strncpy(backend_endpoint, DEFAULT_BACKEND_ENDPOINT, STRING_LEN);
+      needsSave = true;
+    }
+    if (strlen(backend_ID) == 0)
+    {
+      strncpy(backend_ID, DEFAULT_BACKEND_ID, ID_LEN);
+      needsSave = true;
+    }
+    if (strlen(backend_token) == 0)
+    {
+      strncpy(backend_token, DEFAULT_BACKEND_TOKEN, STRING_LEN);
+      needsSave = true;
+    }
+
+    if (needsSave)
+    {
+      iotWebConf.saveConfig();
+      DLOGLN("Zero-touch: defaults written to NVS.");
+    }
   }
   cached_taf7_param          = max(1, atoi(taf7_param));
   cached_taf14_param         = max(1, atoi(taf14_param));
