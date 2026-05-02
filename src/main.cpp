@@ -92,6 +92,14 @@ const char wifiInitialApPassword[] = "password";
 
 #define STATUS_PIN LED_BUILTIN
 
+// ---------------------------------------------------------------------------
+// Virtual flashlight – single IR pulse triggered from the web UI.
+// LED polarity: LOW = LED on (standard active-low driver circuit).
+// If your circuit is active-high, change OPTICAL_FLASH_LED_ON to HIGH.
+// ---------------------------------------------------------------------------
+#define OPTICAL_FLASH_LED_ON  LOW   // level that lights up the IR LED
+#define OPTICAL_FLASH_MS      300   // pulse duration [ms]
+
 // Telegram vars
 const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
 const uint8_t SML_SIGNATURE_END[]   = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
@@ -1190,6 +1198,104 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
   vTaskDelete(NULL); // delete task when finished
 }
 
+// ---------------------------------------------------------------------------
+// Webserver_FlashPulse – fire one IR pulse and return immediately.
+// Called via fetch() from the virtual-flashlight page; no page reload.
+// ---------------------------------------------------------------------------
+void Webserver_FlashPulse()
+{
+  mySerial.end();
+  pinMode(TX_PIN, OUTPUT);
+  digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
+  delay(OPTICAL_FLASH_MS);
+  digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
+  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  server.send(200, "text/plain", "ok");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_Flashlight – virtual flashlight page.
+// One big button = one IR pulse. Works on desktop and mobile.
+// ---------------------------------------------------------------------------
+void Webserver_Flashlight()
+{
+  server.send(200, "text/html", R"rawliteral(
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Flashlight</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; width: 100%;
+    background: #111;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action: manipulation; /* prevents 300 ms tap delay on mobile */
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 2rem; padding: 1.5rem;
+  }
+  #flash-btn {
+    width: min(70vw, 70vh);
+    height: min(70vw, 70vh);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ffe066, #e6a800);
+    border: none;
+    box-shadow: 0 0 40px 10px rgba(230,168,0,0.4);
+    cursor: pointer;
+    font-size: clamp(3rem, 10vw, 6rem);
+    transition: transform .08s, box-shadow .08s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #flash-btn:active,
+  #flash-btn.firing {
+    transform: scale(.93);
+    box-shadow: 0 0 80px 20px rgba(255,220,0,0.7);
+    background: radial-gradient(circle at 35% 35%, #fff5aa, #ffd000);
+  }
+  #status {
+    color: #888; font-size: .9rem; height: 1.2em; text-align: center;
+  }
+  #back-link {
+    color: #aaa; font-size: .85rem; text-decoration: none;
+    border: 1px solid #444; border-radius: 6px;
+    padding: .4rem 1rem;
+  }
+  #back-link:hover { background: #222; color: #fff; }
+</style>
+</head>
+<body>
+<button id="flash-btn" onclick="flash()">&#x1F526;</button>
+<div id="status"></div>
+<a id="back-link" href="/">&#8592; Go Back</a>
+<script>
+  const btn = document.getElementById('flash-btn');
+  const status = document.getElementById('status');
+  let busy = false;
+  async function flash() {
+    if (busy) return;
+    busy = true;
+    btn.classList.add('firing');
+    status.textContent = '';
+    try {
+      const r = await fetch('/flash');
+      if (!r.ok) status.textContent = 'Fehler: ' + r.status;
+    } catch(e) {
+      status.textContent = 'Verbindungsfehler';
+    }
+    setTimeout(() => { btn.classList.remove('firing'); busy = false; }, 100);
+  }
+</script>
+</body>
+</html>
+)rawliteral");
+}
+
 void Webserver_UrlConfig()
 {
   server.on("/",                    Webserver_HandleRoot);
@@ -1204,6 +1310,8 @@ void Webserver_UrlConfig()
   server.on("/showLogBuffer",       Webserver_ShowLogBuffer);
   server.on("/MeterValue_Num2",     Webserver_MeterValue_Num2);
 
+  server.on("/flashlight",           Webserver_Flashlight);
+  server.on("/flash",                Webserver_FlashPulse);
   server.on("/upload", [] { Webserver_HandleCertUpload(); Webclient_loadCertToChar(); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
   server.on("/restart", [] { Webserver_LocationHrefHome(5); delay(100); ESP.restart(); });
@@ -2286,6 +2394,7 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</li>
   <li><a href='MeterValue_Num2'>Calculate # Meter Values (alternative)</a></li>
   <li><a href='showMeterValues'>Show Meter Values</a></li>
+  
 )rawliteral";
 
   {
@@ -2390,8 +2499,9 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</li>
 </ul>
 
-<h3>Debug Helpers</h3>
+<h3>Helpers</h3>
 <ul>
+  <li><a href='flashlight'>Flashlight</a></li>
   <li><i>Set Device Offline:</i> )rawliteral";
   s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
