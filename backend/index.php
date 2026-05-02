@@ -99,11 +99,27 @@ if (isset($_GET['fields']) && $_GET['fields'] !== '') {
 // Calculate entry size in bytes from the active field list
 $entrySize = array_sum($active_fields);
 
+// Reject manifests that contain no known fields (would cause division by zero below).
+if ($entrySize === 0) {
+    http_response_code(400);
+    echo "No valid fields in manifest.";
+    exit;
+}
+
 // ---------------------------------------------------------------------------
 // Read and validate the raw binary POST body.
 // The ESP32 sends the entire packed ring-buffer in one request, including
 // uninitialised (zero-filled) slots. Those are filtered out below.
 // ---------------------------------------------------------------------------
+
+// Reject oversized payloads before reading them into memory.
+$contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+if ($contentLength > 36864) {
+    http_response_code(413);
+    echo "Payload too large.";
+    exit;
+}
+
 $rawData = file_get_contents('php://input');
 $rawLen  = strlen($rawData);
 

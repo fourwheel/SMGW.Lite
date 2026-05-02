@@ -106,6 +106,14 @@ function getStatusDescription(int $statusCode): string
 //   unsigned long uptime     (4 bytes, little-endian unsigned)
 //   int           statusCode (4 bytes, little-endian signed)
 // ---------------------------------------------------------------------------
+// Reject oversized payloads before reading them into memory.
+$contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+if ($contentLength > 36864) {
+    http_response_code(413);
+    echo "Payload too large.";
+    exit;
+}
+
 $inputData    = file_get_contents("php://input");
 $logEntrySize = 12; // 3 x 4 bytes
 $logEntries   = [];
