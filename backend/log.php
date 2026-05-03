@@ -2,7 +2,7 @@
 // ---------------------------------------------------------------------------
 // Authentication
 // ---------------------------------------------------------------------------
-include("valid_clients.php");
+include("../config.php");
 
 $id    = $_GET['ID']    ?? '';
 $token = $_GET['token'] ?? '';
@@ -11,8 +11,15 @@ if ($token === "header") {
     $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
 }
 
-// Reject unknown or invalid clients immediately
-if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
+// Look up the stored SHA-256 token hash for this client ID.
+$stmt = mysqli_prepare($_link, "SELECT token FROM clients WHERE device_id = ? LIMIT 1");
+mysqli_stmt_bind_param($stmt, "s", $id);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
+$row    = mysqli_fetch_assoc($result);
+mysqli_stmt_close($stmt);
+
+if (!$row || !hash_equals($row['token'], hash('sha256', $token))) {
     http_response_code(403);
     echo "Access denied.";
     exit;

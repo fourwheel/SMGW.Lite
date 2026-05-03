@@ -5,7 +5,7 @@
 // ini_set('display_startup_errors', 1);
 // error_reporting(E_ALL);
 
-include("valid_clients.php");
+include("../config.php");
 
 // ---------------------------------------------------------------------------
 // Authentication
@@ -21,8 +21,17 @@ if ($token === "header") {
     $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
 }
 
-// Reject unknown or invalid clients immediately
-if (!isset($valid_clients[$id]) || !hash_equals($valid_clients[$id], $token)) {
+// Look up the stored SHA-256 token hash for this client ID.
+$stmt = mysqli_prepare($_link, "SELECT token FROM clients WHERE device_id = ? LIMIT 1");
+mysqli_stmt_bind_param($stmt, "s", $id);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
+$row    = mysqli_fetch_assoc($result);
+mysqli_stmt_close($stmt);
+
+// Reject unknown clients or tokens that do not match the stored hash.
+// hash_equals() prevents timing attacks.
+if (!$row || !hash_equals($row['token'], hash('sha256', $token))) {
     http_response_code(403);
     echo "Access denied.";
     exit;
@@ -226,8 +235,6 @@ echo "Data received. Fields: " . implode(',', array_keys($active_fields)) . ". E
 // ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client
 // ---------------------------------------------------------------------------
-include("../config.php");
-
 $prev = ["timestamp" => 0, "meter" => 0];
 
 // Use a prepared statement to prevent SQL injection on the $id field.
