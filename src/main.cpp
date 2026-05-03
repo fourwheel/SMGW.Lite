@@ -206,7 +206,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature Temp_sensors(&oneWire);
 unsigned long last_temperature  = 0;
 bool read_temperature           = false;
-int current_temperature         = 123;
+int current_temperature         = 0;
 
 // Log vars
 const int LOG_BUFFER_SIZE = 200;
@@ -863,7 +863,11 @@ String Log_BufferToString(int showNumber)
 
 void resetMeterValue(MeterValue &val)
 {
-  val = MeterValue{}; // reset all fields to zero
+  int32_t  saved_solar = val.solar;
+  uint32_t saved_temp  = val.temperature;
+  val = MeterValue{};
+  if (mystrom_PV_object.isChecked()) val.solar = saved_solar;
+  val.temperature = saved_temp; // temperature never comes from the telegram, always preserve it
 }
 
 // ---------------------------------------------------------------------------
@@ -1823,7 +1827,7 @@ void handle_Telegram_receive()
 
       prev_detected_protocol = last_detected_protocol;
     }
-    if (parsed && temperature_object.isChecked())
+    if (parsed && temperature_object.isChecked() && !mystrom_PV_object.isChecked())
       LastMeterValue.temperature = current_temperature;
 
     Telegram_ResetReceiveBuffer();
