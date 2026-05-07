@@ -151,29 +151,17 @@ usort($logEntries, function($a, $b) {
 });
 
 // ---------------------------------------------------------------------------
-// Write log file
+// Update client metadata
 // ---------------------------------------------------------------------------
-// Use a prepared statement-style approach for the filename: only allow safe
-// characters from the validated $id (already checked against valid_clients).
-$logFile    = "log/" . date("y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "_log.txt";
-$logContent = "Timestamp (UTC)      \tUptime (ms) \tCode\tDescription\n";
-$logContent .= str_repeat("-", 80) . "\n";
+$scheme       = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$endpoint_str = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'unknown') . ($_SERVER['SCRIPT_NAME'] ?? '/log.php');
+$stmt = mysqli_prepare($_link,
+    "UPDATE clients SET endpoint = ?, last_reading = NOW() WHERE device_id = ?"
+);
+mysqli_stmt_bind_param($stmt, "ss", $endpoint_str, $id);
+mysqli_stmt_execute($stmt);
+mysqli_stmt_close($stmt);
 
-foreach ($logEntries as $entry) {
-    $ts   = ($entry['timestamp'] > 0) ? date("Y-m-d H:i:s", $entry['timestamp']) : "---";
-    $logContent .= sprintf("%-20s\t%-12d\t%d\t%s\n",
-        $ts,
-        $entry['uptime'],
-        $entry['statusCode'],
-        $entry['description']
-    );
-}
-
-if (file_put_contents($logFile, $logContent) !== false) {
-    http_response_code(200);
-    echo "Log saved (" . count($logEntries) . " entries).";
-} else {
-    http_response_code(500);
-    echo "Failed to save log file.";
-}
+http_response_code(200);
+echo "Log received (" . count($logEntries) . " entries).";
 ?>

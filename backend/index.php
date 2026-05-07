@@ -233,6 +233,19 @@ http_response_code(200);
 echo "Data received. Fields: " . implode(',', array_keys($active_fields)) . ". Entries: " . count($entries) . ".\n";
 
 // ---------------------------------------------------------------------------
+// Database: update client metadata
+// ---------------------------------------------------------------------------
+$wireframe_str = implode(',', array_keys($active_fields));
+$scheme        = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$endpoint_str  = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'unknown') . ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+$stmt = mysqli_prepare($_link,
+    "UPDATE clients SET endpoint = ?, wireframe = ?, last_reading = NOW() WHERE device_id = ?"
+);
+mysqli_stmt_bind_param($stmt, "sss", $endpoint_str, $wireframe_str, $id);
+mysqli_stmt_execute($stmt);
+mysqli_stmt_close($stmt);
+
+// ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client
 // ---------------------------------------------------------------------------
 $prev = ["timestamp" => 0, "meter" => 0];
@@ -380,33 +393,85 @@ file_put_contents($stats_file, $stats_line, FILE_APPEND | LOCK_EX);
 
 // ---------------------------------------------------------------------------
 // Diagnostic log — written whenever at least one entry was rejected.
-// File: log/YYYY-MM-DD-HH-ii-ss-{ID}-diag.tsv
-// Columns: timestamp_utc | ts_unix | meter | solar | temp_c | power_w |
-//          prev_ts | prev_meter | status
+// File: log/YYYY-MM-DD-HH-ii-ss-{ID}-diag.txt
+// Fixed-width plain text; rejected rows include a verbose explanation.
 // ---------------------------------------------------------------------------
 $rejected_count = count($diag_rows) - $inserted;
 if ($rejected_count > 0) {
-    $diag_file = "log/" . date("y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "-diag.tsv";
+    $diag_file = "log/" . date("Y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "-diag.txt";
     $fh = fopen($diag_file, "w");
     if ($fh) {
-        fwrite($fh, "timestamp_utc\t\tts_unix\t\tmeter\t\tsolar\t\ttemp_c\tpower_w\tprev_ts\t\tprev_meter\tstatus\n");
-        fwrite($fh, str_repeat("-", 120) . "\n");
-        foreach ($diag_rows as $r) {
-            $mark = ($r['status'] !== "OK") ? ">>> " : "    ";
-            fwrite($fh, sprintf("%s%-20s\t%d\t\t%d\t\t%s\t\t%s\t%d\t%d\t\t%d\t\t%s\n",
+        // ── Header ───────────────────────────────────────────────────────────
+        fwrite($fh, "Device  : $id\n");
+        fwrite($fh, "Received: " . date("Y-m-d H:i:s") . " UTC\n");
+        fwrite($fh, "Batch   : " . count($diag_rows) . " entries received, $inserted inserted, $rejected_count rejected\n");
+        fwrite($fh, "\n");
+
+        // ── Column header ────────────────────────────────────────────────────
+        $sep = str_repeat("-", 118) . "\n";
+        fwrite($fh, sprintf("     %-3s  %-19s  %-11s  %-11s  %-9s  %-7s  %-8s  %-11s  %-11s  %s\n",
+            "#", "Timestamp (UTC)", "Unix TS", "Meter", "Solar", "Temp°C", "Power W", "Prev TS", "Prev Meter", "Status"
+        ));
+        fwrite($fh, $sep);
+
+        // ── Rows ─────────────────────────────────────────────────────────────
+        foreach ($diag_rows as $i => $r) {
+            $ok    = ($r['status'] === "OK");
+            $mark  = $ok ? "   " : ">>>";
+            $solar = ($r['solar'] !== "") ? (string)$r['solar'] : "-";
+            $temp  = ($r['temp']  !== "") ? (string)$r['temp']  : "-";
+
+            fwrite($fh, sprintf("%s  %-3d  %-19s  %-11d  %-11d  %-9s  %-7s  %-8d  %-11d  %-11d  %s\n",
                 $mark,
+                $i + 1,
                 $r['ts_fmt'],
                 $r['ts'],
                 $r['meter'],
-                $r['solar'],
-                $r['temp'],
+                $solar,
+                $temp,
                 $r['power_w'],
                 $r['prev_ts'],
                 $r['prev_m'],
                 $r['status']
             ));
+
+            if (!$ok) {
+                $delta_t = $r['ts'] - $r['prev_ts'];
+                $delta_m = $r['meter'] - $r['prev_m'];
+                switch (true) {
+                    case $r['status'] === "older_than_db_prev":
+                        fwrite($fh, "       ↳ Entry TS (" . $r['ts'] . ") < last DB TS (" . $r['prev_ts'] . "),  Δt = {$delta_t} s\n");
+                        fwrite($fh, "         Wahrscheinliche Ursache: gepufferter TAF-14-Wert, der ankam, nachdem ein\n");
+                        fwrite($fh, "         neuerer TAF-7-Wert bereits in einer früheren Backend-Übertragung gespeichert\n");
+                        fwrite($fh, "         wurde (z. B. ESP hat 200 OK nicht empfangen und nochmals gesendet).\n");
+                        break;
+                    case $r['status'] === "duplicate_timestamp":
+                        fwrite($fh, "       ↳ TS (" . $r['ts'] . ") == last DB TS — exaktes Duplikat.\n");
+                        fwrite($fh, "         Wahrscheinliche Ursache: ESP32 hat die Übertragung wiederholt, weil das\n");
+                        fwrite($fh, "         200 OK vom Server nicht angekommen ist; der Wert wurde bereits gespeichert.\n");
+                        break;
+                    case str_starts_with($r['status'], "meter_rollback"):
+                        fwrite($fh, "       ↳ Zählerstand (" . $r['meter'] . ") < Vorwert (" . $r['prev_m'] . "),  Δmeter = {$delta_m}\n");
+                        fwrite($fh, "         Wahrscheinliche Ursache: Zählerüberlauf, Neustart des Zählers oder\n");
+                        fwrite($fh, "         falsches Gerät sendet unter dieser ID.\n");
+                        break;
+                    case str_starts_with($r['status'], "power_out_of_range"):
+                        $delta_wh = round($delta_m / 10.0, 1);
+                        fwrite($fh, "       ↳ Berechnete Leistung außerhalb [0 W … 40 kW].\n");
+                        fwrite($fh, "         Δt = {$delta_t} s,  Δmeter = {$delta_m} raw = {$delta_wh} Wh,  implizierte Leistung = " . $r['power_w'] . " W\n");
+                        fwrite($fh, "         Wahrscheinliche Ursache: sehr großes Zeitfenster zwischen zwei Messwerten\n");
+                        fwrite($fh, "         oder implausible Zählersprung (z. B. nach Neustart).\n");
+                        break;
+                    default:
+                        fwrite($fh, "       ↳ Status: " . $r['status'] . "\n");
+                }
+                fwrite($fh, "\n");
+            }
         }
-        fwrite($fh, "\nSummary: " . count($diag_rows) . " received, $inserted inserted, $rejected_count rejected.\n");
+
+        // ── Footer ───────────────────────────────────────────────────────────
+        fwrite($fh, $sep);
+        fwrite($fh, "Summary: " . count($diag_rows) . " received, $inserted inserted, $rejected_count rejected.\n");
         fclose($fh);
     }
 }
