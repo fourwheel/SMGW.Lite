@@ -65,3 +65,30 @@ ALTER TABLE `clients`
 ALTER TABLE `sml_v1`
   MODIFY `i` int(11) NOT NULL AUTO_INCREMENT;
 COMMIT;
+
+--
+-- Triggers for table `clients`
+-- Automatically hashes the token with SHA-256 on insert and update,
+-- so plain-text tokens can be entered directly (e.g. via phpMyAdmin).
+--
+DELIMITER //
+
+CREATE TRIGGER hash_token_before_insert
+BEFORE INSERT ON clients
+FOR EACH ROW
+BEGIN
+    IF NEW.token IS NOT NULL THEN
+        SET NEW.token = SHA2(NEW.token, 256);
+    END IF;
+END//
+
+CREATE TRIGGER hash_token_before_update
+BEFORE UPDATE ON clients
+FOR EACH ROW
+BEGIN
+    IF NEW.token IS NOT NULL AND NEW.token != OLD.token THEN
+        SET NEW.token = SHA2(NEW.token, 256);
+    END IF;
+END//
+
+DELIMITER ;
