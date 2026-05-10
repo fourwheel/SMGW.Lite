@@ -3,5 +3,5 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-backend/valid_clients.php
+backend/config.php
 src/wifi_credentials.h
