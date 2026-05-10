@@ -1,0 +1,463 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_HZ-V1",
+      "label": "hz-v1",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "mysql",
+      "pluginName": "MySQL"
+    }
+  ],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "panel",
+      "id": "barchart",
+      "name": "Bar chart",
+      "version": ""
+    },
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "12.4.1"
+    },
+    {
+      "type": "datasource",
+      "id": "mysql",
+      "name": "MySQL",
+      "version": "12.4.1"
+    },
+    {
+      "type": "panel",
+      "id": "text",
+      "name": "Text",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "gridPos": {
+        "h": 4,
+        "w": 20,
+        "x": 0,
+        "y": 0
+      },
+      "id": 52,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "# Stunden- und Tagesprofil\n\nWähle den gewünschten Zeitraum aus. Aus diesem Zeitraum wird dann das **Stundenprofil** berechnet. Es bildet quasi den Mittelwert aus dem gesamten Stromverbrauch einer konkreten Stunde am Tag.\n\n",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.4.1",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_HZ-V1}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "light-blue",
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "% / Wh",
+            "axisPlacement": "right",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Wh"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": true,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 20,
+        "x": 0,
+        "y": 4
+      },
+      "id": 28,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "colorByField": "hour_of_day",
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "never",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "hour_of_day",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_HZ-V1}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\r\n  -- '+00:00' ist UTC, '+01:00' ist Berlin Winterzeit (nutze '+02:00' für Sommerzeit)\r\n  LPAD(HOUR(CONVERT_TZ(FROM_UNIXTIME(previous_timestamp), '+00:00', '+02:00')), 2, '0') AS hour_of_day,\r\n  SUM(grid) AS Wh,\r\n  ROUND(SUM(grid) * 100.0 / SUM(SUM(grid)) OVER (), 2) AS Percentage\r\n\r\nFROM (\r\n  SELECT\r\n    (CAST(meter_value AS SIGNED) -\r\n     CAST(LAG(meter_value) OVER (PARTITION BY id ORDER BY timestamp_client) AS SIGNED)) / 10 AS grid,\r\n    LAG(timestamp_client) OVER (PARTITION BY id ORDER BY timestamp_client) AS previous_timestamp\r\n  FROM `hz-v1`.`sml_v1`  -- Backticks für DB-Namen mit Bindestrich\r\n  WHERE\r\n    id = '$id'\r\n    AND $__unixEpochFilter(timestamp_client)\r\n) AS sub\r\nWHERE grid IS NOT NULL\r\nGROUP BY hour_of_day\r\nORDER BY hour_of_day;",
+          "refId": "vorheriger Zeitstempel",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_HZ-V1}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "hide": true,
+          "rawQuery": true,
+          "rawSql": "SELECT\r\n  LPAD(HOUR(CONVERT_TZ(FROM_UNIXTIME(previous_timestamp), 'UTC', 'Europe/Berlin')), 2, '0') AS hour_of_day,  -- Stunde als String mit führender Null\r\n  SUM(grid) AS Wh,\r\n  ROUND(SUM(grid) * 100.0 / SUM(SUM(grid)) OVER (), 2) AS Percentage  -- Prozentanteil, gerundet auf 2 Nachkommastellen\r\n\r\nFROM (\r\n  SELECT\r\n    (CAST(meter_value AS SIGNED) -\r\n     CAST(LAG(meter_value) OVER (PARTITION BY id ORDER BY timestamp_client) AS SIGNED)) / 10 AS grid,\r\n    LAG(timestamp_client) OVER (PARTITION BY id ORDER BY timestamp_client) AS previous_timestamp  -- Vorheriger Zeitstempel\r\n  FROM sml_v1\r\n  WHERE\r\n    id = \"$id\"\r\n    AND $__unixEpochFilter(timestamp_client)\r\n) AS sub\r\nWHERE grid IS NOT NULL\r\nGROUP BY hour_of_day\r\nORDER BY hour_of_day;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Stundenprofil",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_HZ-V1}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "light-blue",
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "KWh",
+            "axisPlacement": "left",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 20,
+        "x": 0,
+        "y": 12
+      },
+      "id": 51,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "colorByField": "tag",
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "hour_of_day",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_HZ-V1}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "hide": true,
+          "rawQuery": true,
+          "rawSql": "SELECT\r\n  DATE(CONVERT_TZ(FROM_UNIXTIME(previous_timestamp), 'UTC', 'Europe/Berlin')) AS tag,  -- Kalendertag (lokale Zeit)\r\n  SUM(grid) AS kWh\r\nFROM (\r\n  SELECT\r\n    (CAST(meter_value AS SIGNED) -\r\n     CAST(LAG(meter_value) OVER (PARTITION BY id ORDER BY timestamp_client) AS SIGNED)) / 10000 AS grid,\r\n    LAG(timestamp_client) OVER (PARTITION BY id ORDER BY timestamp_client) AS previous_timestamp\r\n  FROM sml_v1\r\n  WHERE\r\n    id = \"$id\"\r\n    AND $__unixEpochFilter(timestamp_client)\r\n) AS sub\r\nWHERE grid IS NOT NULL\r\nGROUP BY tag\r\nORDER BY tag;",
+          "refId": "vorheriger Zeitstempel",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_HZ-V1}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\r\n  DATE(CONVERT_TZ(FROM_UNIXTIME(previous_timestamp), '+00:00', '+01:00')) AS tag,\r\n  SUM(grid) AS kWh\r\nFROM (\r\n  SELECT\r\n    (CAST(meter_value AS SIGNED) -\r\n     CAST(LAG(meter_value) OVER (PARTITION BY id ORDER BY timestamp_client) AS SIGNED)) / 10000 AS grid,\r\n    LAG(timestamp_client) OVER (PARTITION BY id ORDER BY timestamp_client) AS previous_timestamp\r\n  FROM `hz-v1`.`sml_v1`\r\n  WHERE\r\n    id = '$id'\r\n    AND $__unixEpochFilter(timestamp_client)\r\n) AS sub\r\nWHERE grid IS NOT NULL\r\nGROUP BY tag\r\nORDER BY tag;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Tagesprofil",
+      "type": "barchart"
+    }
+  ],
+  "preload": false,
+  "refresh": "",
+  "schemaVersion": 42,
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "allowCustomValue": false,
+        "current": {},
+        "datasource": {
+          "type": "mysql",
+          "uid": "${DS_HZ-V1}"
+        },
+        "definition": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+        "label": "Location",
+        "name": "id",
+        "options": [],
+        "query": {
+          "editorMode": "code",
+          "format": "table",
+          "query": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+          "rawQuery": true,
+          "rawSql": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+          "refId": "SQLVariableQueryEditor-VariableQuery",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        "refresh": 1,
+        "regex": "",
+        "regexApplyTo": "value",
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1d"
+    ]
+  },
+  "timezone": "Europe/Berlin",
+  "title": "Stunden- und Tagesprofil",
+  "uid": "aej609tmsks8wc",
+  "version": 15,
+  "weekStart": ""
+}
