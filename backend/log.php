@@ -4,26 +4,7 @@
 // ---------------------------------------------------------------------------
 include("../config.php");
 
-$id    = $_GET['ID']    ?? '';
-$token = $_GET['token'] ?? '';
-
-if ($token === "header") {
-    $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
-}
-
-// Look up the stored SHA-256 token hash for this client ID.
-$stmt = mysqli_prepare($_link, "SELECT token FROM clients WHERE device_id = ? LIMIT 1");
-mysqli_stmt_bind_param($stmt, "s", $id);
-mysqli_stmt_execute($stmt);
-$result = mysqli_stmt_get_result($stmt);
-$row    = mysqli_fetch_assoc($result);
-mysqli_stmt_close($stmt);
-
-if (!$row || !hash_equals($row['token'], hash('sha256', $token))) {
-    http_response_code(403);
-    echo "Access denied.";
-    exit;
-}
+$id = authenticate();
 
 // ---------------------------------------------------------------------------
 // Status code descriptions
@@ -150,18 +131,6 @@ usort($logEntries, function($a, $b) {
         return $b['timestamp'] <=> $a['timestamp'];
     return $b['uptime'] <=> $a['uptime'];
 });
-
-// ---------------------------------------------------------------------------
-// Update client metadata
-// ---------------------------------------------------------------------------
-$scheme       = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$endpoint_str = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'unknown') . ($_SERVER['SCRIPT_NAME'] ?? '/log.php');
-$stmt = mysqli_prepare($_link,
-    "UPDATE clients SET endpoint = ?, last_reading = NOW() WHERE device_id = ?"
-);
-mysqli_stmt_bind_param($stmt, "ss", $endpoint_str, $id);
-mysqli_stmt_execute($stmt);
-mysqli_stmt_close($stmt);
 
 http_response_code(200);
 echo "Log received (" . count($logEntries) . " entries).";

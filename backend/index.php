@@ -10,32 +10,9 @@ include("../config.php");
 // ---------------------------------------------------------------------------
 // Authentication
 // The client ID is always passed as a URL parameter.
-// The token can be passed as a URL parameter or as the X-Auth-Token header.
-// Sending it as a header ("token=header") is preferred because URL parameters
-// may appear in server access logs.
+// The token must be passed as the X-Auth-Token header.
 // ---------------------------------------------------------------------------
-$id    = $_GET['ID']    ?? '';
-$token = $_GET['token'] ?? '';
-
-if ($token === "header") {
-    $token = $_SERVER['HTTP_X_AUTH_TOKEN'] ?? '';
-}
-
-// Look up the stored SHA-256 token hash for this client ID.
-$stmt = mysqli_prepare($_link, "SELECT token FROM clients WHERE device_id = ? LIMIT 1");
-mysqli_stmt_bind_param($stmt, "s", $id);
-mysqli_stmt_execute($stmt);
-$result = mysqli_stmt_get_result($stmt);
-$row    = mysqli_fetch_assoc($result);
-mysqli_stmt_close($stmt);
-
-// Reject unknown clients or tokens that do not match the stored hash.
-// hash_equals() prevents timing attacks.
-if (!$row || !hash_equals($row['token'], hash('sha256', $token))) {
-    http_response_code(403);
-    echo "Access denied.";
-    exit;
-}
+$id = authenticate();
 
 // ---------------------------------------------------------------------------
 // Early-exit for connectivity tests
@@ -236,14 +213,7 @@ echo "Data received. Fields: " . implode(',', array_keys($active_fields)) . ". E
 // Database: update client metadata
 // ---------------------------------------------------------------------------
 $wireframe_str = implode(',', array_keys($active_fields));
-$scheme        = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$endpoint_str  = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'unknown') . ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
-$stmt = mysqli_prepare($_link,
-    "UPDATE clients SET endpoint = ?, wireframe = ?, last_reading = NOW() WHERE device_id = ?"
-);
-mysqli_stmt_bind_param($stmt, "sss", $endpoint_str, $wireframe_str, $id);
-mysqli_stmt_execute($stmt);
-mysqli_stmt_close($stmt);
+update_client_endpoint($id, $wireframe_str);
 
 // ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client

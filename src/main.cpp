@@ -1285,7 +1285,7 @@ void Webserver_TestBackendConnection()
     }
   }
 
-  String url = String(backend_path) + "?backend_test=true&token=header&ID=" + String(backend_ID);
+  String url = String(backend_path) + "?backend_test=true&ID=" + String(backend_ID);
   client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                "Host: " + String(backend_host) + "\r\n" +
                "X-Auth-Token: " + String(backend_token) + "\r\n" +
