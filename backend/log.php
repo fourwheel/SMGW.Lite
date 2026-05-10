@@ -58,6 +58,7 @@ function getStatusDescription(int $statusCode): string
         case 1014: return "TAF 7-900s meter reading trigger";
         case 1018: return "Dynamic TAF trigger";
         case 1022: return "TAF 14 trigger not possible, buffer full";
+        case 1023: return "No backend host configured, skipping";
 
         // --- Meter value buffer ---
         case 1013: return "MeterValues_clear_Buffer()";

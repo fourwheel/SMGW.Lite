@@ -130,11 +130,15 @@ struct MeterValue
   uint32_t temperature;      // temperature * 100 (e.g. 2150 = 21.50 degC)
   uint32_t solar;            // MyStrom / solar energy counter
   uint32_t meter_value_280;  // OBIS 2.8.0 feed-in counter, unit: 0.1 Wh
+  // Instantaneous power — not stored in ring-buffer, REST API / UI only
+  uint32_t power_import;     // OBIS 1.7.0 import power, unit: W (always >= 0)
+  uint32_t power_export;     // OBIS 2.7.0 export power, unit: W (always >= 0)
+  int32_t  net_power;        // OBIS 16.7.0 net power, unit: W (negative = feed-in)
 };
 
 // Working copies — always kept in the full struct format for easy access
-MeterValue LastMeterValue = {0, 0, 0, 0, 0};
-MeterValue PrevMeterValue = {0, 0, 0, 0, 0};
+MeterValue LastMeterValue = {};
+MeterValue PrevMeterValue = {};
 
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
@@ -760,6 +764,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1020: return "Sending Log successful";
   case 1021: return "call_backend successful";
   case 1022: return "taf14 trigger not possible, buffer full";
+  case 1023: return "No backend host configured, skipping";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
@@ -961,63 +966,223 @@ String getObisRow(uint8_t* buffer, int prefix, int suffix, uint8_t* code, const 
       }
     }
   }
-  return ""; // Return empty if register is not found
+  return "<tr><td>" + String(label) + "</td><td>–</td><td>–</td><td>n/a</td></tr>";
 }
 
-String analyzeSML(uint8_t* buffer, size_t length) {
-  // Inject predefined style and charset
-  String s = "<meta charset='UTF-8'>";
-  s += String(HTML_STYLE);
-  s += "<title>SML Live Analysis</title>";
-  s += "<div class='section'><h2>SML Live Analysis</h2>";
+// Returns the "Parsed Values" section common to both protocols.
+// Shows LastMeterValue energy counters + instantaneous power fields.
+// For IEC: parses manufacturer code and meter ID from the first line.
+// For SML: extracts OBIS 96.1.0 (meter serial) as a hex/ASCII string.
+String buildCommonSection(uint8_t* buffer, size_t length)
+{
+  bool isIEC = (length > 0 && buffer[0] == '/');
 
-  // 1. Find Prefix and Suffix
-  int px = -1;
-  for (size_t i = 0; i < (int)length - 4; i++) {
-    if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b) { px = i; break; }
-  }
-  int sx = -1;
-  if (px != -1) {
-    for (size_t i = px; i < (int)length - 5; i++) {
-      if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b && buffer[i+4] == 0x1a) { sx = i; break; }
+  String s = "<div class='section'><h2>Parsed Values</h2>";
+  uint32_t ageS = (LastMeterValue.timestamp > 0)
+                  ? (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp) : 0;
+  s += "<p><small>From LastMeterValue — last telegram: <strong>" + String(ageS) +
+       " s ago</strong></small></p>";
+
+  // ── Meter identification ─────────────────────────────────────────────────
+  s += "<h3>Meter Identification</h3>";
+  s += "<table><tr><th>Field</th><th>Value</th></tr>";
+
+  if (isIEC) {
+    // IEC first line: /<MFR><baud><ident>\r\n
+    // MFR = 3-char manufacturer code, baud = 1 char, ident = meter ID
+    static char firstLine[128];
+    const char* src = (const char*)buffer;
+    const char* eol = strstr(src, "\r\n");
+    size_t lineLen = eol ? min((size_t)(eol - src), sizeof(firstLine) - 1) : 0;
+    strncpy(firstLine, src, lineLen);
+    firstLine[lineLen] = '\0';
+
+    char mfr[4]   = "n/a";
+    char ident[64] = "n/a";
+    if (lineLen >= 4) {              // at minimum: '/' + 3 mfr chars
+      strncpy(mfr, firstLine + 1, 3); mfr[3] = '\0';
+      if (lineLen > 5) {             // skip '/' + 3 mfr + 1 baud char
+        strncpy(ident, firstLine + 5, min(lineLen - 5, sizeof(ident) - 1));
+        ident[min(lineLen - 5, sizeof(ident) - 1)] = '\0';
+      }
+    }
+    s += "<tr><td>Protocol</td><td>IEC 62056-21</td></tr>";
+    s += "<tr><td>Manufacturer Code</td><td><strong>" + String(mfr)   + "</strong></td></tr>";
+    s += "<tr><td>Meter Identifier</td><td><strong>"  + String(ident) + "</strong></td></tr>";
+    s += "<tr><td>Payload Length</td><td>" + String(length) + " Bytes</td></tr>";
+  } else {
+    // SML: OBIS 96.1.0 = meter serial number (octet-string)
+    int px = -1, sx = -1;
+    for (size_t i = 0; i < length - 4; i++)
+      if (buffer[i]==0x1b && buffer[i+1]==0x1b && buffer[i+2]==0x1b && buffer[i+3]==0x1b) { px=i; break; }
+    if (px != -1)
+      for (size_t i = px; i < length - 5; i++)
+        if (buffer[i]==0x1b && buffer[i+1]==0x1b && buffer[i+2]==0x1b && buffer[i+3]==0x1b && buffer[i+4]==0x1a) { sx=i; break; }
+
+    String meterId = "n/a";
+    if (px != -1 && sx != -1) {
+      uint8_t obis960[] = {0x01, 0x00, 0x60, 0x01, 0x00, 0xff}; // 96.1.0 meter serial
+      for (int i = px; i < sx - 12; i++) {
+        if (memcmp(&buffer[i], obis960, 6) == 0) {
+          // Scan forward for an octet-string TLV (high nibble == 0, len > 1)
+          for (int j = i + 6; j < i + 40 && j < sx; j++) {
+            uint8_t tl = buffer[j];
+            if ((tl & 0xF0) == 0x00 && (tl & 0x0F) > 1) {
+              int len = (tl & 0x0F) - 1;
+              if (j + len >= sx) break;
+              bool ascii = true;
+              for (int k = 0; k < len; k++)
+                if (buffer[j+1+k] < 0x20 || buffer[j+1+k] > 0x7E) { ascii = false; break; }
+              meterId = "";
+              if (ascii) {
+                for (int k = 0; k < len; k++) meterId += (char)buffer[j+1+k];
+              } else {
+                char hex[3];
+                for (int k = 0; k < len; k++) {
+                  sprintf(hex, "%02X", buffer[j+1+k]);
+                  if (k) meterId += ' ';
+                  meterId += hex;
+                }
+              }
+              break;
+            }
+          }
+          break;
+        }
+      }
+    }
+    s += "<tr><td>Protocol</td><td>SML</td></tr>";
+    s += "<tr><td>Meter Serial (96.1.0)</td><td><strong>" + meterId + "</strong></td></tr>";
+    if (px != -1 && sx != -1) {
+      int crcLen = (sx + 6) - px;
+      s += "<tr><td>Payload Length</td><td>" + String(crcLen + 2) + " Bytes</td></tr>";
     }
   }
-  if (px == -1 || sx == -1)
-    return s + "<p><font color='red'><strong>Error:</strong> Telegram incomplete (Prefix/Suffix missing).</font></p>";
+  s += "</table>";
 
-  // 2. CRC check
+  // ── Energy counters ──────────────────────────────────────────────────────
+  s += "<h3>Energy Counters</h3>";
+  s += "<table><tr><th>OBIS</th><th>Value</th></tr>";
+  s += "<tr><td>Consumption (1.8.0)</td><td><strong>" +
+       String(LastMeterValue.meter_value_180 * 0.1f, 1) + " Wh</strong></td></tr>";
+  s += "<tr><td>Delivery (2.8.0)</td><td><strong>" +
+       String(LastMeterValue.meter_value_280 * 0.1f, 1) + " Wh</strong></td></tr>";
+  s += "</table>";
+
+  s += "</div>";
+  return s;
+}
+
+// Returns the SML-specific analysis section (no HTML head).
+String analyzeSML_section(uint8_t* buffer, size_t length)
+{
+  String s = "<div class='section'><h2>SML Raw Analysis</h2>";
+
+  int px = -1;
+  for (size_t i = 0; i < (int)length - 4; i++)
+    if (buffer[i]==0x1b && buffer[i+1]==0x1b && buffer[i+2]==0x1b && buffer[i+3]==0x1b) { px=i; break; }
+  int sx = -1;
+  if (px != -1)
+    for (size_t i = px; i < (int)length - 5; i++)
+      if (buffer[i]==0x1b && buffer[i+1]==0x1b && buffer[i+2]==0x1b && buffer[i+3]==0x1b && buffer[i+4]==0x1a) { sx=i; break; }
+
+  if (px == -1 || sx == -1)
+    return s + "<p><font color='red'><strong>Error:</strong> Telegram incomplete (Prefix/Suffix missing).</font></p></div>";
+
   int      crcLen  = (sx + 6) - px;
   uint16_t compCRC = calculateSML_CRC16(&buffer[px], crcLen);
   uint16_t recvCRC = (buffer[sx + 6] << 8) | buffer[sx + 7];
   bool     crcOk   = (compCRC == recvCRC);
 
-  // 3. Status table
   s += "<h3>Telegram Status</h3>";
   s += "<table><tr><th>Parameter</th><th>Value</th></tr>";
   s += "<tr><td>Index (Start/End)</td><td>" + String(px) + " / " + String(sx) + "</td></tr>";
-  s += "<tr><td>Payload Length</td><td>" + String(crcLen + 2) + " Bytes</td></tr>";
   s += "<tr><td>Checksum (CRC)</td><td>";
   if (recvCRC == 0)   s += "Meter sent no CRC (0x0000)";
   else if (crcOk)     s += "0x" + String(recvCRC, HEX) + " (Valid)";
-  else                s += "<font color='red'>0x" + String(recvCRC, HEX) + " (Invalid! Expected: " + String(compCRC, HEX) + ")</font>";
+  else                s += "<font color='red'>0x" + String(recvCRC, HEX) + " (Invalid! Expected: 0x" + String(compCRC, HEX) + ")</font>";
   s += "</td></tr></table>";
 
-  // 4. Data table
-  s += "<h3>Registers</h3>";
+  s += "<h3>Registers (from raw binary)</h3>";
   s += "<table><tr><th>OBIS Code</th><th>Index</th><th>Length</th><th>Reading</th></tr>";
-  uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff}; // Total Consumption
-  uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff}; // Total Delivery
-  uint8_t obis167[] = {0x01, 0x00, 0x10, 0x07, 0x00, 0xff}; // Active Power
-  s += getObisRow(buffer, px, sx, obis180, "Consumption (1.8.0)", "Wh", 0.1);
-  s += getObisRow(buffer, px, sx, obis280, "Delivery (2.8.0)",    "Wh", 0.1);
-  s += getObisRow(buffer, px, sx, obis167, "Active Power",        "W",  1.0);
+  uint8_t obis180[] = {0x01,0x00,0x01,0x08,0x00,0xff};
+  uint8_t obis280[] = {0x01,0x00,0x02,0x08,0x00,0xff};
+  uint8_t obis170[] = {0x01,0x00,0x01,0x07,0x00,0xff};
+  uint8_t obis270[] = {0x01,0x00,0x02,0x07,0x00,0xff};
+  uint8_t obis167[] = {0x01,0x00,0x10,0x07,0x00,0xff};
+  s += getObisRow(buffer, px, sx, obis180, "Consumption (1.8.0)",  "Wh", 0.1);
+  s += getObisRow(buffer, px, sx, obis280, "Delivery (2.8.0)",     "Wh", 0.1);
+  s += getObisRow(buffer, px, sx, obis170, "Power Import (1.7.0)", "W",  1.0);
+  s += getObisRow(buffer, px, sx, obis270, "Power Export (2.7.0)", "W",  1.0);
+  s += getObisRow(buffer, px, sx, obis167, "Net Power (16.7.0)",   "W",  1.0);
   s += "</table></div>";
   return s;
 }
 
-void Webserver_SML_Analysis()
+// Returns the IEC-specific analysis section (no HTML head).
+String analyzeIEC_section(uint8_t* buffer, size_t length)
 {
-  server.send(200, "text/html", analyzeSML(telegram_receive_buffer, TELEGRAM_LENGTH));
+  String s = "<div class='section'><h2>IEC 62056-21 Raw Analysis</h2>";
+
+  static char telegram_str[TELEGRAM_LENGTH + 1];
+  size_t copy_len = (length <= TELEGRAM_LENGTH) ? length : TELEGRAM_LENGTH;
+  memcpy(telegram_str, buffer, copy_len);
+  telegram_str[copy_len] = '\0';
+
+  if (telegram_str[0] != '/')
+    return s + "<p><font color='red'><strong>Error:</strong> No IEC telegram in buffer.</font></p></div>";
+
+  auto parseObis = [&](const char* label, float* out) -> bool {
+    const char *p = strstr(telegram_str, label);
+    if (!p) return false;
+    const char *op = strchr(p, '(');
+    const char *st = op ? strchr(op, '*') : nullptr;
+    if (!op || !st || op >= st) return false;
+    char buf[20]; size_t l = st - op - 1;
+    if (l >= sizeof(buf)) return false;
+    strncpy(buf, op + 1, l); buf[l] = '\0';
+    for (int i = 0; buf[i]; i++) if (buf[i] == ',') buf[i] = '.';
+    *out = atof(buf);
+    return true;
+  };
+
+  struct { const char* label; const char* name; const char* unit; } regs[] = {
+    { "1-0:1.8.0",  "Consumption (1.8.0)",  "kWh" },
+    { "1-0:2.8.0",  "Delivery (2.8.0)",     "kWh" },
+    { "1-0:1.7.0",  "Power Import (1.7.0)", "kW"  },
+    { "1-0:2.7.0",  "Power Export (2.7.0)", "kW"  },
+    { "1-0:16.7.0", "Net Power (16.7.0)",   "kW"  },
+  };
+
+  s += "<h3>Registers (from telegram text)</h3>";
+  s += "<table><tr><th>OBIS Code</th><th>Reading</th></tr>";
+  for (auto& r : regs) {
+    float val = 0.0f;
+    if (parseObis(r.label, &val))
+      s += "<tr><td>" + String(r.name) + "</td><td><strong>" + String(val, 3) + " " + r.unit + "</strong></td></tr>";
+    else
+      s += "<tr><td>" + String(r.name) + "</td><td>n/a</td></tr>";
+  }
+  s += "</table></div>";
+  return s;
+}
+
+String analyzeTelegram(uint8_t* buffer, size_t length)
+{
+  String s = "<meta charset='UTF-8'>";
+  s += String(HTML_STYLE);
+  s += "<title>Telegram Analysis</title>";
+  s += buildCommonSection(buffer, length);
+  if (length > 0 && buffer[0] == '/')
+    s += analyzeIEC_section(buffer, length);
+  else
+    s += analyzeSML_section(buffer, length);
+  return s;
+}
+
+void Webserver_Telegram_Analysis()
+{
+  server.send(200, "text/html", analyzeTelegram(telegram_receive_buffer, TELEGRAM_LENGTH));
 }
 
 void Webserver_MeterValue_Num2()
@@ -1304,7 +1469,7 @@ void Webserver_UrlConfig()
 {
   server.on("/",                    Webserver_HandleRoot);
   server.on("/showTelegram",        Webserver_ShowTelegram);
-  server.on("/showSMLAnalysis",     Webserver_SML_Analysis);
+  server.on("/showTelegramAnalysis", Webserver_Telegram_Analysis);
   server.on("/showTelegramRaw",     Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue",  Webserver_ShowLastMeterValue);
   server.on("/showCert",            Webserver_ShowCert);
@@ -1551,7 +1716,12 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
             if (vStart + vLen > sx || vLen <= 0 || vLen > 8) continue;
             uint64_t raw64 = 0;
             for (int k = 0; k < vLen; k++) raw64 = (raw64 << 8) | buffer[vStart + k];
-            // Return the raw value without any scaling
+            // Sign-extend signed integers (0x5x type) so callers can cast to int32_t
+            if (typeGroup == 0x50) {
+              uint64_t signBit = 1ULL << (vLen * 8 - 1);
+              if (raw64 & signBit)
+                raw64 |= ~((signBit << 1) - 1); // fill upper bits with 1s
+            }
             *result = (uint32_t)raw64;
             return true;
           }
@@ -1616,17 +1786,26 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   // 3. Extract OBIS Data
   uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff};
   uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff};
-  uint32_t temp180 = 0, temp280 = 0;
+  uint8_t obis170[] = {0x01, 0x00, 0x01, 0x07, 0x00, 0xff};
+  uint8_t obis270[] = {0x01, 0x00, 0x02, 0x07, 0x00, 0xff};
+  uint8_t obis167[] = {0x01, 0x00, 0x10, 0x07, 0x00, 0xff};
+  uint32_t temp180 = 0, temp280 = 0, temp170 = 0, temp270 = 0, temp167 = 0;
   bool found180 = obisExtractor(buffer, px, sx, obis180, &temp180);
   bool found280 = obisExtractor(buffer, px, sx, obis280, &temp280);
+  obisExtractor(buffer, px, sx, obis170, &temp170);
+  obisExtractor(buffer, px, sx, obis270, &temp270);
+  obisExtractor(buffer, px, sx, obis167, &temp167);
 
   // Only update globals if the main consumption register was found.
-  // OBIS 2.8.0 is optional — some meters don't transmit it.
+  // All other fields are optional — some meters don't transmit them.
   if (found180) {
     resetMeterValue(LastMeterValue);
     LastMeterValue.meter_value_180 = temp180;
     LastMeterValue.timestamp       = Time_getEpochTime();
     if (found280) LastMeterValue.meter_value_280 = temp280;
+    LastMeterValue.power_import = temp170;
+    LastMeterValue.power_export = temp270;
+    LastMeterValue.net_power    = (int32_t)temp167; // reinterpret two's complement
     return true;
   }
   return false;
@@ -1666,25 +1845,32 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   LastMeterValue.meter_value_180 = (uint32_t)(kWh180 * 10000.0f);
   LastMeterValue.timestamp       = Time_getEpochTime();
 
-  // Extract OBIS 2.8.0 (feed-in / delivery) — optional
-  const char *obis280 = strstr(telegram_str, "1-0:2.8.0");
-  if (obis280)
-  {
-    const char *p280 = strchr(obis280, '(');
-    const char *s280 = (p280) ? strchr(p280, '*') : nullptr;
-    if (p280 && s280 && p280 < s280)
-    {
-      char v280[16];
-      size_t l280 = s280 - p280 - 1;
-      if (l280 < sizeof(v280))
-      {
-        strncpy(v280, p280 + 1, l280);
-        v280[l280] = '\0';
-        for (int i = 0; v280[i]; i++) if (v280[i] == ',') v280[i] = '.';
-        LastMeterValue.meter_value_280 = (uint32_t)(atof(v280) * 10000.0f);
-      }
-    }
-  }
+  // Helper lambda: find OBIS label in IEC text, parse the float value after '('
+  auto parseIecObis = [&](const char* label, float* out) -> bool {
+    const char *p = strstr(telegram_str, label);
+    if (!p) return false;
+    const char *op = strchr(p, '(');
+    const char *st = op ? strchr(op, '*') : nullptr;
+    if (!op || !st || op >= st) return false;
+    char buf[20];
+    size_t l = st - op - 1;
+    if (l >= sizeof(buf)) return false;
+    strncpy(buf, op + 1, l);
+    buf[l] = '\0';
+    for (int i = 0; buf[i]; i++) if (buf[i] == ',') buf[i] = '.';
+    *out = atof(buf);
+    return true;
+  };
+
+  float v280 = 0.0f, v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
+  if (parseIecObis("1-0:2.8.0", &v280))
+    LastMeterValue.meter_value_280 = (uint32_t)(v280 * 10000.0f);
+  if (parseIecObis("1-0:1.7.0", &v170))
+    LastMeterValue.power_import = (uint32_t)(v170 * 1000.0f); // kW → W
+  if (parseIecObis("1-0:2.7.0", &v270))
+    LastMeterValue.power_export = (uint32_t)(v270 * 1000.0f);
+  if (parseIecObis("1-0:16.7.0", &v167))
+    LastMeterValue.net_power = (int32_t)(v167 * 1000.0f);     // signed, kW → W
 
   return true;
 }
@@ -1836,6 +2022,7 @@ void handle_Telegram_receive()
 
 void Webclient_send_log_to_backend()
 {
+  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); return; }
   DLOGLN("Send Log to Backend");
   Log_AddEntry(1019);
   WiFiClientSecure client;
@@ -1899,6 +2086,7 @@ void Webclient_send_meter_values_to_backend()
   DLOGLN("call_backend_V2");
   last_call_backend = millis();
 
+  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); call_backend_successfull = true; return; }
   if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); Log_AddEntry(0); call_backend_successfull = true; return; }
 
   call_backend_successfull = false;
@@ -2435,7 +2623,7 @@ void Webserver_HandleRoot()
   s += Telegram_protocol_to_string(last_detected_protocol);
   s += R"rawliteral(</li>
   <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
-  <li><a href='showSMLAnalysis'>Show SML Analysis</a></li>
+  <li><a href='showTelegramAnalysis'>Show Telegram Analysis</a></li>
 </ul>
 
 <div class="section">
@@ -2640,9 +2828,10 @@ void Webserver_ShowLastMeterValue()
   jsonDoc["timestamp"]       = LastMeterValue.timestamp;
   jsonDoc["temperature"]     = LastMeterValue.temperature;
   jsonDoc["solar"]           = LastMeterValue.solar;
-  // OBIS 2.8.0 is always included in the JSON endpoint for completeness,
-  // even if it is not stored in the packed ring-buffer
   jsonDoc["meter_value_280"] = LastMeterValue.meter_value_280;
+  jsonDoc["power_import"]    = LastMeterValue.power_import;
+  jsonDoc["power_export"]    = LastMeterValue.power_export;
+  jsonDoc["net_power"]       = LastMeterValue.net_power;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);
