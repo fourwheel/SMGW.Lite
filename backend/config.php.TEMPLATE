@@ -39,12 +39,14 @@ function update_client_endpoint(string $id, ?string $wireframe = null): void {
     global $_link;
     $scheme   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $endpoint = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'unknown') . ($_SERVER['SCRIPT_NAME'] ?? '');
+    $ip_raw   = (int)($_GET['IP'] ?? -1);
+    $ip_octet = ($ip_raw >= 0 && $ip_raw <= 255) ? $ip_raw : null;
     if ($wireframe !== null) {
-        $stmt = mysqli_prepare($_link, "UPDATE clients SET endpoint = ?, wireframe = ?, last_reading = NOW() WHERE device_id = ?");
-        mysqli_stmt_bind_param($stmt, "sss", $endpoint, $wireframe, $id);
+        $stmt = mysqli_prepare($_link, "UPDATE clients SET endpoint = ?, wireframe = ?, ip_last_octet = ?, last_reading = NOW() WHERE device_id = ?");
+        mysqli_stmt_bind_param($stmt, "ssis", $endpoint, $wireframe, $ip_octet, $id);
     } else {
-        $stmt = mysqli_prepare($_link, "UPDATE clients SET endpoint = ?, last_reading = NOW() WHERE device_id = ?");
-        mysqli_stmt_bind_param($stmt, "ss", $endpoint, $id);
+        $stmt = mysqli_prepare($_link, "UPDATE clients SET endpoint = ?, ip_last_octet = ?, last_reading = NOW() WHERE device_id = ?");
+        mysqli_stmt_bind_param($stmt, "sis", $endpoint, $ip_octet, $id);
     }
     mysqli_stmt_execute($stmt);
     mysqli_stmt_close($stmt);
