@@ -102,16 +102,10 @@ const char wifiInitialApPassword[] = "password";
 #define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
 
 // Telegram vars
-const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
-const uint8_t SML_SIGNATURE_END[]   = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 #define TELEGRAM_LENGTH 1024
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegram in ms
-size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
 size_t telegram_receive_bufferIndex = 0;          // position in serial data buffer
-bool readingExtraBytes = false;                   // reading additional bytes?
-uint8_t extraBytes[3];                            // additional bytes after end signature
-size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
 
@@ -190,7 +184,6 @@ int meter_value_override_i       = 0;
 // write pointer for non-override (TAF14) entries — grows downward from end
 int meter_value_NON_override_i   = Meter_Value_Buffer_Size - 1;
 
-float currentPower, LastPower = 0.0;
 
 int staticDelay = 0;
 
@@ -2404,8 +2397,6 @@ int32_t MeterValue_get_from_remote()
 void Telegram_ResetReceiveBuffer()
 {
   telegram_receive_bufferIndex = 0;
-  readingExtraBytes = false;
-  extraIndex = 0;
 }
 
 void handle_Telegram_receive()
@@ -3045,7 +3036,6 @@ void Webserver_HandleRoot()
     // always matches the budget / entry_size. The warning is only relevant if
     // the user switches between auto and manual, which triggers a re-init via
     // Param_configSaved() automatically. So we never need to show it.
-    bool isAutoMode  = (atoi(Meter_Value_Buffer_Size_Char) <= 0);
     bool sizeChanged = false; // budget-based sizing always matches
 
     if (sizeChanged)
