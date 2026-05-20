@@ -89,6 +89,20 @@ function getStatusDescription(int $statusCode): string
 }
 
 // ---------------------------------------------------------------------------
+// Update meter model if supplied
+// ---------------------------------------------------------------------------
+if (!empty($_GET['model'])) {
+    $model = substr(preg_replace('/[^\x20-\x7E]/', '', $_GET['model']), 0, 64);
+    if ($model !== '') {
+        global $_link;
+        $stmt = mysqli_prepare($_link, "UPDATE clients SET meter_model = ? WHERE device_id = ?");
+        mysqli_stmt_bind_param($stmt, "ss", $model, $id);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Parse binary log buffer
 // Matches the LogEntry struct in main.cpp:
 //   unsigned long timestamp  (4 bytes, little-endian unsigned)

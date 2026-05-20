@@ -970,6 +970,8 @@ String getObisRow(uint8_t* buffer, int prefix, int suffix, uint8_t* code, const 
   return "<tr><td>" + String(label) + "</td><td>–</td><td>–</td><td>n/a</td></tr>";
 }
 
+String meter_model = "";
+
 // Returns the "Parsed Values" section common to both protocols.
 // Shows LastMeterValue energy counters + instantaneous power fields.
 // For IEC: parses manufacturer code and meter ID from the first line.
@@ -994,7 +996,8 @@ String buildCommonSection(uint8_t* buffer, size_t length)
     static char firstLine[128];
     const char* src = (const char*)buffer;
     const char* eol = strstr(src, "\r\n");
-    size_t lineLen = eol ? min((size_t)(eol - src), sizeof(firstLine) - 1) : 0;
+    size_t rawLen = eol ? (size_t)(eol - src) : 0;
+    size_t lineLen = rawLen < sizeof(firstLine) - 1 ? rawLen : sizeof(firstLine) - 1;
     strncpy(firstLine, src, lineLen);
     firstLine[lineLen] = '\0';
 
@@ -1003,10 +1006,12 @@ String buildCommonSection(uint8_t* buffer, size_t length)
     if (lineLen >= 4) {              // at minimum: '/' + 3 mfr chars
       strncpy(mfr, firstLine + 1, 3); mfr[3] = '\0';
       if (lineLen > 5) {             // skip '/' + 3 mfr + 1 baud char
-        strncpy(ident, firstLine + 5, min(lineLen - 5, sizeof(ident) - 1));
-        ident[min(lineLen - 5, sizeof(ident) - 1)] = '\0';
+        size_t identLen = lineLen - 5 < sizeof(ident) - 1 ? lineLen - 5 : sizeof(ident) - 1;
+        strncpy(ident, firstLine + 5, identLen);
+        ident[identLen] = '\0';
       }
     }
+    if (meter_model.isEmpty()) meter_model = String(mfr) + " " + String(ident);
     s += "<tr><td>Protocol</td><td>IEC 62056-21</td></tr>";
     s += "<tr><td>Manufacturer Code</td><td><strong>" + String(mfr)   + "</strong></td></tr>";
     s += "<tr><td>Meter Identifier</td><td><strong>"  + String(ident) + "</strong></td></tr>";
@@ -1031,13 +1036,16 @@ String buildCommonSection(uint8_t* buffer, size_t length)
             if ((tl & 0xF0) == 0x00 && (tl & 0x0F) > 1) {
               int len = (tl & 0x0F) - 1;
               if (j + len >= sx) break;
-              bool ascii = true;
-              for (int k = 0; k < len; k++)
-                if (buffer[j+1+k] < 0x20 || buffer[j+1+k] > 0x7E) { ascii = false; break; }
               meterId = "";
-              if (ascii) {
-                for (int k = 0; k < len; k++) meterId += (char)buffer[j+1+k];
-              } else {
+              // Look for 3 consecutive uppercase letters (manufacturer code)
+              for (int k = 0; k < len - 2; k++) {
+                uint8_t a = buffer[j+1+k], b = buffer[j+2+k], c = buffer[j+3+k];
+                if (a >= 'A' && a <= 'Z' && b >= 'A' && b <= 'Z' && c >= 'A' && c <= 'Z') {
+                  meterId = String((char)a) + String((char)b) + String((char)c);
+                  break;
+                }
+              }
+              if (meterId.isEmpty()) {
                 char hex[3];
                 for (int k = 0; k < len; k++) {
                   sprintf(hex, "%02X", buffer[j+1+k]);
@@ -1052,6 +1060,7 @@ String buildCommonSection(uint8_t* buffer, size_t length)
         }
       }
     }
+    if (meter_model.isEmpty() && meterId != "n/a") meter_model = meterId;
     s += "<tr><td>Protocol</td><td>SML</td></tr>";
     s += "<tr><td>Meter Serial (96.1.0)</td><td><strong>" + meterId + "</strong></td></tr>";
     if (px != -1 && sx != -1) {
@@ -2166,7 +2175,41 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   }
   if (sx == -1) return false;
 
-  // 3. Extract OBIS Data
+  // 3a. Extract meter serial (OBIS 0-0:96.1.0) for meter_model if not yet known
+  if (meter_model.isEmpty()) {
+    uint8_t obis960[] = {0x01, 0x00, 0x60, 0x01, 0x00, 0xff};
+    for (int i = px; i < sx - 12; i++) {
+      if (memcmp(&buffer[i], obis960, 6) == 0) {
+        for (int j = i + 6; j < i + 40 && j < sx; j++) {
+          uint8_t tl = buffer[j];
+          if ((tl & 0xF0) == 0x00 && (tl & 0x0F) > 1) {
+            int slen = (tl & 0x0F) - 1;
+            if (j + slen >= sx) break;
+            // Look for 3 consecutive uppercase letters (manufacturer code)
+            for (int k = 0; k < slen - 2; k++) {
+              uint8_t a = buffer[j+1+k], b = buffer[j+2+k], c = buffer[j+3+k];
+              if (a >= 'A' && a <= 'Z' && b >= 'A' && b <= 'Z' && c >= 'A' && c <= 'Z') {
+                meter_model = String((char)a) + String((char)b) + String((char)c);
+                break;
+              }
+            }
+            if (meter_model.isEmpty()) {
+              char hex[3];
+              for (int k = 0; k < slen; k++) {
+                sprintf(hex, "%02X", buffer[j+1+k]);
+                if (k) meter_model += ' ';
+                meter_model += hex;
+              }
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // 3b. Extract OBIS Data
   uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff};
   uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff};
   uint8_t obis170[] = {0x01, 0x00, 0x01, 0x07, 0x00, 0xff};
@@ -2204,6 +2247,22 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   size_t copy_len = (length <= TELEGRAM_LENGTH) ? length : TELEGRAM_LENGTH;
   memcpy(telegram_str, buffer, copy_len);
   telegram_str[copy_len] = '\0';
+
+  // Extract meter model from identification line (/<MFR><baud><ident>) if not yet known
+  if (meter_model.isEmpty() && telegram_str[0] == '/') {
+    const char *eol = strstr(telegram_str, "\r\n");
+    size_t lineLen = eol ? (size_t)(eol - telegram_str) : 0;
+    if (lineLen >= 4) {
+      char mfr[4]; strncpy(mfr, telegram_str + 1, 3); mfr[3] = '\0';
+      meter_model = mfr;
+      if (lineLen > 5) {
+        char ident[64];
+        size_t identLen = lineLen - 5 < sizeof(ident) - 1 ? lineLen - 5 : sizeof(ident) - 1;
+        strncpy(ident, telegram_str + 5, identLen); ident[identLen] = '\0';
+        meter_model += ' '; meter_model += ident;
+      }
+    }
+  }
 
   // Extract OBIS 1.8.0 (consumption) — required
   const char *obis180 = strstr(telegram_str, "1-0:1.8.0");
@@ -2422,6 +2481,11 @@ void Webclient_send_log_to_backend()
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
+  if (!meter_model.isEmpty()) {
+    String encoded = meter_model;
+    encoded.replace(" ", "%20");
+    logHeader += "&model=" + encoded;
+  }
   logHeader += " HTTP/1.1\r\nHost: " + backend_host + "\r\n";
   logHeader += "X-Auth-Token: " + String(backend_token) + "\r\n";
   logHeader += "Content-Type: application/octet-stream\r\n";
@@ -3091,6 +3155,9 @@ void Webserver_HandleRoot()
 
 <h3>System Info</h3>
 <ul>
+  <li>Meter Model: )rawliteral";
+  s += meter_model.isEmpty() ? "unknown" : meter_model;
+  s += R"rawliteral(</li>
   <li><i>LED blink:</i> )rawliteral";
   s += (led_blink_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
