@@ -71,6 +71,8 @@ function getStatusDescription(int $statusCode): string
         // --- Backend connection ---
         case 4000: return "Connection to server failed (certificate?)";
         case 4001: return "Error transmitting Buffer Chunk";
+        case 4002: return "Meter values send failed (no HTTP 200)";
+        case 4003: return "Log send failed (no HTTP 200)";
 
         // --- MyStrom / PV ---
         case 5000: return "myStrom: connection failed";

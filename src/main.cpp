@@ -22,7 +22,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
-#include <IotWebConfMultipleWifi.h>
 #include <SPIFFS.h>
 #if defined(ESP32)
 #include <WiFi.h>
@@ -141,6 +140,7 @@ bool MeterValue_trigger_non_override = false;
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
+unsigned long last_reconnect_attempt = 0;
 
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
@@ -195,8 +195,9 @@ int cached_backend_call_minute = 2;
 
 // Backend vars
 bool call_backend_successfull = true;
+bool redirect_to_sysinfo = false;
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
-unsigned long last_call_backend = 0;
+unsigned long last_call_backend = (unsigned long)-61000L;
 
 // Temperature vars
 #define ONE_WIRE_BUS 4
@@ -264,7 +265,8 @@ void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_splitHostAndPath(const String &url, String &host, String &path);
 void Webserver_HandleCertUpload();
 void Webserver_HandleRoot();
-void Webserver_LocationHrefHome(int delay = 0);
+void Webserver_HandleSysInfo();
+void Webserver_LocationHrefsysinfo(int delay = 0);
 void Webserver_SetCert();
 void Webserver_ShowCert();
 void Webserver_ShowLastMeterValue();
@@ -319,16 +321,6 @@ char config_280_char[STRING_LEN];         // "true" when OBIS 2.8.0 field is sto
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
 
-iotwebconf::ChainedWifiParameterGroup chainedWifiParameterGroups[] = {
-  iotwebconf::ChainedWifiParameterGroup("wifi1")
-};
-
-iotwebconf::MultipleWifiAddition multipleWifiAddition(
-  &iotWebConf,
-  chainedWifiParameterGroups,
-  sizeof(chainedWifiParameterGroups) / sizeof(chainedWifiParameterGroups[0]));
-
-iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 IotWebConfParameterGroup groupTelegram      = IotWebConfParameterGroup("groupTelegram",      "Telegram Param");
 IotWebConfParameterGroup groupBackend       = IotWebConfParameterGroup("groupBackend",       "Backend Config");
@@ -337,7 +329,7 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys",           "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -773,6 +765,8 @@ String Log_StatusCodeToString(int statusCode)
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
+        case 4002: return "Meter values send failed (no HTTP 200)";
+        case 4003: return "Log send failed (no HTTP 200)";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
@@ -786,7 +780,7 @@ String Log_StatusCodeToString(int statusCode)
   }
   if (statusCode < 1000)
   {
-    return "# meter slot";
+    return "# meter slots to transfer";
   }
   return "Unknown status code";
 }
@@ -912,9 +906,9 @@ int MeterValue_Num2()
   return count;
 }
 
-void Webserver_LocationHrefHome(int delay)
+void Webserver_LocationHrefsysinfo(int delay)
 {
-  String call = "<meta http-equiv='refresh' content='" + String(delay) + ";url=/'>";
+  String call = "<meta http-equiv='refresh' content='" + String(delay) + ";url=/sysinfo'>";
   server.send(200, "text/html", call);
 }
 
@@ -1321,19 +1315,19 @@ void Webserver_HandleCertUpload()
       file.println(cert);
       file.close();
       Log_AddEntry(8002);
-      Webserver_LocationHrefHome();
+      Webserver_LocationHrefsysinfo();
     }
     else
     {
       Log_AddEntry(8003);
-      Webserver_LocationHrefHome();
+      Webserver_LocationHrefsysinfo();
       server.send(500, "text/plain", "Cannot Open File!");
     }
   }
   else
   {
     Log_AddEntry(8004);
-    Webserver_LocationHrefHome();
+    Webserver_LocationHrefsysinfo();
   }
 }
 
@@ -1851,6 +1845,7 @@ void Webserver_PinAssistantDeluxe()
 void Webserver_UrlConfig()
 {
   server.on("/",                    Webserver_HandleRoot);
+  server.on("/sysinfo",             Webserver_HandleSysInfo);
   server.on("/showTelegram",        Webserver_ShowTelegram);
   server.on("/showTelegramAnalysis", Webserver_Telegram_Analysis);
   server.on("/showTelegramRaw",     Webserver_ShowTelegram_Raw);
@@ -1868,14 +1863,14 @@ void Webserver_UrlConfig()
   server.on("/flashlong",            Webserver_FlashLongPulse);
   server.on("/upload", [] { Webserver_HandleCertUpload(); Webclient_loadCertToChar(); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
-  server.on("/restart", [] { Webserver_LocationHrefHome(5); delay(100); ESP.restart(); });
-  server.on("/resetLogBuffer", [] { Webserver_LocationHrefHome(); LogBuffer_reset(); });
-  server.on("/StoreMeterValue", [] { Webserver_LocationHrefHome(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
-  server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefHome(); });
-  server.on("/sendboth_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendLog_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
-  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefHome(); });
+  server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
+  server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
+  server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
+  server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefsysinfo(); });
+  server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
+  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefsysinfo(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
 
   // OTA update handler
@@ -2049,9 +2044,10 @@ void Param_setup()
 
   iotWebConf.setConfigSavedCallback(&Param_configSaved);
   iotWebConf.getApTimeoutParameter()->visible = true;
+
   iotWebConf.skipApStartup();
-  multipleWifiAddition.init();
   iotWebConf.init();
+  iotWebConf.setApTimeoutMs(30000);
 }
 
 void OTA_setup()
@@ -2217,7 +2213,7 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 
   // Only update globals if the main consumption register was found.
   // All other fields are optional — some meters don't transmit them.
-  if (found180) {
+  if (found180 && temp180 > 0) {
     resetMeterValue(LastMeterValue);
     LastMeterValue.meter_value_180 = temp180;
     LastMeterValue.timestamp       = Time_getEpochTime();
@@ -2463,11 +2459,11 @@ void Webclient_send_log_to_backend()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
-  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); return; }
+  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); call_backend_successfull = false; return; }
   memcpy(logDataBuffer, logBuffer, logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
@@ -2488,6 +2484,7 @@ void Webclient_send_log_to_backend()
   client.write(logDataBuffer, logBufferSize);
   free(logDataBuffer);
 
+  bool logOk = false;
   unsigned long log_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < log_deadline)
   {
@@ -2495,11 +2492,13 @@ void Webclient_send_log_to_backend()
     {
       String line = client.readStringUntil('\n');
       DLOGLN(line);
-      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; break; }
+      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; logOk = true; break; }
       else b_send_log_to_backend = true;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  call_backend_successfull = logOk;
+  if (!logOk) Log_AddEntry(4003);
   client.stop();
 }
 
@@ -2525,16 +2524,14 @@ void Webclient_send_meter_values_to_backend()
   last_call_backend = millis();
 
   if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); call_backend_successfull = true; return; }
-  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); Log_AddEntry(0); call_backend_successfull = true; return; }
-
-  call_backend_successfull = false;
+  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); call_backend_successfull = true; return; }
 
   WiFiClientSecure client;
   client.setTimeout(10000); // 10 s read timeout for readStringUntil()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
   // Determine which byte ranges of the buffer actually contain data.
   //
@@ -2601,9 +2598,10 @@ void Webclient_send_meter_values_to_backend()
 
   // TAF7 range (front of buffer), then TAF14 range (back of buffer).
   // The backend sorts all entries by timestamp, so the order here doesn't matter.
-  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); return; }
-  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); return; }
+  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); call_backend_successfull = false; return; }
+  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); call_backend_successfull = false; return; }
 
+  bool ok = false;
   unsigned long mv_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < mv_deadline)
   {
@@ -2614,7 +2612,7 @@ void Webclient_send_meter_values_to_backend()
       if (line.startsWith("HTTP/1.1 200"))
       {
         DLOGLN("MeterValues successfully sent");
-        call_backend_successfull = true;
+        ok = true;
         MeterValues_clear_Buffer();
         last_call_backend = millis();
         Log_AddEntry(1021);
@@ -2623,6 +2621,8 @@ void Webclient_send_meter_values_to_backend()
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  call_backend_successfull = ok;
+  if (!ok) Log_AddEntry(4002);
   client.stop();
 }
 
@@ -2752,7 +2752,16 @@ void handle_check_wifi_connection()
     }
     else
     {
-      // Still offline
+      // Still offline — periodisch Reconnect versuchen
+      if (iotWebConf.getState() == iotwebconf::NetworkState::ApMode)
+      {
+        if (millis() - last_reconnect_attempt > 60000)
+        {
+          last_reconnect_attempt = millis();
+          DLOGLN("AP mode: triggering reconnect attempt");
+          iotWebConf.forceApMode(false);
+        }
+      }
     }
   }
 }
@@ -2780,7 +2789,7 @@ void handle_temperature()
 
 void handle_call_backend()
 {
-  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
+  if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
     if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
@@ -2916,10 +2925,8 @@ String Time_formatUptime()
   return String(buffer);
 }
 
-void Webserver_HandleRoot()
+void Webserver_HandleSysInfo()
 {
-  if (iotWebConf.handleCaptivePortal()) return;
-
   String s;
   s.reserve(8000);
   s += R"rawliteral(<!DOCTYPE html>
@@ -2932,6 +2939,7 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</title>)rawliteral";
   s += HTML_STYLE;
   s += R"rawliteral(</head><body>
+<p><a href='/'>&#8592; Home</a></p>
 <p>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.</p>
 
 <h2>Last Meter Value</h2>
@@ -3204,6 +3212,217 @@ void Webserver_HandleRoot()
   server.send(200, "text/html", s);
 }
 
+// ---------------------------------------------------------------------------
+// Webserver_HandleRoot – dashboard (/)
+// ---------------------------------------------------------------------------
+void Webserver_HandleRoot()
+{
+  if (iotWebConf.handleCaptivePortal()) return;
+
+  if (redirect_to_sysinfo) {
+    redirect_to_sysinfo = false;
+    server.sendHeader("Location", "/sysinfo");
+    server.send(302, "text/plain", "");
+    return;
+  }
+
+  bool hasReading      = LastMeterValue.timestamp > 0 && LastMeterValue.meter_value_180 > 0;
+  bool hasPinPrecision = hasReading && (LastMeterValue.meter_value_180 % 10000) != 0;
+  bool backendCalled   = last_call_backend > 0;
+  bool backendOk       = call_backend_successfull;
+  uint32_t ageS        = hasReading ? (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp) : 0;
+  const uint32_t kNoTelegramThresholdS = 30;
+  uint32_t backAgoMin  = backendCalled ? (millis() - last_call_backend) / 60000UL : 0;
+
+  String s;
+  s.reserve(4000);
+  s += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<title>SmartMeterLite</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:1rem;color:#1a1a1a;}
+.logo{font-size:1.5rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;padding-top:.4rem;}
+.meter-card{background:#1a3799;color:#fff;border-radius:16px;padding:2rem 2rem 1.6rem;text-align:center;width:100%;max-width:400px;box-shadow:0 4px 20px rgba(26,55,153,.22);}
+.m-lbl{font-size:.76rem;opacity:.72;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.6rem;}
+.m-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:.3rem;}
+.m-row-l{display:flex;align-items:baseline;gap:.35rem;}
+.m-arr{font-size:1.2rem;opacity:.8;flex-shrink:0;}
+.m-val{font-size:2.3rem;font-weight:800;letter-spacing:-.03em;line-height:1;-webkit-text-fill-color:#fff;}
+.m-val2{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;line-height:1;-webkit-text-fill-color:#fff;opacity:.85;}
+.m-unit{font-size:.78rem;opacity:.6;align-self:flex-end;padding-bottom:.1rem;}
+.m-pwr{display:flex;align-items:baseline;gap:.2rem;opacity:.8;}
+.m-pwr-val{font-size:1.05rem;font-weight:700;-webkit-text-fill-color:#fff;}
+.m-pwr-unit{font-size:.72rem;opacity:.75;}
+.m-div{border:none;border-top:1px solid rgba(255,255,255,.15);margin:.45rem 0;}
+.m-age{font-size:.73rem;opacity:.48;margin-top:.35rem;}
+.m-age-warn{color:#ffb300;opacity:1;font-weight:600;}
+.m-net-lbl{font-size:.78rem;opacity:.55;}
+.sc{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.9rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.75rem;}
+.sc-top{display:flex;align-items:center;gap:.75rem;}
+.dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;}
+.dg{background:#4caf50;box-shadow:0 0 6px #4caf5066;}
+.do{background:#ff9800;box-shadow:0 0 6px #ff980066;}
+.dr{background:#f44336;box-shadow:0 0 6px #f4433666;}
+.st strong{display:block;font-size:.92rem;margin-bottom:.1rem;}
+.st small{font-size:.77rem;color:#666;}
+.br{display:flex;gap:.7rem;width:100%;}
+.btn{flex:1;display:flex;align-items:center;justify-content:center;gap:.35rem;padding:.75rem .4rem;border-radius:10px;font-size:.85rem;font-weight:700;text-decoration:none;border:2px solid #1a3799;color:#1a3799;background:#f0f2f7;text-align:center;line-height:1.3;}
+.btn:hover{background:#1a3799;color:#fff;}
+.lc{color:#666;font-size:.85rem;text-decoration:none;border:1px solid #d0d8f0;border-radius:8px;padding:.4rem 1rem;background:#fff;}
+.lc:hover{color:#1a3799;}
+.grafana-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;max-width:400px;padding:.85rem 1rem;border-radius:14px;background:#2c3e6b;color:#fff;font-size:.88rem;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 2px 10px rgba(26,55,153,.18);}
+.grafana-btn:hover{background:#1a3799;}
+footer{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin-top:.5rem;padding-top:.5rem;}
+footer a{color:#999;font-size:.78rem;text-decoration:none;}
+footer a:hover{color:#1a3799;}
+.footer-love{font-size:.78rem;color:#aaa;}
+</style>
+</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+)rawliteral";
+
+  // Leistung bestimmen
+  // Beide Richtungen (1.7.0 + 2.7.0) bekannt → an kWh-Zeilen hängen.
+  // Sonst (nur eine Richtung oder nur 16.7.0) → standalone net-Zeile.
+  bool hasPower   = false;
+  bool netOnly    = false;
+  int32_t importW = 0, exportW = 0, netW = 0;
+  if (hasReading) {
+    if (LastMeterValue.power_import > 0 && LastMeterValue.power_export > 0) {
+      importW  = (int32_t)LastMeterValue.power_import;
+      exportW  = (int32_t)LastMeterValue.power_export;
+      hasPower = true;
+    } else if (LastMeterValue.net_power != 0) {
+      netW     = LastMeterValue.net_power;
+      netOnly  = true;
+      hasPower = true;
+    } else if (LastMeterValue.power_import > 0) {
+      netW     = (int32_t)LastMeterValue.power_import;
+      netOnly  = true;
+      hasPower = true;
+    } else if (LastMeterValue.power_export > 0) {
+      netW     = -(int32_t)LastMeterValue.power_export;
+      netOnly  = true;
+      hasPower = true;
+    }
+  }
+
+  auto pwrStr = [](int32_t w) -> String {
+    char buf[24];
+    if (w >= 1000) snprintf(buf, sizeof(buf), "%.2f&thinsp;kW", w / 1000.0f);
+    else           snprintf(buf, sizeof(buf), "%d&thinsp;W", (int)w);
+    return String(buf);
+  };
+
+  // Meter reading card
+  s += "<div class='meter-card'>"
+       "<div class='m-lbl'>Z&#228;hlerstand</div>";
+
+  // 1.8.0 — Bezug (↓) + Import-Leistung rechts
+  if (hasReading) {
+    char valBuf[32];
+    uint32_t v = LastMeterValue.meter_value_180;
+    snprintf(valBuf, sizeof(valBuf), "%lu,%04lu", (unsigned long)(v / 10000), (unsigned long)(v % 10000));
+    s += "<div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>&#8595;</span><span class='m-val'>" + String(valBuf) + "</span>"
+         "<span class='m-unit'>kWh</span></div>";
+    if (!netOnly && importW > 0)
+      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(importW) + "</span></div>";
+    s += "</div>";
+  } else {
+    s += "<div class='m-age' style='margin:.6rem 0;'>Warte auf Telegramm&#8239;&#8230;</div>";
+  }
+
+  // Nettoleistung zwischen 1.8.0 und 2.8.0
+  if (hasPower) {
+    int32_t calcNet = netOnly ? netW : (importW - exportW);
+    int32_t absP    = calcNet < 0 ? -calcNet : calcNet;
+    const char* arr = calcNet >= 0 ? "&#8595;" : "&#8593;";
+    const char* lbl = calcNet >= 0 ? "Netzbezug" : "Netzeinspeisung";
+    s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>" + String(arr) + "</span>"
+         "<span class='m-pwr-val'>" + pwrStr(absP) + "</span>"
+         "</div>"
+         "<span class='m-net-lbl'>" + String(lbl) + "</span></div>";
+  }
+
+  // 2.8.0 — Einspeisung (↑) + Export-Leistung rechts, nur wenn > 0
+  if (hasReading && LastMeterValue.meter_value_280 > 0) {
+    char val2Buf[32];
+    uint32_t v2 = LastMeterValue.meter_value_280;
+    snprintf(val2Buf, sizeof(val2Buf), "%lu,%04lu", (unsigned long)(v2 / 10000), (unsigned long)(v2 % 10000));
+    s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>&#8593;</span>"
+         "<span class='m-val2'>" + String(val2Buf) + "</span>"
+         "<span class='m-unit'>kWh</span></div>";
+    if (!netOnly && exportW > 0)
+      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(exportW) + "</span></div>";
+    s += "</div>";
+  }
+
+  if (hasReading) {
+    if (ageS >= kNoTelegramThresholdS)
+      s += "<div class='m-age m-age-warn'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
+    else
+      s += "<div class='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
+  }
+  s += "</div>";
+
+  // PIN / INF status
+  s += "<div class='sc'>";
+  if (!hasReading) {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Messwert</strong>"
+         "<small>Noch kein Telegramm empfangen.</small></div></div>"
+         "<div class='br'>"
+         "<a class='btn' href='/PinAssistant'>&#128274; PIN Assistant</a>"
+         "<a class='btn' href='/PinAssistantDeluxe'>&#128274; PIN Assistant Deluxe</a>"
+         "</div>";
+  } else if (ageS >= kNoTelegramThresholdS) {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Telegramm empfangen</strong>"
+         "<small>Lesekopf getrennt oder Verbindungsproblem?</small></div></div>";
+  } else if (hasPinPrecision) {
+    s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>PIN eingegeben &#8211; INF aktiv</strong>"
+         "<small>Messwerte mit Nachkommastellen.</small></div></div>";
+  } else {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>PIN nicht eingegeben oder INF aus</strong>"
+         "<small>Bitte PIN eingeben und INF auf ON setzen.</small></div></div>"
+         "<div class='br'>"
+         "<a class='btn' href='/PinAssistant'>&#128274; PIN Assistant</a>"
+         "<a class='btn' href='/PinAssistantDeluxe'>&#128274; PIN Assistant Deluxe</a>"
+         "</div>";
+  }
+  s += "</div>";
+
+  // Backend status
+  s += "<div class='sc'>";
+  if (!backendCalled)
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+         "<small>Noch kein Backend-Call durchgef&#252;hrt.</small></div></div>";
+  else if (backendOk)
+    s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+         "<small>Letzter Call vor " + String(backAgoMin) + " min.</small></div></div>";
+  else
+    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+         "<small>Letzter Backend-Call fehlgeschlagen.</small></div></div>";
+  s += "</div>";
+
+  s += R"rawliteral(<a class='grafana-btn' href='https://portal.smartmeterlite.de' target='_blank' rel='noopener'>&#128200; portal.smartmeterlite.de &rarr;</a>
+<a class='lc' href='/sysinfo'>&#9881;&#65039; Konfiguration &amp; Details</a>
+<footer>
+<a href='https://smartmeterlite.de' target='_blank' rel='noopener'>smartmeterlite.de</a>
+<a href='https://www.linkedin.com/in/laurin-vierrath/' target='_blank' rel='noopener'>&#128039; From Laurin with Love</a>
+</footer>
+</body></html>)rawliteral";
+
+  server.send(200, "text/html", s);
+}
+
 void Webserver_ShowCert()
 {
   server.send(200, "text/html", String(FullCert));
@@ -3282,6 +3501,7 @@ void Webserver_ShowLastMeterValue()
 void Param_configSaved()
 {
   DLOGLN("Configuration was updated.");
+  redirect_to_sysinfo = true;
   Led_update_Blink();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);

@@ -1,0 +1,20 @@
+Device  : AW6
+Received: 2026-05-12 05:19:24 UTC
+Batch   : 3 entries received, 1 inserted, 2 rejected
+
+     #    Timestamp (UTC)      Unix TS      Meter        Solar      Temp°C  Power W   Prev TS      Prev Meter   Status
+----------------------------------------------------------------------------------------------------------------------
+>>>  1    2026-05-12 05:16:59  1778563019   36587873     -          0        0         1778563079   36588101     older_than_db_prev
+       ↳ Entry TS (1778563019) < last DB TS (1778563079),  Δt = -60 s
+         Wahrscheinliche Ursache: gepufferter TAF-14-Wert, der ankam, nachdem ein
+         neuerer TAF-7-Wert bereits in einer früheren Backend-Übertragung gespeichert
+         wurde (z. B. ESP hat 200 OK nicht empfangen und nochmals gesendet).
+
+>>>  2    2026-05-12 05:17:59  1778563079   36588101     -          0        0         1778563079   36588101     duplicate_timestamp
+       ↳ TS (1778563079) == last DB TS — exaktes Duplikat.
+         Wahrscheinliche Ursache: ESP32 hat die Übertragung wiederholt, weil das
+         200 OK vom Server nicht angekommen ist; der Wert wurde bereits gespeichert.
+
+     3    2026-05-12 05:18:59  1778563139   36588331     -          0        1380      1778563079   36588101     OK
+----------------------------------------------------------------------------------------------------------------------
+Summary: 3 received, 1 inserted, 2 rejected.
