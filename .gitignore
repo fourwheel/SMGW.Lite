@@ -1,6 +1,5 @@
 .pio
 .vscode/
 .claude/
-smartmeterlite-website/
 backend/config.php
 src/wifi_credentials.h
