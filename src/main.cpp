@@ -73,6 +73,7 @@ const char wifiInitialApPassword[] = "password";
 // Copy src/wifi_credentials.h.example to src/wifi_credentials.h and fill in your values.
 // ---------------------------------------------------------------------------
 #include "wifi_credentials.h"
+#include "certs/isrg_root_x1.h"
 
 #define STRING_LEN 128
 #define ID_LEN 4
@@ -196,6 +197,8 @@ int cached_backend_call_minute = 2;
 // Backend vars
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
+bool g_wifiSetupPending  = false;
+unsigned long g_apStopAt = 0;     // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 unsigned long last_call_backend = (unsigned long)-61000L;
 
@@ -265,10 +268,12 @@ void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_splitHostAndPath(const String &url, String &host, String &path);
 void Webserver_HandleCertUpload();
 void Webserver_HandleRoot();
+void Webserver_HandleWifiSetup();
+void Webserver_HandleWifiStatus();
 void Webserver_HandleSysInfo();
 void Webserver_LocationHrefsysinfo(int delay = 0);
 void Webserver_SetCert();
-void Webserver_ShowCert();
+
 void Webserver_ShowLastMeterValue();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
@@ -1256,14 +1261,48 @@ char FullCert[2000];
 
 void Webserver_SetCert()
 {
-  server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
+  // Read directly from SPIFFS so the textarea is empty when no custom cert is stored.
+  // Empty textarea = bundled ISRG Root X1 fallback is active.
+  String stored = "";
+  File file = SPIFFS.open("/cert.pem", FILE_READ);
+  if (file && file.size() > 0)
+  {
+    stored = file.readString();
+    file.close();
+  }
+
+  String hint = stored.length() == 0
+    ? "<p style='font-size:.85rem;color:#888;margin-top:.5rem;'>Leave empty to use the onboard ISRG Root X1 cert (valid until 2035).</p>"
+    : "";
+
+  server.send(200, "text/html",
+    "<form action='/upload' method='POST'>"
+    "<textarea name='cert' rows='10' cols='80'>" + stored + "</textarea>"
+    "<br><input type='submit'>" + hint + "</form>");
 }
 
 void Webserver_TestBackendConnection()
 {
+  size_t certLen = strlen(FullCert);
+  String certStart = String(FullCert).substring(0, 30);
+  certStart.replace("<", "&lt;");
+  String certEnd = certLen > 30 ? String(FullCert).substring(certLen - 30) : "";
+  certEnd.replace("<", "&lt;");
+
   WiFiClientSecure client;
   client.setCACert(FullCert);
   String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body><div class='section'>";
+
+  time_t now = (time_t)Time_getEpochTime();
+  char timeBuf[32];
+  struct tm* ti = gmtime(&now);
+  strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S UTC", ti);
+
+  res += "<b>Cert debug:</b><br>";
+  res += "Length: " + String(certLen) + "<br>";
+  res += "Start:  <code>" + certStart + "</code><br>";
+  res += "End:    <code>" + certEnd   + "</code><br>";
+  res += "Device time: <code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")<br><br>";
 
   if (client.connect(backend_host.c_str(), 443))
   {
@@ -1271,7 +1310,7 @@ void Webserver_TestBackendConnection()
   }
   else
   {
-    client.setInsecure(); // If cert not accepted, try without
+    client.setInsecure();
     if (client.connect(backend_host.c_str(), 443))
       res += "&#9989; Host reachable<br>&#10060; Cert not working.";
     else
@@ -1309,6 +1348,17 @@ void Webserver_HandleCertUpload()
   if (server.hasArg("cert"))
   {
     String cert = server.arg("cert");
+    cert.trim();
+
+    if (cert.length() == 0)
+    {
+      // Empty submission — remove SPIFFS file so the bundled fallback cert is used.
+      SPIFFS.remove("/cert.pem");
+      Log_AddEntry(8002);
+      Webserver_LocationHrefsysinfo();
+      return;
+    }
+
     File file = SPIFFS.open("/cert.pem", FILE_WRITE);
     if (file)
     {
@@ -1334,11 +1384,18 @@ void Webserver_HandleCertUpload()
 void Webclient_loadCertToChar()
 {
   File file = SPIFFS.open("/cert.pem", FILE_READ);
-  if (!file) { Log_AddEntry(8001); return; }
-  size_t size = file.size();
-  file.readBytes(FullCert, size);
-  FullCert[size] = '\0';
-  file.close();
+  if (file && file.size() > 0)
+  {
+    size_t size = file.size();
+    file.readBytes(FullCert, size);
+    FullCert[size] = '\0';
+    file.close();
+    return;
+  }
+  // No cert in SPIFFS — fall back to bundled ISRG Root X1
+  strncpy(FullCert, ISRG_ROOT_X1, sizeof(FullCert) - 1);
+  FullCert[sizeof(FullCert) - 1] = '\0';
+  Log_AddEntry(8001);
 }
 
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
@@ -1850,7 +1907,7 @@ void Webserver_UrlConfig()
   server.on("/showTelegramAnalysis", Webserver_Telegram_Analysis);
   server.on("/showTelegramRaw",     Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue",  Webserver_ShowLastMeterValue);
-  server.on("/showCert",            Webserver_ShowCert);
+
   server.on("/setCert",             Webserver_SetCert);
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues",     Webserver_ShowMeterValues);
@@ -1862,6 +1919,20 @@ void Webserver_UrlConfig()
   server.on("/flash",                Webserver_FlashPulse);
   server.on("/flashlong",            Webserver_FlashLongPulse);
   server.on("/upload", [] { Webserver_HandleCertUpload(); Webclient_loadCertToChar(); });
+  server.on("/wifiSetup",  HTTP_POST,  Webserver_HandleWifiSetup);
+  server.on("/wifiStatus",             Webserver_HandleWifiStatus);
+
+  // Captive portal suppression: respond with the expected payload for each OS probe
+  // so the device is seen as "has internet" and no browser popup is triggered.
+  // iOS/macOS
+  server.on("/hotspot-detect.html",      [] { server.send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); });
+  server.on("/library/test/success.html",[] { server.send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); });
+  // Android
+  server.on("/generate_204",             [] { server.send(204, "text/plain", ""); });
+  server.on("/gen_204",                  [] { server.send(204, "text/plain", ""); });
+  // Windows
+  server.on("/connecttest.txt",          [] { server.send(200, "text/plain", "Microsoft Connect Test"); });
+  server.on("/ncsi.txt",                 [] { server.send(200, "text/plain", "Microsoft NCSI"); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
@@ -2878,6 +2949,14 @@ void handle_MeterValue_trigger()
 void loop()
 {
   iotWebConf.doLoop();
+
+  if (g_apStopAt > 0 && millis() >= g_apStopAt)
+  {
+    g_apStopAt = 0;
+    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
+    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
+  }
+
   ArduinoOTA.handle();
   handle_temperature();
   // handle_Telegram_receive();  // handled by dedicated FreeRTOS task
@@ -3092,7 +3171,7 @@ void Webserver_HandleSysInfo()
   <li><i>Use SSL Cert:</i> )rawliteral";
   s += (UseSslCert_object.isChecked() ? "true" : "false");
   s += R"rawliteral(</li>
-  <li><a href='showCert'>Show Cert</a></li>
+
   <li><a href='setCert'>Set Cert</a></li>
   <li><a href='testBackendConnection'>Test Backend Connection</a></li>
   <li>Last Backend Call ago (min): )rawliteral";
@@ -3221,11 +3300,14 @@ void Webserver_HandleRoot()
 
   if (redirect_to_sysinfo) {
     redirect_to_sysinfo = false;
-    server.sendHeader("Location", "/sysinfo");
-    server.send(302, "text/plain", "");
-    return;
+    if (wifi_connected) {
+      server.sendHeader("Location", "/sysinfo");
+      server.send(302, "text/plain", "");
+      return;
+    }
   }
 
+  bool isApMode        = !wifi_connected;
   bool hasReading      = LastMeterValue.timestamp > 0 && LastMeterValue.meter_value_180 > 0;
   bool hasPinPrecision = hasReading && (LastMeterValue.meter_value_180 % 10000) != 0;
   bool backendCalled   = last_call_backend > 0;
@@ -3275,12 +3357,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .btn:hover{background:#1a3799;color:#fff;}
 .lc{color:#666;font-size:.85rem;text-decoration:none;border:1px solid #d0d8f0;border-radius:8px;padding:.4rem 1rem;background:#fff;}
 .lc:hover{color:#1a3799;}
-.grafana-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;max-width:400px;padding:.85rem 1rem;border-radius:14px;background:#2c3e6b;color:#fff;font-size:.88rem;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 2px 10px rgba(26,55,153,.18);}
-.grafana-btn:hover{background:#1a3799;}
+.grafana-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;max-width:400px;padding:.85rem 1rem;border-radius:14px;background:#374151;color:#fff;font-size:.88rem;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+.grafana-btn:hover{background:#1e293b;}
 footer{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin-top:.5rem;padding-top:.5rem;}
 footer a{color:#999;font-size:.78rem;text-decoration:none;}
 footer a:hover{color:#1a3799;}
 .footer-love{font-size:.78rem;color:#aaa;}
+.wifi-card{background:#fff3cd;border:1px solid #ffc107;border-radius:14px;padding:1rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.6rem;}
+.wifi-card h3{font-size:.92rem;font-weight:700;color:#856404;margin:0;}
+.wifi-card small{font-size:.77rem;color:#856404;opacity:.85;}
+.wifi-form{display:flex;flex-direction:column;gap:.5rem;}
+.wifi-form input[type=text],.wifi-form input[type=password]{width:100%;padding:.55rem .75rem;border-radius:8px;border:1px solid #ccc;font-size:.88rem;background:#fff;}
+.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
+.wifi-form button:hover{background:#142b7a;}
 </style>
 </head>
 <body>
@@ -3374,6 +3463,19 @@ footer a:hover{color:#1a3799;}
   }
   s += "</div>";
 
+  // WiFi setup card — only shown in AP mode
+  if (isApMode) {
+    s += R"rawliteral(<div class='wifi-card'>
+<h3>&#128246; Kein WLAN verbunden &ndash; Netzwerk einrichten</h3>
+<small>Das Ger&auml;t ist im Access-Point-Modus. Gib dein WLAN-Passwort ein, um eine Verbindung herzustellen.</small>
+<form class='wifi-form' action='/wifiSetup' method='POST'>
+<input type='text'     name='ssid'     placeholder='WLAN-Name (SSID)'    autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'>
+<input type='password' name='password' placeholder='WLAN-Passwort'       autocomplete='current-password'>
+<button type='submit'>Verbinden</button>
+</form>
+</div>)rawliteral";
+  }
+
   // PIN / INF status
   s += "<div class='sc'>";
   if (!hasReading) {
@@ -3401,14 +3503,17 @@ footer a:hover{color:#1a3799;}
 
   // Backend status
   s += "<div class='sc'>";
-  if (!backendCalled)
-    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+  if (!wifi_connected)
+    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Kein Backend-Kontakt</strong>"
+         "<small>Kein WLAN &ndash; Backend nicht erreichbar.</small></div></div>";
+  else if (!backendCalled)
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Backend noch nicht kontaktiert</strong>"
          "<small>Noch kein Backend-Call durchgef&#252;hrt.</small></div></div>";
   else if (backendOk)
     s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit Backend verbunden</strong>"
          "<small>Letzter Call vor " + String(backAgoMin) + " min.</small></div></div>";
   else
-    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Backend-Fehler</strong>"
          "<small>Letzter Backend-Call fehlgeschlagen.</small></div></div>";
   s += "</div>";
 
@@ -3423,10 +3528,136 @@ footer a:hover{color:#1a3799;}
   server.send(200, "text/html", s);
 }
 
-void Webserver_ShowCert()
+void Webserver_HandleWifiSetup()
 {
-  server.send(200, "text/html", String(FullCert));
+  String ssid     = server.arg("ssid");
+  String password = server.arg("password");
+
+  ssid.trim();
+
+  if (ssid.length() == 0) {
+    server.sendHeader("Location", "/");
+    server.send(302, "text/plain", "");
+    return;
+  }
+
+  strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     ssid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
+  strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, password.c_str(), IOTWEBCONF_WORD_LEN - 1);
+  iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
+  iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
+
+  iotWebConf.saveConfig();
+  redirect_to_sysinfo = false;
+  DLOGLN("WiFi-Setup: credentials saved, starting direct connection attempt.");
+
+  // Lock the AP: forceApMode(true) prevents IotWebConf from stopping it via timeout
+  // before the browser has received the IP.
+  iotWebConf.forceApMode(true);
+
+  // Direct WiFi.begin(): ESP32 switches to AP_STA mode, AP stays up.
+  WiFi.begin(ssid.c_str(), password.c_str());
+  g_wifiSetupPending = true;
+  g_apStopAt         = 0;
+
+  // Lade-Seite mit JS-Polling ausliefern
+  String page = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>SmartMeterLite &ndash; Verbinde&hellip;</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;gap:1rem;color:#1a1a1a;}
+.logo{font-size:1.5rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;}
+.card{background:#fff;border-radius:16px;border:1px solid #d0d8f0;padding:2rem;width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
+.spinner{width:40px;height:40px;border:4px solid #d0d8f0;border-top-color:#1a3799;border-radius:50%;animation:spin 0.9s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg{font-size:.95rem;color:#444;}
+.ssid{font-weight:700;color:#1a3799;}
+.hint{font-size:.82rem;color:#888;line-height:1.5;}
+.err{color:#c0392b;font-size:.88rem;display:none;}
+.result{display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
+.ip-box{background:#f0f2f7;border-radius:10px;padding:.9rem 1.2rem;font-size:1.05rem;color:#333;letter-spacing:.04em;}
+.ip-last{font-weight:800;color:#1a3799;font-size:1.2rem;}
+.steps{text-align:left;font-size:.84rem;color:#444;line-height:1.8;width:100%;}
+.steps li{margin-left:1.1rem;}
+.open-btn{display:block;width:100%;padding:.8rem;border-radius:10px;background:#1a3799;color:#fff;font-size:.95rem;font-weight:700;text-decoration:none;text-align:center;}
+.open-btn:hover{background:#142b7a;}
+</style>
+</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<div class="card">
+  <div id="connecting">
+    <div class="spinner"></div>
+    <p class="msg" style="margin-top:1rem;">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+  </div>
+  <div class="result" id="result">
+    <p class="msg">&#10003;&nbsp; Verbunden! Deine IP-Adresse:</p>
+    <div class="ip-box" id="ip-display"></div>
+    <ol class="steps">
+      <li>Notiere dir die IP-Adresse &ndash; besonders das letzte Byte (fett).</li>
+      <li>Wechsle jetzt mit deinem Ger&auml;t ins WLAN <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>.</li>
+      <li>Klicke dann auf den Button unten.</li>
+    </ol>
+    <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>
+  </div>
+  <p class="err" id="err">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+</div>
+<script>
+var attempts = 0, max = 20;
+function poll() {
+  fetch('/wifiStatus')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.connected) {
+        var parts = d.ip.split('.');
+        var last  = parts.pop();
+        var prefix = parts.join('.') + '.';
+        document.getElementById('ip-display').innerHTML =
+          prefix + '<span class="ip-last">' + last + '</span>';
+        var url = 'http://' + d.ip + '/';
+        document.getElementById('open-btn').href = url;
+        document.getElementById('connecting').style.display = 'none';
+        document.getElementById('result').style.display     = 'flex';
+      } else if (++attempts < max) {
+        setTimeout(poll, 2000);
+      } else {
+        document.getElementById('connecting').style.display = 'none';
+        document.getElementById('err').style.display        = 'block';
+      }
+    })
+    .catch(function(){ if (++attempts < max) setTimeout(poll, 2000); });
 }
+setTimeout(poll, 2000);
+</script>
+</body></html>)rawliteral";
+
+  server.send(200, "text/html", page);
+}
+
+void Webserver_HandleWifiStatus()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    String ip = WiFi.localIP().toString();
+    if (g_wifiSetupPending)
+    {
+      g_wifiSetupPending = false;
+      // Give the HTTP response 2 s to be delivered, then stop the AP.
+      g_apStopAt = millis() + 2000;
+      DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
+    }
+    server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
+  }
+  else
+  {
+    server.send(200, "application/json", "{\"connected\":false}");
+  }
+}
+
+
 
 void Webserver_ShowTelegram_Raw()
 {
