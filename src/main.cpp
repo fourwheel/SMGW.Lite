@@ -436,6 +436,49 @@ const char HTML_STYLE[] PROGMEM = R"rawliteral(
 </style>
 )rawliteral";
 
+const char HTML_STYLE_MODERN[] PROGMEM = R"rawliteral(
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:.8rem;color:#1a1a1a;}
+.logo{font-size:1.4rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;}
+.back{color:#1a3799;font-size:.85rem;text-decoration:none;width:100%;max-width:600px;}
+.back:hover{text-decoration:underline;}
+.card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:1.1rem 1.3rem;width:100%;max-width:600px;}
+.card-title{font-size:.95rem;font-weight:700;color:#1a3799;margin-bottom:.7rem;padding-bottom:.35rem;border-bottom:1px solid #e8edf5;}
+.kv{display:flex;gap:.5rem;padding:.28rem 0;font-size:.84rem;border-bottom:1px solid #f0f2f7;}
+.kv.last{border-bottom:none;}
+.kl{color:#666;min-width:210px;flex-shrink:0;white-space:nowrap;}
+a{color:#1a3799;text-decoration:none;}
+a:hover{text-decoration:underline;}
+table{border-collapse:collapse;width:100%;font-size:.81rem;margin-top:.2rem;}
+th,td{border:1px solid #dde3f0;padding:4px 7px;text-align:left;word-break:break-word;}
+th{background:#f0f2f7;color:#1a3799;font-weight:600;}
+tr:nth-child(even) td{background:#fafbfd;}
+.ok{color:#2e7d32;font-weight:600;}
+.fail{color:#c62828;font-weight:600;}
+.warn{color:#856404;font-weight:600;}
+.btns{display:flex;gap:.5rem;flex-wrap:wrap;}
+.btn{padding:.65rem .95rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.84rem;font-weight:700;text-decoration:none;border:none;cursor:pointer;display:inline-block;min-height:44px;display:inline-flex;align-items:center;}
+.btn:hover{background:#142b7a;text-decoration:none;}
+.btn-s{background:#f0f2f7;color:#1a3799;border:1px solid #c0ccec;}
+.btn-s:hover{background:#dde3f0;}
+.btn-d{background:#c62828;color:#fff;border:none;}
+.btn-d:hover{background:#a01c1c;}
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+textarea{width:100%;font-family:monospace;font-size:.78rem;border:1px solid #d0d8f0;border-radius:8px;padding:.6rem;resize:vertical;}
+.hint{font-size:.79rem;color:#888;margin-top:.3rem;}
+code{font-family:monospace;font-size:.85em;background:#f0f2f7;padding:.1em .3em;border-radius:3px;}
+small{font-size:.79rem;}
+.kl.e::after{content:" \270F";font-size:.68rem;color:#1a3799;opacity:.6;vertical-align:middle;}
+.cfg-link{display:flex;align-items:center;gap:.9rem;background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.85rem 1.3rem;width:100%;max-width:600px;text-decoration:none;color:#1a1a1a;transition:border-color .15s;}
+.cfg-link:hover{background:#f5f7ff;text-decoration:none;border-color:#1a3799;}
+.cfg-icon{font-size:1.5rem;color:#1a3799;flex-shrink:0;line-height:1;}
+.cfg-text strong{display:block;font-size:.9rem;font-weight:700;color:#1a3799;}
+.cfg-text small{font-size:.77rem;color:#777;}
+@media(max-width:440px){.kv{flex-wrap:wrap;}.kl{min-width:unset;width:100%;color:#888;font-size:.78rem;padding-bottom:0;white-space:normal;}}
+</style>
+)rawliteral";
+
 unsigned long Time_getEpochTime()
 {
   return static_cast<unsigned long>(time(nullptr));
@@ -827,15 +870,27 @@ String Log_EntryToString(int i)
 
 String Log_BufferToString(int showNumber)
 {
+  bool fullPage = showNumber > 10;
   int showed_number = 0;
   String logString;
-  if (showNumber > 10)
+  if (fullPage)
   {
-    logString  = "<html><head><title>SMGWLite - Log Buffer</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-    logString += String(HTML_STYLE);
-    logString += "</head><body>";
+    logString  = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Log Buffer</title>)rawliteral";
+    logString += String(HTML_STYLE_MODERN);
+    logString += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card" style="max-width:800px;">
+<div class="card-title">Log Buffer</div>
+<div class="tbl">)rawliteral";
   }
-  logString += "<table border=1><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
+  logString += "<table><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
 
   // First loop: most recent entries, from logIndex down to 0
   for (int i = logIndex; i >= 0; i--)
@@ -843,7 +898,7 @@ String Log_BufferToString(int showNumber)
     logString += Log_EntryToString(i);
     showed_number++;
     if (showed_number >= showNumber)
-      return logString + "</table>";
+      return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
   }
 
   // Second loop: older entries that wrapped around, from buffer end to logIndex
@@ -970,17 +1025,22 @@ String meter_model = "";
 // For SML: extracts OBIS 96.1.0 (meter serial) as a hex/ASCII string.
 String buildCommonSection(uint8_t* buffer, size_t length)
 {
+  String s = "<div class='card'><div class='card-title'>Parsed Values";
+  if (LastMeterValue.timestamp > 0) {
+    uint32_t ageS = (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp);
+    s += "<small style='font-weight:400;color:#888;'>&mdash; last telegram: " + String(ageS) + " s ago</small>";
+  }
+  s += "</div>";
+
+  if (LastMeterValue.timestamp == 0) {
+    s += "<p style='font-size:.84rem;color:#888;font-style:italic;'>No telegram received yet.</p></div>";
+    return s;
+  }
+
   bool isIEC = (length > 0 && buffer[0] == '/');
 
-  String s = "<div class='section'><h2>Parsed Values</h2>";
-  uint32_t ageS = (LastMeterValue.timestamp > 0)
-                  ? (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp) : 0;
-  s += "<p><small>From LastMeterValue — last telegram: <strong>" + String(ageS) +
-       " s ago</strong></small></p>";
-
-  // ── Meter identification ─────────────────────────────────────────────────
-  s += "<h3>Meter Identification</h3>";
-  s += "<table><tr><th>Field</th><th>Value</th></tr>";
+  s += "<p style='font-size:.84rem;font-weight:600;color:#1a3799;margin-bottom:.3rem;'>Meter Identification</p>";
+  s += "<div class='tbl'><table><tr><th>Field</th><th>Value</th></tr>";
 
   if (isIEC) {
     // IEC first line: /<MFR><baud><ident>\r\n
@@ -1060,16 +1120,15 @@ String buildCommonSection(uint8_t* buffer, size_t length)
       s += "<tr><td>Payload Length</td><td>" + String(crcLen + 2) + " Bytes</td></tr>";
     }
   }
-  s += "</table>";
+  s += "</table></div>";
 
-  // ── Energy counters ──────────────────────────────────────────────────────
-  s += "<h3>Energy Counters</h3>";
-  s += "<table><tr><th>OBIS</th><th>Value</th></tr>";
+  s += "<p style='font-size:.84rem;font-weight:600;color:#1a3799;margin:.7rem 0 .3rem;'>Energy Counters</p>";
+  s += "<div class='tbl'><table><tr><th>OBIS</th><th>Value</th></tr>";
   s += "<tr><td>Consumption (1.8.0)</td><td><strong>" +
        String(LastMeterValue.meter_value_180 * 0.1f, 1) + " Wh</strong></td></tr>";
   s += "<tr><td>Delivery (2.8.0)</td><td><strong>" +
        String(LastMeterValue.meter_value_280 * 0.1f, 1) + " Wh</strong></td></tr>";
-  s += "</table>";
+  s += "</table></div>";
 
   s += "</div>";
   return s;
@@ -1078,7 +1137,7 @@ String buildCommonSection(uint8_t* buffer, size_t length)
 // Returns the SML-specific analysis section (no HTML head).
 String analyzeSML_section(uint8_t* buffer, size_t length)
 {
-  String s = "<div class='section'><h2>SML Raw Analysis</h2>";
+  String s = "<div class='card'><div class='card-title'>SML Raw Analysis</div>";
 
   int px = -1;
   for (size_t i = 0; i < (int)length - 4; i++)
@@ -1089,24 +1148,24 @@ String analyzeSML_section(uint8_t* buffer, size_t length)
       if (buffer[i]==0x1b && buffer[i+1]==0x1b && buffer[i+2]==0x1b && buffer[i+3]==0x1b && buffer[i+4]==0x1a) { sx=i; break; }
 
   if (px == -1 || sx == -1)
-    return s + "<p><font color='red'><strong>Error:</strong> Telegram incomplete (Prefix/Suffix missing).</font></p></div>";
+    return s + "<p class='fail'>&#10060; Telegram incomplete &mdash; Prefix/Suffix missing.</p></div>";
 
   int      crcLen  = (sx + 6) - px;
   uint16_t compCRC = calculateSML_CRC16(&buffer[px], crcLen);
   uint16_t recvCRC = (buffer[sx + 6] << 8) | buffer[sx + 7];
   bool     crcOk   = (compCRC == recvCRC);
 
-  s += "<h3>Telegram Status</h3>";
-  s += "<table><tr><th>Parameter</th><th>Value</th></tr>";
+  s += "<p style='font-size:.84rem;font-weight:600;color:#1a3799;margin-bottom:.3rem;'>Telegram Status</p>";
+  s += "<div class='tbl'><table><tr><th>Parameter</th><th>Value</th></tr>";
   s += "<tr><td>Index (Start/End)</td><td>" + String(px) + " / " + String(sx) + "</td></tr>";
   s += "<tr><td>Checksum (CRC)</td><td>";
   if (recvCRC == 0)   s += "Meter sent no CRC (0x0000)";
-  else if (crcOk)     s += "0x" + String(recvCRC, HEX) + " (Valid)";
-  else                s += "<font color='red'>0x" + String(recvCRC, HEX) + " (Invalid! Expected: 0x" + String(compCRC, HEX) + ")</font>";
-  s += "</td></tr></table>";
+  else if (crcOk)     s += "<span class='ok'>&#9989; 0x" + String(recvCRC, HEX) + " (Valid)</span>";
+  else                s += "<span class='fail'>&#10060; 0x" + String(recvCRC, HEX) + " (Invalid &mdash; expected: 0x" + String(compCRC, HEX) + ")</span>";
+  s += "</td></tr></table></div>";
 
-  s += "<h3>Registers (from raw binary)</h3>";
-  s += "<table><tr><th>OBIS Code</th><th>Index</th><th>Length</th><th>Reading</th></tr>";
+  s += "<p style='font-size:.84rem;font-weight:600;color:#1a3799;margin:.7rem 0 .3rem;'>Registers (from raw binary)</p>";
+  s += "<div class='tbl'><table><tr><th>OBIS Code</th><th>Index</th><th>Length</th><th>Reading</th></tr>";
   uint8_t obis180[] = {0x01,0x00,0x01,0x08,0x00,0xff};
   uint8_t obis280[] = {0x01,0x00,0x02,0x08,0x00,0xff};
   uint8_t obis170[] = {0x01,0x00,0x01,0x07,0x00,0xff};
@@ -1117,14 +1176,14 @@ String analyzeSML_section(uint8_t* buffer, size_t length)
   s += getObisRow(buffer, px, sx, obis170, "Power Import (1.7.0)", "W",  1.0);
   s += getObisRow(buffer, px, sx, obis270, "Power Export (2.7.0)", "W",  1.0);
   s += getObisRow(buffer, px, sx, obis167, "Net Power (16.7.0)",   "W",  1.0);
-  s += "</table></div>";
+  s += "</table></div></div>";
   return s;
 }
 
 // Returns the IEC-specific analysis section (no HTML head).
 String analyzeIEC_section(uint8_t* buffer, size_t length)
 {
-  String s = "<div class='section'><h2>IEC 62056-21 Raw Analysis</h2>";
+  String s = "<div class='card'><div class='card-title'>IEC 62056-21 Raw Analysis</div>";
 
   static char telegram_str[TELEGRAM_LENGTH + 1];
   size_t copy_len = (length <= TELEGRAM_LENGTH) ? length : TELEGRAM_LENGTH;
@@ -1132,7 +1191,7 @@ String analyzeIEC_section(uint8_t* buffer, size_t length)
   telegram_str[copy_len] = '\0';
 
   if (telegram_str[0] != '/')
-    return s + "<p><font color='red'><strong>Error:</strong> No IEC telegram in buffer.</font></p></div>";
+    return s + "<p class='fail'>&#10060; No IEC telegram in buffer.</p></div>";
 
   auto parseObis = [&](const char* label, float* out) -> bool {
     const char *p = strstr(telegram_str, label);
@@ -1156,29 +1215,43 @@ String analyzeIEC_section(uint8_t* buffer, size_t length)
     { "1-0:16.7.0", "Net Power (16.7.0)",   "kW"  },
   };
 
-  s += "<h3>Registers (from telegram text)</h3>";
-  s += "<table><tr><th>OBIS Code</th><th>Reading</th></tr>";
+  s += "<p style='font-size:.84rem;font-weight:600;color:#1a3799;margin-bottom:.3rem;'>Registers (from telegram text)</p>";
+  s += "<div class='tbl'><table><tr><th>OBIS Code</th><th>Reading</th></tr>";
   for (auto& r : regs) {
     float val = 0.0f;
     if (parseObis(r.label, &val))
       s += "<tr><td>" + String(r.name) + "</td><td><strong>" + String(val, 3) + " " + r.unit + "</strong></td></tr>";
     else
-      s += "<tr><td>" + String(r.name) + "</td><td>n/a</td></tr>";
+      s += "<tr><td>" + String(r.name) + "</td><td style='color:#aaa;'>n/a</td></tr>";
   }
-  s += "</table></div>";
+  s += "</table></div></div>";
   return s;
 }
 
 String analyzeTelegram(uint8_t* buffer, size_t length)
 {
-  String s = "<meta charset='UTF-8'>";
-  s += String(HTML_STYLE);
-  s += "<title>Telegram Analysis</title>";
+  String s;
+  s.reserve(4000);
+  s += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Telegram Analysis</title>)rawliteral";
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+)rawliteral";
   s += buildCommonSection(buffer, length);
-  if (length > 0 && buffer[0] == '/')
-    s += analyzeIEC_section(buffer, length);
-  else
-    s += analyzeSML_section(buffer, length);
+  if (LastMeterValue.timestamp > 0) {
+    if (length > 0 && buffer[0] == '/')
+      s += analyzeIEC_section(buffer, length);
+    else
+      s += analyzeSML_section(buffer, length);
+  }
+  s += "</body></html>";
   return s;
 }
 
@@ -1207,10 +1280,26 @@ void Webserver_ShowMeterValues()
   server.send(200, "text/html", "");
 
   // Header
-  String s = "<html><head><title>SMGWLite - Meter Values</title>" + String(HTML_STYLE) + "</head><body>";
-  s += "<p>Entry size: " + String(MeterValue_EntrySize()) + " bytes | ";
-  s += MeterValue_BuildFieldsParam() + "</p>";
-  s += "<table border='1'><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Timestamp</th><th>Consumption (1.8.0)</th>";
+  String s;
+  s.reserve(1000);
+  s = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Meter Values</title>)rawliteral";
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card" style="max-width:800px;">
+<div class="card-title">Meter Values</div>
+<p class="hint">Entry size: )rawliteral";
+  s += String(MeterValue_EntrySize()) + " bytes | ";
+  s += MeterValue_BuildFieldsParam();
+  s += R"rawliteral(</p>
+<table><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Unix</th><th>Consumption (1.8.0)</th>)rawliteral";
   if (config_temperature_enabled) s += "<th>Temperature</th>";
   if (config_solar_enabled)       s += "<th>myStrom (solar)</th>";
   if (config_obis280_enabled)     s += "<th>Infeed (2.8.0)</th>";
@@ -1238,7 +1327,7 @@ void Webserver_ShowMeterValues()
     server.sendContent(row);
   }
 
-  server.sendContent("</table></body></html>");
+  server.sendContent("</table></div></body></html>");
   server.sendContent(""); // signal end of chunked response
 }
 
@@ -1271,14 +1360,35 @@ void Webserver_SetCert()
     file.close();
   }
 
-  String hint = stored.length() == 0
-    ? "<p style='font-size:.85rem;color:#888;margin-top:.5rem;'>Leave empty to use the onboard ISRG Root X1 cert (valid until 2035).</p>"
-    : "";
+  String page;
+  page.reserve(2000);
+  page += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; SSL Certificate</title>)rawliteral";
+  page += HTML_STYLE_MODERN;
+  page += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card">
+  <div class="card-title">SSL Certificate</div>
+  <form action="/upload" method="POST">
+    <textarea name="cert" rows="12">)rawliteral";
+  page += stored;
+  page += R"rawliteral(</textarea>
+    <p class="hint">Leave empty to use the onboard ISRG Root X1 cert (valid until 2035).</p>
+    <div class="btns" style="margin-top:.7rem;">
+      <button class="btn" type="submit">Save</button>
+      <a class="btn btn-s" href="/sysinfo">Cancel</a>
+    </div>
+  </form>
+</div>
+</body></html>)rawliteral";
 
-  server.send(200, "text/html",
-    "<form action='/upload' method='POST'>"
-    "<textarea name='cert' rows='10' cols='80'>" + stored + "</textarea>"
-    "<br><input type='submit'>" + hint + "</form>");
+  server.send(200, "text/html", page);
 }
 
 void Webserver_TestBackendConnection()
@@ -1289,34 +1399,56 @@ void Webserver_TestBackendConnection()
   String certEnd = certLen > 30 ? String(FullCert).substring(certLen - 30) : "";
   certEnd.replace("<", "&lt;");
 
-  WiFiClientSecure client;
-  client.setCACert(FullCert);
-  String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body><div class='section'>";
-
   time_t now = (time_t)Time_getEpochTime();
   char timeBuf[32];
   struct tm* ti = gmtime(&now);
   strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S UTC", ti);
 
-  res += "<b>Cert debug:</b><br>";
-  res += "Length: " + String(certLen) + "<br>";
-  res += "Start:  <code>" + certStart + "</code><br>";
-  res += "End:    <code>" + certEnd   + "</code><br>";
-  res += "Device time: <code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")<br><br>";
+  // Build page header with cert debug info
+  String pageHead;
+  pageHead.reserve(2000);
+  pageHead += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Backend Test</title>)rawliteral";
+  pageHead += HTML_STYLE_MODERN;
+  pageHead += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card">
+  <div class="card-title">Backend Connection Test</div>)rawliteral";
+  pageHead += "<div class='kv'><span class='kl'>Cert length</span>" + String(certLen) + "</div>";
+  pageHead += "<div class='kv'><span class='kl'>Cert start</span><code>" + certStart + "</code></div>";
+  pageHead += "<div class='kv'><span class='kl'>Cert end</span><code>" + certEnd + "</code></div>";
+  pageHead += "<div class='kv'><span class='kl'>Device time</span><code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")</div>";
+
+  const String pageFoot = "</div></body></html>";
+
+  WiFiClientSecure client;
+  client.setCACert(FullCert);
+
+  String rows = "";
 
   if (client.connect(backend_host.c_str(), 443))
   {
-    res += "&#9989; Host reachable,<br>&#9989; Cert correct";
+    rows += "<div class='kv'><span class='kl'>Host</span><span class='ok'>&#9989; Reachable</span></div>";
+    rows += "<div class='kv'><span class='kl'>Certificate</span><span class='ok'>&#9989; Valid</span></div>";
   }
   else
   {
     client.setInsecure();
     if (client.connect(backend_host.c_str(), 443))
-      res += "&#9989; Host reachable<br>&#10060; Cert not working.";
+    {
+      rows += "<div class='kv'><span class='kl'>Host</span><span class='ok'>&#9989; Reachable</span></div>";
+      rows += "<div class='kv'><span class='kl'>Certificate</span><span class='fail'>&#10060; Not working</span></div>";
+    }
     else
     {
-      res += "Host not reachable.";
-      server.send(200, "text/html", res);
+      rows += "<div class='kv last'><span class='kl'>Host</span><span class='fail'>&#10060; Not reachable</span></div>";
+      server.send(200, "text/html", pageHead + rows + pageFoot);
       return;
     }
   }
@@ -1330,17 +1462,23 @@ void Webserver_TestBackendConnection()
   unsigned long timeout = millis();
   while (client.available() == 0)
   {
-    if (millis() - timeout > 5000) { res += "<br>No response from server."; server.send(200, "text/html", res); return; }
+    if (millis() - timeout > 5000)
+    {
+      rows += "<div class='kv last'><span class='kl'>Response</span><span class='fail'>Timeout</span></div>";
+      server.send(200, "text/html", pageHead + rows + pageFoot);
+      return;
+    }
   }
 
   String response = "";
   while (client.available()) response += client.readString();
 
-  if (response.indexOf("200") != -1) res += "<br>&#9989; ID & Token valid.";
-  else                                res += "<br>&#10060; ID & Token invalid!";
+  if (response.indexOf("200") != -1)
+    rows += "<div class='kv last'><span class='kl'>ID &amp; Token</span><span class='ok'>&#9989; Valid</span></div>";
+  else
+    rows += "<div class='kv last'><span class='kl'>ID &amp; Token</span><span class='fail'>&#10060; Invalid</span></div>";
 
-  res += "</div></body></html>";
-  server.send(200, "text/html", res);
+  server.send(200, "text/html", pageHead + rows + pageFoot);
 }
 
 void Webserver_HandleCertUpload()
@@ -1946,14 +2084,57 @@ void Webserver_UrlConfig()
 
   // OTA update handler
   server.on("/update", HTTP_GET, []() {
+    String page;
+    page.reserve(1200);
+    page += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Firmware Update</title>)rawliteral";
+    page += HTML_STYLE_MODERN;
+    page += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card">
+  <div class="card-title">Firmware Update</div>
+  <p style="font-size:.84rem;color:#444;margin-bottom:.8rem;">W&auml;hle eine <code>.bin</code>-Datei aus und klicke auf &bdquo;Update starten&ldquo;. Das Ger&auml;t startet nach dem Update automatisch neu.</p>
+  <form method="POST" action="/update" enctype="multipart/form-data">
+    <input type="file" name="update" accept=".bin" style="font-size:.85rem;margin-bottom:.8rem;display:block;width:100%;">
+    <div class="btns">
+      <button class="btn" type="submit">Update starten</button>
+      <a class="btn btn-s" href="/sysinfo">Abbrechen</a>
+    </div>
+  </form>
+</div>
+</body></html>)rawliteral";
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html",
-      "<form method='POST' action='/update' enctype='multipart/form-data'>"
-      "<input type='file' name='update'><input type='submit' value='Update'></form>");
+    server.send(200, "text/html", page);
   });
   server.on("/update", HTTP_POST, []() {
+    String result = Update.hasError() ? "Update fehlgeschlagen." : "Update erfolgreich &ndash; Neustart&hellip;";
+    String page;
+    page.reserve(800);
+    page += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Update</title>)rawliteral";
+    page += HTML_STYLE_MODERN;
+    page += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<div class="card">
+  <div class="card-title">Firmware Update</div>
+  <p style="font-size:.95rem;font-weight:600;color:#1a1a1a;">)rawliteral";
+    page += result;
+    page += R"rawliteral(</p>
+</div>
+</body></html>)rawliteral";
     server.sendHeader("Connection", "close");
-    server.send(200, "text/plain", (Update.hasError()) ? "Update Failed" : "Update Successful. Rebooting...");
+    server.send(200, "text/html", page);
     ESP.restart();
   }, []() {
     HTTPUpload& upload = server.upload();
@@ -2076,6 +2257,57 @@ void setup()
   xTaskCreate(telegramTask, "TelegramBot", 2048, NULL, 0, NULL);
 }
 
+class SmartMeterHtmlFormatProvider : public iotwebconf::HtmlFormatProvider
+{
+protected:
+  String getStyleInner() override {
+    return
+      "*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}"
+      "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+        "background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;"
+        "align-items:center;padding:1.5rem 1rem 3rem;gap:.8rem;color:#1a1a1a;}"
+      ".logo{font-size:1.4rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;}"
+      ".back{color:#1a3799;font-size:.85rem;text-decoration:none;width:100%;max-width:500px;}"
+      ".back:hover{text-decoration:underline;}"
+      ".card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;"
+        "padding:1.1rem 1.3rem;width:100%;max-width:500px;}"
+      "div{padding:0;}"
+      "input,select{padding:.55rem .7rem;border:1px solid #d0d8f0;border-radius:8px;"
+        "font-size:.88rem;width:100%;background:#fff;margin-top:.3rem;box-sizing:border-box;}"
+      "input:focus,select:focus{outline:2px solid #1a3799;border-color:#1a3799;}"
+      "input[type=checkbox]{width:auto;margin:8px 6px;transform:scale(1.4);}"
+      "label{font-size:.84rem;font-weight:500;color:#444;display:block;margin-top:.8rem;}"
+      "fieldset{border:1px solid #d0d8f0;border-radius:10px;padding:.8rem 1rem 1rem;"
+        "margin-bottom:.8rem;}"
+      "legend{font-size:.9rem;font-weight:700;color:#1a3799;padding:0 .4rem;}"
+      "button{padding:.68rem;border-radius:8px;background:#1a3799;color:#fff;"
+        "font-size:.88rem;font-weight:700;border:none;cursor:pointer;width:100%;"
+        "margin-top:1rem;min-height:44px;}"
+      "button:hover{background:#142b7a;}"
+      ".de{background:#fff3f3;border:1px solid #ffcccc;border-radius:6px;padding:.4rem;"
+        "margin-top:.3rem;}"
+      ".em{font-size:.78rem;color:#c62828;}"
+      ".c{text-align:center;}"
+      "a{color:#1a3799;text-decoration:none;}"
+      "a:hover{text-decoration:underline;}";
+  }
+  String getBodyInner() override {
+    return "<div class='logo'>&#9889; SmartMeterLite</div>"
+           "<a class='back' href='/sysinfo'>&#8592; Zur&uuml;ck</a>"
+           "<div class='card'>";
+  }
+  String getFormEnd() override {
+    return "<button type='submit'>Speichern</button></form>";
+  }
+  String getFormSaved() override {
+    return "<div style='font-size:.9rem;color:#2e7d32;font-weight:600;padding:.5rem 0;'>"
+           "&#9989; Konfiguration gespeichert &ndash; <a href='/'>Zur Startseite</a></div>";
+  }
+  String getEnd() override { return "</div></body></html>"; }
+};
+
+SmartMeterHtmlFormatProvider customHtmlFormatProvider;
+
 void Param_setup()
 {
   groupTelegram.addItem(&activate_IEC_Parser_object);
@@ -2117,6 +2349,7 @@ void Param_setup()
   iotWebConf.getApTimeoutParameter()->visible = true;
 
   iotWebConf.skipApStartup();
+  iotWebConf.setHtmlFormatProvider(&customHtmlFormatProvider);
   iotWebConf.init();
   iotWebConf.setApTimeoutMs(30000);
 }
@@ -3007,64 +3240,72 @@ String Time_formatUptime()
 void Webserver_HandleSysInfo()
 {
   String s;
-  s.reserve(8000);
+  s.reserve(9000);
   s += R"rawliteral(<!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>)rawliteral";
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>)rawliteral";
   s += thingName;
   s += R"rawliteral(</title>)rawliteral";
-  s += HTML_STYLE;
-  s += R"rawliteral(</head><body>
-<p><a href='/'>&#8592; Home</a></p>
-<p>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.</p>
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/">&#8592; Home</a>
 
-<h2>Last Meter Value</h2>
-<p><small>Green = included in wire format</small></p>
-<table>)rawliteral";
+<a class="cfg-link" href="config">
+<span class="cfg-icon">&#9881;</span>
+<span class="cfg-text">
+<strong>Konfigurationsseite</strong>
+<small>Werte mit &#9999; k&ouml;nnen dort ge&auml;ndert werden</small>
+</span>
+</a>
+
+<div class="card">
+<div class="card-title">Last Meter Value <small style="font-weight:400;color:#888;">&mdash; green = in wire format</small></div>
+<div class="tbl"><table>)rawliteral";
   {
-    // W = in wire (light green), N = not in wire
-    const char* W = " style='background:#e6ffe6'";
+    const char* W = " style='background:#d4edda'";
     const char* N = "";
     const char* w280  = config_obis280_enabled     ? W : N;
     const char* wTemp = config_temperature_enabled ? W : N;
     const char* wSol  = config_solar_enabled        ? W : N;
-    s += String("<tr><th") + N    + ">Time</th>"
-       + "<th" + N    + ">Consumption (1.8.0)</th>"
-       + "<th" + N  + ">Infeed (2.8.0)</th>"
-       + "<th" + N + ">Temperature</th>"
-       + "<th" + N  + ">MyStrom (solar)</th></tr>";
-    s += String("<tr><td") + W    + ">" + String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago</td>"
+    s += "<tr><th>Time</th><th>1.8.0</th><th>2.8.0</th><th>Temp</th><th>MyStrom</th></tr>";
+    s += String("<tr><td") + W    + ">" + String(Time_getEpochTime() - LastMeterValue.timestamp) + "s ago</td>"
        + "<td" + W    + ">" + String(LastMeterValue.meter_value_180) + "</td>"
        + "<td" + w280  + ">" + String(LastMeterValue.meter_value_280) + "</td>"
-       + "<td" + wTemp + ">" + String(LastMeterValue.temperature / 100.0) + " \xc2\xb0""C</td>"
+       + "<td" + wTemp + ">" + String(LastMeterValue.temperature / 100.0) + "\xc2\xb0""C</td>"
        + "<td" + wSol  + ">" + String(LastMeterValue.solar) + "</td></tr>";
   }
-  s += R"rawliteral(</table>
+  s += R"rawliteral(</table></div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="StoreMeterValue">Store Meter Value Now (TAF6)</a>
+<a class="btn btn-s" href="showLastMeterValue">Last Value (JSON)</a>
+</div>
+</div>
 
-<p><a href='StoreMeterValue'>Store Meter Value Now (Taf6)</a></p>
-
-<h3>Meter Value Buffer</h3>
-<ul>
-  <li>Used / Size: )rawliteral";
+<div class="card">
+<div class="card-title">Meter Value Buffer</div>
+<div class="kv"><span class="kl">Used / Size</span>)rawliteral";
   s += String(MeterValue_Num()) + " / " + String(Meter_Value_Buffer_Size);
   {
     int cfgKB = atoi(Meter_Value_Buffer_Size_Char);
-    size_t budget = (cfgKB <= 0) ? BUFFER_REFERENCE_BYTES : (size_t)cfgKB * 1024;
     s += meter_value_buffer_is_auto
-         ? " (auto &mdash; " + String(BUFFER_REFERENCE_BYTES / 1024) + " KB reference budget)"
-         : " (manual &mdash; " + String(cfgKB) + " KB budget)";
-    s += "<br><small>Budget: " + String(budget) + " bytes &nbsp;|&nbsp; "
-         + String(MeterValue_EntrySize()) + " bytes/slot &nbsp;&rarr;&nbsp; "
-         + String(MeterValue_slots_from_budget(budget)) + " slots</small>";
+         ? " <small>(auto &mdash; " + String(BUFFER_REFERENCE_BYTES / 1024) + " KB reference budget)</small>"
+         : " <small>(manual &mdash; " + String(cfgKB) + " KB budget)</small>";
   }
-  s += R"rawliteral(</li>
-  <li>Slots with current budget: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Budget</span>)rawliteral";
   {
-    // Calculate maximum possible slots for this field configuration given
-    // the current free heap. Shown as a capacity reference for the user.
+    int cfgKB = atoi(Meter_Value_Buffer_Size_Char);
+    size_t budget = (cfgKB <= 0) ? BUFFER_REFERENCE_BYTES : (size_t)cfgKB * 1024;
+    s += String(budget) + " bytes &nbsp;|&nbsp; " + String(MeterValue_EntrySize()) + " bytes/slot &nbsp;&rarr;&nbsp; " + String(MeterValue_slots_from_budget(budget)) + " slots";
+  }
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Capacity (free heap)</span>)rawliteral";
+  {
     int maxSlots = MeterValue_calc_max_slots_for_display();
     int maxMinutes_taf7  = (maxSlots > 0 && atoi(taf7_param)  > 0) ? (maxSlots * atoi(taf7_param))  : 0;
     int maxMinutes_taf14 = (maxSlots > 0 && atoi(taf14_param) > 0) ? (maxSlots * atoi(taf14_param) / 60) : 0;
@@ -3078,214 +3319,195 @@ void Webserver_HandleSysInfo()
       if (d > 0) s += String(d) + "d";
       s += String(h) + "h" + String(m) + "min"; }
   }
-  s += R"rawliteral(</li>
-  <li>Wire format: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Wire format</span>)rawliteral";
   s += MeterValue_BuildFieldsParam();
-  s += R"rawliteral(</li>
-  <li>Entry size: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Entry size</span>)rawliteral";
   s += String(MeterValue_EntrySize()) + " bytes";
-  s += R"rawliteral(</li>
-  <li>Free heap: )rawliteral";
-  s += String(ESP.getFreeHeap() / 1024) + " KB  (buffer uses " + String((size_t)Meter_Value_Buffer_Size * MeterValue_EntrySize() / 1024) + " KB)";
-  s += R"rawliteral(</li>
-  <li>Temperature in buffer: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Free heap</span>)rawliteral";
+  s += String(ESP.getFreeHeap() / 1024) + " KB <small>(buffer uses " + String((size_t)Meter_Value_Buffer_Size * MeterValue_EntrySize() / 1024) + " KB)</small>";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Temperature</span>)rawliteral";
   s += String(config_temperature_enabled ? "yes" : "no");
-  s += R"rawliteral(</li>
-  <li>MyStrom / Solar in buffer: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">MyStrom / Solar</span>)rawliteral";
   s += String(config_solar_enabled ? "yes" : "no");
-  s += R"rawliteral(</li>
-  <li>Infeed (2.8.0) in buffer: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Infeed (2.8.0)</span>)rawliteral";
   s += String(config_obis280_enabled ? "yes" : "no");
-  s += R"rawliteral(</li>
-  <li>i override: )rawliteral";
-  s += String(meter_value_override_i);
-  s += R"rawliteral(</li>
-  <li>i non override: )rawliteral";
-  s += String(meter_value_NON_override_i);
-  s += R"rawliteral(</li>
-  <li>Buffer Overflow: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">i override / non-override</span>)rawliteral";
+  s += String(meter_value_override_i) + " / " + String(meter_value_NON_override_i);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Buffer Overflow</span>)rawliteral";
   s += String(meter_value_buffer_overflow);
-  s += R"rawliteral(</li>
-  <li>Buffer Full: )rawliteral";
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Buffer Full</span>)rawliteral";
   s += String(meter_value_buffer_full);
-  s += R"rawliteral(</li>
-  <li><a href='MeterValue_Num2'>Calculate # Meter Values (alternative)</a></li>
-  <li><a href='showMeterValues'>Show Meter Values</a></li>
-  
-)rawliteral";
-
-  {
-    // In auto mode (config value == 0) the buffer size is calculated from the
-    // heap at init time, so it will never equal the config value of 0.
-    // Only show the "buffer size changed" warning when the user has set a
-    // manual slot count AND it differs from what is currently allocated.
-    // In KB-budget mode there is no "size changed" scenario: the slot count
-    // always matches the budget / entry_size. The warning is only relevant if
-    // the user switches between auto and manual, which triggers a re-init via
-    // Param_configSaved() automatically. So we never need to show it.
-    bool sizeChanged = false; // budget-based sizing always matches
-
-    if (sizeChanged)
-    {
-      s += "<li><font color='red'>Buffer Size changed, please ";
-      if (MeterValue_Num() > 0)
-        s += "<a href='sendMeterValues_Task'>Send Meter Values to Backend</a> to not lose (" + String(MeterValue_Num()) + ") values and ";
-      s += "<a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></font></li>\n";
-    }
-    else
-    {
-      s += "<li><a href='MeterValue_init_Buffer'>Re-Init Meter Value Buffer</a></li>\n";
-    }
-  }
-
-  s += R"rawliteral(  <li><a href='showLastMeterValue'>Show Last Meter Value (JSON)</a></li>
-</ul>
-
-<h3>Telegram Parse Config</h3>
-<ul>
-  <li><i>Protocol (auto-detected):</i> )rawliteral";
-  s += Telegram_protocol_to_string(last_detected_protocol);
-  s += R"rawliteral(</li>
-  <li><a href='showTelegram'>Show Telegram</a> (<a href='showTelegramRaw'>Raw</a>)</li>
-  <li><a href='showTelegramAnalysis'>Show Telegram Analysis</a></li>
-</ul>
-
-<div class="section">
-<h3>Backend Config</h3>
-<ul>
-  <li><i>Backend Endpoint:</i> )rawliteral";
-  s += backend_endpoint;
-  s += R"rawliteral(</li>
-  <li>Host: )rawliteral";
-  s += backend_host;
-  s += R"rawliteral(</li>
-  <li>Path: )rawliteral";
-  s += backend_path;
-  s += R"rawliteral(</li>
-  <li><i>Backend Call Minute:</i> )rawliteral";
-  s += String(atoi(backend_call_minute));
-  s += R"rawliteral(</li>
-  <li><i>Backend ID:</i> )rawliteral";
-  s += backend_ID;
-  s += R"rawliteral(</li>
-  <li><i>Use SSL Cert:</i> )rawliteral";
-  s += (UseSslCert_object.isChecked() ? "true" : "false");
-  s += R"rawliteral(</li>
-
-  <li><a href='setCert'>Set Cert</a></li>
-  <li><a href='testBackendConnection'>Test Backend Connection</a></li>
-  <li>Last Backend Call ago (min): )rawliteral";
-  s += String((millis() - last_call_backend) / 60000);
-  s += R"rawliteral(</li>
-  <li>Static Delay: )rawliteral";
-  s += String(staticDelay);
-  s += R"rawliteral( s</li>
-  <li><a href='sendLog_Task'>Send Log Files to backend</a></li>
-  <li><a href='sendMeterValues_Task'>Send Meter Values to backend</a></li>
-  <li><a href='sendboth_Task'>Send Both to backend</a></li>
-</ul>
+  s += R"rawliteral(</div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="showMeterValues">Show Meter Values</a>
+<a class="btn btn-s" href="MeterValue_Num2">Count (alternative)</a>
+</div>
 </div>
 
-<h3>Taf Config</h3>
-<ul>
-  <li><i>Taf 7:</i> )rawliteral";
-  s += (taf7_b_object.isChecked() ? "activated" : "not activated");
-  s += R"rawliteral(</li>
-  <li><i>Taf7 minute param:</i> )rawliteral";
-  s += String(atoi(taf7_param));
-  s += R"rawliteral(</li>
-  <li><i>Taf 14:</i> )rawliteral";
-  s += (taf14_b_object.isChecked() ? "activated" : "not activated");
-  s += R"rawliteral(</li>
-  <li><i>Taf14 Interval:</i> )rawliteral";
-  s += String(atoi(taf14_param));
-  s += R"rawliteral(</li>
-</ul>
-
-<h3>Additional Meters</h3>
-<ul>
-  <li><i>Temperature Sensor:</i> )rawliteral";
-  s += (temperature_object.isChecked() ? "activated" : "deactivated");
-  s += R"rawliteral(</li>
-  <li><i>MyStrom (solar):</i> )rawliteral";
-  s += (mystrom_PV_object.isChecked() ? "activated" : "deactivated");
-  s += R"rawliteral(</li>
-  <li><i>MyStrom IP:</i> )rawliteral";
-  s += mystrom_PV_IP;
-  s += R"rawliteral(</li>
-</ul>
-
-<h3>Helpers</h3>
-<ul>
-  <li><a href='PinAssistant'>PIN Assistant</a></li>
-  <li><a href='PinAssistantDeluxe'>PIN Assistant Deluxe</a></li>
-  <li><i>Set Device Offline:</i> )rawliteral";
-  s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
-  s += R"rawliteral(</li>
-  <li><i>Get Values from other SMGWLite:</i> )rawliteral";
-  s += (DebugFromOtherClient_object.isChecked() ? "activated" : "deactivated");
-  s += R"rawliteral(</li>
-  <li><i>Remote Client IP:</i> )rawliteral";
-  s += String(DebugMeterValueFromOtherClientIP);
-  s += R"rawliteral(</li>
-</ul>
-
-<h3>System Info</h3>
-<ul>
-  <li>Meter Model: )rawliteral";
-  s += meter_model.isEmpty() ? "unknown" : meter_model;
-  s += R"rawliteral(</li>
-  <li><i>LED blink:</i> )rawliteral";
-  s += (led_blink_object.isChecked() ? "activated" : "deactivated");
-  s += R"rawliteral(</li>
-  <li>Watermark Main Task: )rawliteral";
-  s += String(uxTaskGetStackHighWaterMark(NULL));
-  s += R"rawliteral(</li>
-  <li>Watermark Meter Values: )rawliteral";
-  s += String(watermark_meter_buffer);
-  s += R"rawliteral(</li>
-  <li>Watermark Logs: )rawliteral";
-  s += String(watermark_log_buffer);
-  s += R"rawliteral(</li>
-  <li>Watermark Telegram: )rawliteral";
-  s += String(watermark_telegram);
-  s += R"rawliteral(</li>
-  <li>Uptime: )rawliteral";
-  s += Time_formatUptime();
-  s += R"rawliteral(</li>
-)rawliteral";
-
-#if defined(ESP32)
-  s += "<li>Reset Reason: " + Log_get_reset_reason() + "</li>\n";
-#elif defined(ESP8266)
-  s += "<li>Reset Reason: " + String(ESP.getResetReason()) + " / " + String(ESP.getResetInfo()) + "</li>\n";
-#endif
-
-  s += R"rawliteral(  <li>System time (UTC): )rawliteral";
-  s += String(Time_getFormattedTime()) + " / " + String(Time_getEpochTime());
-  s += R"rawliteral(</li>
-  <li>Build Time: )rawliteral";
-  s += String(BUILD_TIMESTAMP);
-  s += R"rawliteral(</li>
-  <li>Free Heap: )rawliteral";
-  s += String(ESP.getFreeHeap());
-  s += R"rawliteral(</li>
-  <li>Log Buffer Length (max): )rawliteral";
-  s += String(LOG_BUFFER_SIZE);
-  s += R"rawliteral(</li>
-  <li><a href='update'>FW Update</a></li>
-  <li><a href='restart'>Restart</a></li>
-</ul>
-
-<h3>Log Buffer (last 10 / index )rawliteral";
-  s += String(logIndex);
-  s += R"rawliteral()</h3>
-<ul>
-  <li><a href='showLogBuffer'>Show full Log</a></li>
-  <li><a href='resetLogBuffer'>Reset Log</a></li>
-  <div class="log-section">)rawliteral";
-  s += Log_BufferToString(10);
+<div class="card">
+<div class="card-title">Telegram Parse Config</div>
+<div class="kv last"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
+  s += Telegram_protocol_to_string(last_detected_protocol);
   s += R"rawliteral(</div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="showTelegram">Show Telegram</a>
+<a class="btn btn-s" href="showTelegramRaw">Raw</a>
+<a class="btn btn-s" href="showTelegramAnalysis">Analysis</a>
+</div>
+</div>
+
+<div class="card">
+<div class="card-title">Backend Config</div>
+<div class="kv"><span class="kl e">Backend Endpoint</span>)rawliteral";
+  s += backend_endpoint;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Host</span>)rawliteral";
+  s += backend_host;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Path</span>)rawliteral";
+  s += backend_path;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">Call Minute</span>)rawliteral";
+  s += String(atoi(backend_call_minute));
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">Backend ID</span>)rawliteral";
+  s += backend_ID;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">Use SSL Cert</span>)rawliteral";
+  s += (UseSslCert_object.isChecked() ? "true" : "false");
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Last Call Ago</span>)rawliteral";
+  s += String((millis() - last_call_backend) / 60000) + " min";
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Static Delay</span>)rawliteral";
+  s += String(staticDelay) + " s";
+  s += R"rawliteral(</div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="setCert">Set Cert</a>
+<a class="btn btn-s" href="testBackendConnection">Test Connection</a>
+<a class="btn btn-s" href="sendLog_Task">Send Log</a>
+<a class="btn btn-s" href="sendMeterValues_Task">Send Meter Values</a>
+<a class="btn btn-s" href="sendboth_Task">Send Both</a>
+</div>
+</div>
+
+<div class="card">
+<div class="card-title">TAF Config</div>
+<div class="kv"><span class="kl e">TAF 7</span>)rawliteral";
+  s += (taf7_b_object.isChecked() ? "activated" : "not activated");
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">TAF 7 Minute</span>)rawliteral";
+  s += String(atoi(taf7_param));
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">TAF 14</span>)rawliteral";
+  s += (taf14_b_object.isChecked() ? "activated" : "not activated");
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl e">TAF 14 Interval</span>)rawliteral";
+  s += String(atoi(taf14_param));
+  s += R"rawliteral(</div>
+</div>
+
+<div class="card">
+<div class="card-title">Additional Meters &amp; Sensors</div>
+<div class="kv"><span class="kl e">Temperature Sensor</span>)rawliteral";
+  s += (temperature_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">MyStrom (solar)</span>)rawliteral";
+  s += (mystrom_PV_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl e">MyStrom IP</span>)rawliteral";
+  s += mystrom_PV_IP;
+  s += R"rawliteral(</div>
+</div>
+
+<div class="card">
+<div class="card-title">Helpers</div>
+<div class="kv"><span class="kl e">Set Device Offline</span>)rawliteral";
+  s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">Values from other SMGWLite</span>)rawliteral";
+  s += (DebugFromOtherClient_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl e">Remote Client IP</span>)rawliteral";
+  s += String(DebugMeterValueFromOtherClientIP);
+  s += R"rawliteral(</div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn" href="PinAssistant">PIN Assistant</a>
+<a class="btn" href="PinAssistantDeluxe">PIN Assistant Deluxe</a>
+</div>
+</div>
+
+<div class="card">
+<div class="card-title">System Info</div>
+<div class="kv"><span class="kl">Meter Model</span>)rawliteral";
+  s += meter_model.isEmpty() ? "unknown" : meter_model;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">LED Blink</span>)rawliteral";
+  s += (led_blink_object.isChecked() ? "activated" : "deactivated");
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Watermark Main</span>)rawliteral";
+  s += String(uxTaskGetStackHighWaterMark(NULL));
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Watermark Meter Values</span>)rawliteral";
+  s += String(watermark_meter_buffer);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Watermark Logs</span>)rawliteral";
+  s += String(watermark_log_buffer);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Watermark Telegram</span>)rawliteral";
+  s += String(watermark_telegram);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Uptime</span>)rawliteral";
+  s += Time_formatUptime();
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Reset Reason</span>)rawliteral";
+#if defined(ESP32)
+  s += Log_get_reset_reason();
+#elif defined(ESP8266)
+  s += String(ESP.getResetReason()) + " / " + String(ESP.getResetInfo());
+#endif
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">System Time (UTC)</span>)rawliteral";
+  s += String(Time_getFormattedTime()) + " / " + String(Time_getEpochTime());
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Build Time</span>)rawliteral";
+  s += String(BUILD_TIMESTAMP);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Free Heap</span>)rawliteral";
+  s += String(ESP.getFreeHeap());
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Log Buffer (max)</span>)rawliteral";
+  s += String(LOG_BUFFER_SIZE);
+  s += R"rawliteral(</div>
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="update">FW Update</a>
+<a class="btn btn-d" href="restart">Restart</a>
+</div>
+</div>
+
+<div class="card">
+<div class="card-title">Log Buffer <small style="font-weight:400;color:#888;">(last 10 / index )rawliteral";
+  s += String(logIndex);
+  s += R"rawliteral()</small></div>
+<div class="tbl">)rawliteral";
+  s += Log_BufferToString(10);
+  s += R"rawliteral(</div>)rawliteral";
+  s += R"rawliteral(
+<div class="btns" style="margin-top:.6rem;">
+<a class="btn btn-s" href="showLogBuffer">Show Full Log</a>
+<a class="btn btn-s" href="resetLogBuffer">Reset Log</a>
+</div>
+</div>
+
 </body></html>)rawliteral";
 
   server.send(200, "text/html", s);
@@ -3662,18 +3884,41 @@ void Webserver_HandleWifiStatus()
 void Webserver_ShowTelegram_Raw()
 {
   String s;
-  s.reserve(TELEGRAM_LENGTH * 12 + 512); // 3 textarea blocks * ~4 chars/byte + headers
-  s = "<div class='block'>Receive Buffer</div><textarea name='cert' rows='10' cols='80'>";
+  s.reserve(TELEGRAM_LENGTH * 12 + 1024);
+  s = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Telegram Raw</title>)rawliteral";
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card">
+<div class="card-title">Receive Buffer &ndash; Decimal</div>
+<textarea rows="8">)rawliteral";
   for (int i = 0; i < TELEGRAM_LENGTH; i++) { if (i > 0) s += " "; s += String(telegram_receive_buffer[i]); }
-  s += "</textarea><br><br><div class='block'>Receive Buffer Hex</div><textarea name='cert' rows='10' cols='80'>";
+  s += R"rawliteral(</textarea>
+</div>
+<div class="card">
+<div class="card-title">Receive Buffer &ndash; Hex</div>
+<textarea rows="8">)rawliteral";
   for (int i = 0; i < TELEGRAM_LENGTH; i++) { if (i > 0) s += " "; s += String(telegram_receive_buffer[i], HEX); }
-  s += "</textarea><br><br><div class='block'>Receive Buffer ASCII</div><textarea name='cert' rows='10' cols='80'>";
+  s += R"rawliteral(</textarea>
+</div>
+<div class="card">
+<div class="card-title">Receive Buffer &ndash; ASCII</div>
+<textarea rows="8">)rawliteral";
   for (int i = 0; i < TELEGRAM_LENGTH; i++)
   {
     char c = (char)telegram_receive_buffer[i];
     s += (isPrintable(c) || c == '\n' || c == '\r') ? String(c) : ".";
   }
-  s += "</textarea>";
+  s += R"rawliteral(</textarea>
+</div>
+</body></html>)rawliteral";
   server.send(200, "text/html", s);
 }
 
@@ -3682,12 +3927,30 @@ void Webserver_ShowTelegram()
   if (iotWebConf.handleCaptivePortal()) return;
 
   String s;
-  s.reserve(TELEGRAM_LENGTH * 45 + 1024); // ~45 chars per table row + header overhead
-  s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>SMGWLite - Show Telegram</title>" + String(HTML_STYLE);
-  s += "<br>Last Byte received @ " + String(millis() - lastByteTime) + "ms ago<br>";
-  s += "<br>Last Complete Telegram @ " + String(timestamp_telegram) + " = " + Time_formatTimestamp(timestamp_telegram) + ": " + String(Time_getEpochTime() - timestamp_telegram) + "s old<br>";
-  s += "<table border=1><tr><th>Index</th><th>Receive Buffer</th></tr>";
+  s.reserve(TELEGRAM_LENGTH * 45 + 1500);
+  s = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Telegram</title>)rawliteral";
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card" style="max-width:420px;">
+<div class="card-title">Telegram</div>
+<div class="kv"><span class="kl">Last byte received</span>)rawliteral";
+  s += String(millis() - lastByteTime) + " ms ago";
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Last complete telegram</span>)rawliteral";
+  s += Time_formatTimestamp(timestamp_telegram) + " (" + String(Time_getEpochTime() - timestamp_telegram) + " s ago)";
+  s += R"rawliteral(</div>
+</div>
+<div class="card" style="max-width:420px;">
+<div class="card-title">Receive Buffer (Hex)</div>
+<div class="tbl"><table><tr><th>Index</th><th>Byte</th></tr>)rawliteral";
 
   String color;
   int signature_7101 = 9999;
@@ -3708,7 +3971,9 @@ void Webserver_ShowTelegram()
     else color = "";
     s += "<tr><td>" + String(i) + "</td><td " + String(color) + ">" + String(telegram_receive_buffer[i], HEX) + "</td></tr>";
   }
-  s += "</table></body></html>\n";
+  s += R"rawliteral(</table></div>
+</div>
+</body></html>)rawliteral";
   server.send(200, "text/html", s);
 }
 
