@@ -22,7 +22,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h> // This loads aliases for easier class names.
-#include <IotWebConfMultipleWifi.h>
 #include <SPIFFS.h>
 #if defined(ESP32)
 #include <WiFi.h>
@@ -74,6 +73,7 @@ const char wifiInitialApPassword[] = "password";
 // Copy src/wifi_credentials.h.example to src/wifi_credentials.h and fill in your values.
 // ---------------------------------------------------------------------------
 #include "wifi_credentials.h"
+#include "certs/isrg_root_x1.h"
 
 #define STRING_LEN 128
 #define ID_LEN 4
@@ -98,19 +98,14 @@ const char wifiInitialApPassword[] = "password";
 // If your circuit is active-high, change OPTICAL_FLASH_LED_ON to HIGH.
 // ---------------------------------------------------------------------------
 #define OPTICAL_FLASH_LED_ON  LOW   // level that lights up the IR LED
-#define OPTICAL_FLASH_MS      300   // pulse duration [ms]
+#define OPTICAL_FLASH_MS      300   // short pulse duration [ms]
+#define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
 
 // Telegram vars
-const uint8_t SML_SIGNATURE_START[] = {0x1b, 0x1b, 0x1b, 0x1b, 0x01, 0x01, 0x01, 0x01};
-const uint8_t SML_SIGNATURE_END[]   = {0x1b, 0x1b, 0x1b, 0x1b, 0x1a};
 #define TELEGRAM_LENGTH 1024
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegram in ms
-size_t TelegramSizeUsed = 0;                      // actual size of stored telegram
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
 size_t telegram_receive_bufferIndex = 0;          // position in serial data buffer
-bool readingExtraBytes = false;                   // reading additional bytes?
-uint8_t extraBytes[3];                            // additional bytes after end signature
-size_t extraIndex = 0;                            // index of additional bytes
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 unsigned long timestamp_telegram;                 // timestamp of telegram
 
@@ -146,6 +141,7 @@ bool MeterValue_trigger_non_override = false;
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
+unsigned long last_reconnect_attempt = 0;
 
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
@@ -189,7 +185,6 @@ int meter_value_override_i       = 0;
 // write pointer for non-override (TAF14) entries — grows downward from end
 int meter_value_NON_override_i   = Meter_Value_Buffer_Size - 1;
 
-float currentPower, LastPower = 0.0;
 
 int staticDelay = 0;
 
@@ -201,8 +196,11 @@ int cached_backend_call_minute = 2;
 
 // Backend vars
 bool call_backend_successfull = true;
+bool redirect_to_sysinfo = false;
+bool g_wifiSetupPending  = false;
+unsigned long g_apStopAt = 0;     // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
-unsigned long last_call_backend = 0;
+unsigned long last_call_backend = (unsigned long)-61000L;
 
 // Temperature vars
 #define ONE_WIRE_BUS 4
@@ -270,9 +268,12 @@ void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_splitHostAndPath(const String &url, String &host, String &path);
 void Webserver_HandleCertUpload();
 void Webserver_HandleRoot();
-void Webserver_LocationHrefHome(int delay = 0);
+void Webserver_HandleWifiSetup();
+void Webserver_HandleWifiStatus();
+void Webserver_HandleSysInfo();
+void Webserver_LocationHrefsysinfo(int delay = 0);
 void Webserver_SetCert();
-void Webserver_ShowCert();
+
 void Webserver_ShowLastMeterValue();
 void Webserver_ShowLogBuffer();
 void Webserver_ShowMeterValues();
@@ -325,16 +326,6 @@ char config_280_char[STRING_LEN];         // "true" when OBIS 2.8.0 field is sto
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::TextParameter
 
-iotwebconf::ChainedWifiParameterGroup chainedWifiParameterGroups[] = {
-  iotwebconf::ChainedWifiParameterGroup("wifi1")
-};
-
-iotwebconf::MultipleWifiAddition multipleWifiAddition(
-  &iotWebConf,
-  chainedWifiParameterGroups,
-  sizeof(chainedWifiParameterGroups) / sizeof(chainedWifiParameterGroups[0]));
-
-iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 IotWebConfParameterGroup groupTelegram      = IotWebConfParameterGroup("groupTelegram",      "Telegram Param");
 IotWebConfParameterGroup groupBackend       = IotWebConfParameterGroup("groupBackend",       "Backend Config");
@@ -343,7 +334,7 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys",           "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("activate IEC Parser (instead of SML)", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -779,6 +770,8 @@ String Log_StatusCodeToString(int statusCode)
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
+        case 4002: return "Meter values send failed (no HTTP 200)";
+        case 4003: return "Log send failed (no HTTP 200)";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
@@ -792,7 +785,7 @@ String Log_StatusCodeToString(int statusCode)
   }
   if (statusCode < 1000)
   {
-    return "# meter slot";
+    return "# meter slots to transfer";
   }
   return "Unknown status code";
 }
@@ -918,9 +911,9 @@ int MeterValue_Num2()
   return count;
 }
 
-void Webserver_LocationHrefHome(int delay)
+void Webserver_LocationHrefsysinfo(int delay)
 {
-  String call = "<meta http-equiv='refresh' content='" + String(delay) + ";url=/'>";
+  String call = "<meta http-equiv='refresh' content='" + String(delay) + ";url=/sysinfo'>";
   server.send(200, "text/html", call);
 }
 
@@ -969,6 +962,8 @@ String getObisRow(uint8_t* buffer, int prefix, int suffix, uint8_t* code, const 
   return "<tr><td>" + String(label) + "</td><td>–</td><td>–</td><td>n/a</td></tr>";
 }
 
+String meter_model = "";
+
 // Returns the "Parsed Values" section common to both protocols.
 // Shows LastMeterValue energy counters + instantaneous power fields.
 // For IEC: parses manufacturer code and meter ID from the first line.
@@ -993,7 +988,8 @@ String buildCommonSection(uint8_t* buffer, size_t length)
     static char firstLine[128];
     const char* src = (const char*)buffer;
     const char* eol = strstr(src, "\r\n");
-    size_t lineLen = eol ? min((size_t)(eol - src), sizeof(firstLine) - 1) : 0;
+    size_t rawLen = eol ? (size_t)(eol - src) : 0;
+    size_t lineLen = rawLen < sizeof(firstLine) - 1 ? rawLen : sizeof(firstLine) - 1;
     strncpy(firstLine, src, lineLen);
     firstLine[lineLen] = '\0';
 
@@ -1002,10 +998,12 @@ String buildCommonSection(uint8_t* buffer, size_t length)
     if (lineLen >= 4) {              // at minimum: '/' + 3 mfr chars
       strncpy(mfr, firstLine + 1, 3); mfr[3] = '\0';
       if (lineLen > 5) {             // skip '/' + 3 mfr + 1 baud char
-        strncpy(ident, firstLine + 5, min(lineLen - 5, sizeof(ident) - 1));
-        ident[min(lineLen - 5, sizeof(ident) - 1)] = '\0';
+        size_t identLen = lineLen - 5 < sizeof(ident) - 1 ? lineLen - 5 : sizeof(ident) - 1;
+        strncpy(ident, firstLine + 5, identLen);
+        ident[identLen] = '\0';
       }
     }
+    if (meter_model.isEmpty()) meter_model = String(mfr) + " " + String(ident);
     s += "<tr><td>Protocol</td><td>IEC 62056-21</td></tr>";
     s += "<tr><td>Manufacturer Code</td><td><strong>" + String(mfr)   + "</strong></td></tr>";
     s += "<tr><td>Meter Identifier</td><td><strong>"  + String(ident) + "</strong></td></tr>";
@@ -1030,13 +1028,16 @@ String buildCommonSection(uint8_t* buffer, size_t length)
             if ((tl & 0xF0) == 0x00 && (tl & 0x0F) > 1) {
               int len = (tl & 0x0F) - 1;
               if (j + len >= sx) break;
-              bool ascii = true;
-              for (int k = 0; k < len; k++)
-                if (buffer[j+1+k] < 0x20 || buffer[j+1+k] > 0x7E) { ascii = false; break; }
               meterId = "";
-              if (ascii) {
-                for (int k = 0; k < len; k++) meterId += (char)buffer[j+1+k];
-              } else {
+              // Look for 3 consecutive uppercase letters (manufacturer code)
+              for (int k = 0; k < len - 2; k++) {
+                uint8_t a = buffer[j+1+k], b = buffer[j+2+k], c = buffer[j+3+k];
+                if (a >= 'A' && a <= 'Z' && b >= 'A' && b <= 'Z' && c >= 'A' && c <= 'Z') {
+                  meterId = String((char)a) + String((char)b) + String((char)c);
+                  break;
+                }
+              }
+              if (meterId.isEmpty()) {
                 char hex[3];
                 for (int k = 0; k < len; k++) {
                   sprintf(hex, "%02X", buffer[j+1+k]);
@@ -1051,6 +1052,7 @@ String buildCommonSection(uint8_t* buffer, size_t length)
         }
       }
     }
+    if (meter_model.isEmpty() && meterId != "n/a") meter_model = meterId;
     s += "<tr><td>Protocol</td><td>SML</td></tr>";
     s += "<tr><td>Meter Serial (96.1.0)</td><td><strong>" + meterId + "</strong></td></tr>";
     if (px != -1 && sx != -1) {
@@ -1259,14 +1261,48 @@ char FullCert[2000];
 
 void Webserver_SetCert()
 {
-  server.send(200, "text/html", "<form action='/upload' method='POST'><textarea name='cert' rows='10' cols='80'>" + String(FullCert) + "</textarea><br><input type='submit'></form>");
+  // Read directly from SPIFFS so the textarea is empty when no custom cert is stored.
+  // Empty textarea = bundled ISRG Root X1 fallback is active.
+  String stored = "";
+  File file = SPIFFS.open("/cert.pem", FILE_READ);
+  if (file && file.size() > 0)
+  {
+    stored = file.readString();
+    file.close();
+  }
+
+  String hint = stored.length() == 0
+    ? "<p style='font-size:.85rem;color:#888;margin-top:.5rem;'>Leave empty to use the onboard ISRG Root X1 cert (valid until 2035).</p>"
+    : "";
+
+  server.send(200, "text/html",
+    "<form action='/upload' method='POST'>"
+    "<textarea name='cert' rows='10' cols='80'>" + stored + "</textarea>"
+    "<br><input type='submit'>" + hint + "</form>");
 }
 
 void Webserver_TestBackendConnection()
 {
+  size_t certLen = strlen(FullCert);
+  String certStart = String(FullCert).substring(0, 30);
+  certStart.replace("<", "&lt;");
+  String certEnd = certLen > 30 ? String(FullCert).substring(certLen - 30) : "";
+  certEnd.replace("<", "&lt;");
+
   WiFiClientSecure client;
   client.setCACert(FullCert);
   String res = "<html><head><title>SMGWLite - Backend Test</title>" + String(HTML_STYLE) + "</head><body><div class='section'>";
+
+  time_t now = (time_t)Time_getEpochTime();
+  char timeBuf[32];
+  struct tm* ti = gmtime(&now);
+  strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S UTC", ti);
+
+  res += "<b>Cert debug:</b><br>";
+  res += "Length: " + String(certLen) + "<br>";
+  res += "Start:  <code>" + certStart + "</code><br>";
+  res += "End:    <code>" + certEnd   + "</code><br>";
+  res += "Device time: <code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")<br><br>";
 
   if (client.connect(backend_host.c_str(), 443))
   {
@@ -1274,7 +1310,7 @@ void Webserver_TestBackendConnection()
   }
   else
   {
-    client.setInsecure(); // If cert not accepted, try without
+    client.setInsecure();
     if (client.connect(backend_host.c_str(), 443))
       res += "&#9989; Host reachable<br>&#10060; Cert not working.";
     else
@@ -1312,36 +1348,54 @@ void Webserver_HandleCertUpload()
   if (server.hasArg("cert"))
   {
     String cert = server.arg("cert");
+    cert.trim();
+
+    if (cert.length() == 0)
+    {
+      // Empty submission — remove SPIFFS file so the bundled fallback cert is used.
+      SPIFFS.remove("/cert.pem");
+      Log_AddEntry(8002);
+      Webserver_LocationHrefsysinfo();
+      return;
+    }
+
     File file = SPIFFS.open("/cert.pem", FILE_WRITE);
     if (file)
     {
       file.println(cert);
       file.close();
       Log_AddEntry(8002);
-      Webserver_LocationHrefHome();
+      Webserver_LocationHrefsysinfo();
     }
     else
     {
       Log_AddEntry(8003);
-      Webserver_LocationHrefHome();
+      Webserver_LocationHrefsysinfo();
       server.send(500, "text/plain", "Cannot Open File!");
     }
   }
   else
   {
     Log_AddEntry(8004);
-    Webserver_LocationHrefHome();
+    Webserver_LocationHrefsysinfo();
   }
 }
 
 void Webclient_loadCertToChar()
 {
   File file = SPIFFS.open("/cert.pem", FILE_READ);
-  if (!file) { Log_AddEntry(8001); return; }
-  size_t size = file.size();
-  file.readBytes(FullCert, size);
-  FullCert[size] = '\0';
-  file.close();
+  if (file && file.size() > 0)
+  {
+    size_t size = file.size();
+    file.readBytes(FullCert, size);
+    FullCert[size] = '\0';
+    file.close();
+    return;
+  }
+  // No cert in SPIFFS — fall back to bundled ISRG Root X1
+  strncpy(FullCert, ISRG_ROOT_X1, sizeof(FullCert) - 1);
+  FullCert[sizeof(FullCert) - 1] = '\0';
+  Log_AddEntry(8001);
 }
 
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
@@ -1368,8 +1422,7 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_FlashPulse – fire one IR pulse and return immediately.
-// Called via fetch() from the virtual-flashlight page; no page reload.
+// Webserver_FlashPulse – fire one short IR pulse and return immediately.
 // ---------------------------------------------------------------------------
 void Webserver_FlashPulse()
 {
@@ -1383,81 +1436,462 @@ void Webserver_FlashPulse()
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_Flashlight – virtual flashlight page.
-// One big button = one IR pulse. Works on desktop and mobile.
+// Webserver_FlashLongPulse – fire one long IR pulse (confirm/select).
+// ---------------------------------------------------------------------------
+void Webserver_FlashLongPulse()
+{
+  mySerial.end();
+  pinMode(TX_PIN, OUTPUT);
+  digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
+  delay(OPTICAL_FLASH_LONG_MS);
+  digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
+  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  server.send(200, "text/plain", "ok");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_Flashlight – PIN entry pad for the optical meter interface.
+// Digits 1-9 send that many /flash pulses (400 ms apart); 0 skips pulses.
+// After each digit a 3-second settle countdown signals the meter is ready
+// for the next digit. WEITER sends one pulse to advance the meter menu.
 // ---------------------------------------------------------------------------
 void Webserver_Flashlight()
 {
   server.send(200, "text/html", R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang='de'>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Flashlight</title>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
+<title>PIN Assistant</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     height: 100%; width: 100%;
     background: #111;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    touch-action: manipulation; /* prevents 300 ms tap delay on mobile */
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #eee;
+    touch-action: manipulation;
   }
   body {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    gap: 2rem; padding: 1.5rem;
+    gap: .9rem; padding: 1rem; min-height: 100vh;
   }
-  #flash-btn {
-    width: min(70vw, 70vh);
-    height: min(70vw, 70vh);
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #ffe066, #e6a800);
-    border: none;
-    box-shadow: 0 0 40px 10px rgba(230,168,0,0.4);
+  h1 { font-size: 1rem; color: #bbb; letter-spacing: .05em; text-align: center; }
+  #hint { font-size: .8rem; color: #666; text-align: center; max-width: 280px; line-height: 1.45; }
+  #top-section {
+    display: flex; flex-direction: column;
+    align-items: center; gap: .65rem;
+    width: min(300px, 90vw);
+    padding-bottom: .9rem;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .numpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: .5rem;
+    width: min(300px, 90vw);
+  }
+  .btn {
+    background: #222; color: #eee;
+    border: 1px solid #333; border-radius: 10px;
+    font-size: 1.3rem; font-weight: 700;
+    height: 58px;
     cursor: pointer;
-    font-size: clamp(3rem, 10vw, 6rem);
-    transition: transform .08s, box-shadow .08s;
+    touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    transition: background .1s;
   }
-  #flash-btn:active,
-  #flash-btn.firing {
-    transform: scale(.93);
-    box-shadow: 0 0 80px 20px rgba(255,220,0,0.7);
-    background: radial-gradient(circle at 35% 35%, #fff5aa, #ffd000);
+  .btn:active:not(:disabled) { background: #444; }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn-weiter {
+    width: 100%; height: 52px;
+    font-size: 1rem;
+    background: #1a3799; border-color: #2a4aaa; color: #fff;
   }
-  #status {
-    color: #888; font-size: .9rem; height: 1.2em; text-align: center;
+  .btn-weiter:active:not(:disabled) { background: #0d2577; }
+  .btn-confirm {
+    width: 100%; height: 52px;
+    font-size: 1rem;
+    background: #5a3799; border-color: #6a4aaa; color: #fff;
   }
+  .btn-confirm:active:not(:disabled) { background: #3d2577; }
+  #status-area {
+    width: min(300px, 90vw); min-height: 48px;
+    text-align: center;
+    display: flex; flex-direction: column; gap: .3rem;
+  }
+  #status-text  { font-size: .88rem; color: #aaa; }
+  #progress-text { font-size: .8rem; color: #888; }
+  #countdown-wrap {
+    display: none;
+    width: 100%; background: #2a2a2a; border-radius: 6px;
+    height: 7px; overflow: hidden;
+  }
+  #countdown-bar { height: 100%; background: #1a3799; width: 100%; }
   #back-link {
-    color: #aaa; font-size: .85rem; text-decoration: none;
+    color: #aaa; font-size: .8rem; text-decoration: none;
     border: 1px solid #444; border-radius: 6px;
-    padding: .4rem 1rem;
+    padding: .3rem .9rem;
   }
   #back-link:hover { background: #222; color: #fff; }
 </style>
 </head>
 <body>
-<button id="flash-btn" onclick="flash()">&#x1F526;</button>
-<div id="status"></div>
-<a id="back-link" href="/">&#8592; Go Back</a>
+<h1>&#128274; PIN Assistant</h1>
+<div id='top-section'>
+  <p id='hint'>Navigiere mit einem Klick auf Weiter durchs Men&#252;, bis du zur PIN-Eingabe aufgefordert wirst. Gib dann die PIN &#252;ber die Tasten ein.</p>
+  <button class='btn btn-weiter' onclick='weiter()'>Weiter &#8594;</button>
+</div>
+<div id='status-area'>
+  <div id='status-text'></div>
+  <div id='progress-text'></div>
+  <div id='countdown-wrap'><div id='countdown-bar'></div></div>
+</div>
+<div class='numpad'>
+  <button class='btn' onclick='digit(1)'>1</button>
+  <button class='btn' onclick='digit(2)'>2</button>
+  <button class='btn' onclick='digit(3)'>3</button>
+  <button class='btn' onclick='digit(4)'>4</button>
+  <button class='btn' onclick='digit(5)'>5</button>
+  <button class='btn' onclick='digit(6)'>6</button>
+  <button class='btn' onclick='digit(7)'>7</button>
+  <button class='btn' onclick='digit(8)'>8</button>
+  <button class='btn' onclick='digit(9)'>9</button>
+  <button class='btn' onclick='digit(0)'>0</button>
+</div>
+<hr style='width:min(300px,90vw); border:none; border-top:1px solid #2a2a2a;'>
+<div id='top-section'>
+  <p id='hint'>Bl&#228;tter mit &#8222;Weiter&#8220; durchs Men&#252;. Stelle sicher, dass &#8222;PIN&#8220; auf <span style='color:#e05252;font-weight:700;'>Off</span> steht und &#8222;INF&#8220; auf <span style='color:#4caf50;font-weight:700;'>ON</span>. Wenn nicht, &#228;ndere den Zustand mit dem Button.</p>
+  <button class='btn btn-confirm' onclick='bestaetigen()'>Zustand wechseln</button>
+</div>
+<a id='back-link' href='/'>&#8592; Go Back</a>
 <script>
-  const btn = document.getElementById('flash-btn');
-  const status = document.getElementById('status');
-  let busy = false;
-  async function flash() {
-    if (busy) return;
-    busy = true;
-    btn.classList.add('firing');
-    status.textContent = '';
+  var PULSE_GAP = 400;
+  var SETTLE    = 3000;
+
+  var btns  = document.querySelectorAll('.btn');
+  var sTxt  = document.getElementById('status-text');
+  var pTxt  = document.getElementById('progress-text');
+  var cdWrap = document.getElementById('countdown-wrap');
+  var cdBar  = document.getElementById('countdown-bar');
+
+  function lock() { btns.forEach(function(b) { b.disabled = true; }); }
+  function unlock() {
+    sTxt.textContent = '';
+    pTxt.textContent = '';
+    cdWrap.style.display = 'none';
+    cdBar.style.transition = 'none';
+    cdBar.style.width = '100%';
+    btns.forEach(function(b) { b.disabled = false; });
+  }
+
+  function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+  async function pulse() { await fetch('/flash'); }
+
+  async function countdown() {
+    sTxt.textContent = '⏳ Nächste Stelle wird aktiv — dann nächste Ziffer eingeben';
+    cdWrap.style.display = 'block';
+    cdBar.style.transition = 'none';
+    cdBar.style.width = '100%';
+    cdBar.getBoundingClientRect();
+    cdBar.style.transition = 'width ' + (SETTLE / 1000) + 's linear';
+    cdBar.style.width = '0%';
+    var rem = Math.round(SETTLE / 1000);
+    pTxt.textContent = 'Warte ' + rem + 's …';
+    var iv = setInterval(function() {
+      rem--;
+      pTxt.textContent = rem > 0 ? 'Warte ' + rem + 's …' : '';
+    }, 1000);
+    await wait(SETTLE);
+    clearInterval(iv);
+  }
+
+  async function digit(n) {
+    lock();
     try {
-      const r = await fetch('/flash');
-      if (!r.ok) status.textContent = 'Fehler: ' + r.status;
+      if (n === 0) {
+        unlock();
+        sTxt.textContent = 'Warten, bis nächste Ziffer aktiv';
+        return;
+      } else {
+        for (var i = 1; i <= n; i++) {
+          pTxt.textContent = 'Puls ' + i + ' / ' + n;
+          await pulse();
+          if (i < n) await wait(PULSE_GAP);
+        }
+      }
+      await countdown();
     } catch(e) {
-      status.textContent = 'Verbindungsfehler';
+      sTxt.textContent = 'Verbindungsfehler';
     }
-    setTimeout(() => { btn.classList.remove('firing'); busy = false; }, 100);
+    unlock();
+  }
+
+  async function weiter() {
+    lock();
+    try {
+      pTxt.textContent = 'Puls 1 / 1';
+      await pulse();
+    } catch(e) {
+      sTxt.textContent = 'Verbindungsfehler';
+    }
+    unlock();
+  }
+
+  async function bestaetigen() {
+    lock();
+    try {
+      sTxt.textContent = 'Langer Puls …';
+      await fetch('/flashlong');
+    } catch(e) {
+      sTxt.textContent = 'Verbindungsfehler';
+    }
+    unlock();
+    sTxt.textContent = '';
+  }
+</script>
+</body>
+</html>
+)rawliteral");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_PinAssistantDeluxe – comfortable PIN entry: type the 4-digit PIN
+// into a text field, then press 'PIN übertragen' to send all pulses and delays
+// automatically. The Weiterblättern button navigates the meter menu as before.
+// ---------------------------------------------------------------------------
+void Webserver_PinAssistantDeluxe()
+{
+  server.send(200, "text/html", R"rawliteral(
+<!DOCTYPE html>
+<html lang='de'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
+<title>PIN Assistant Deluxe</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; width: 100%;
+    background: #111;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #eee;
+    touch-action: manipulation;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: .9rem; padding: 1rem; min-height: 100vh;
+  }
+  h1 { font-size: 1rem; color: #bbb; letter-spacing: .05em; text-align: center; }
+
+  /* PIN input field */
+  #pin-input {
+    width: min(300px, 90vw);
+    background: #222; color: #eee;
+    border: 1px solid #444; border-radius: 10px;
+    font-size: 2rem; font-weight: 700; letter-spacing: .4em;
+    text-align: center; padding: .6rem .5rem;
+    outline: none;
+  }
+  #pin-input:focus { border-color: #1a3799; }
+  #pin-input::placeholder { letter-spacing: 0; font-weight: 400; font-size: 1.2rem; color: #555; }
+  #pin-error { font-size: .8rem; color: #c0392b; text-align: center; min-height: 1.1em; }
+
+  /* Divider */
+  .divider {
+    width: min(300px, 90vw);
+    border: none; border-top: 1px solid #2a2a2a;
+  }
+
+  /* Weiter section */
+  #top-section {
+    display: flex; flex-direction: column;
+    align-items: center; gap: .65rem;
+    width: min(300px, 90vw);
+  }
+  #hint { font-size: .8rem; color: #666; text-align: center; max-width: 280px; line-height: 1.45; }
+
+  /* Buttons */
+  .btn {
+    background: #222; color: #eee;
+    border: 1px solid #333; border-radius: 10px;
+    font-size: 1rem; font-weight: 700;
+    height: 52px; width: 100%;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    transition: background .1s;
+  }
+  .btn:active:not(:disabled) { background: #444; }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn-weiter { background: #1a3799; border-color: #2a4aaa; color: #fff; }
+  .btn-weiter:active:not(:disabled) { background: #0d2577; }
+  .btn-confirm { background: #5a3799; border-color: #6a4aaa; color: #fff; }
+  .btn-confirm:active:not(:disabled) { background: #3d2577; }
+  .btn-transfer { background: #1a6b3a; border-color: #2a8a4a; color: #fff; }
+  .btn-transfer:active:not(:disabled) { background: #0d4a28; }
+
+  /* Status area */
+  #status-area {
+    width: min(300px, 90vw); min-height: 48px;
+    text-align: center;
+    display: flex; flex-direction: column; gap: .3rem;
+  }
+  #status-text   { font-size: .88rem; color: #aaa; }
+  #progress-text { font-size: .8rem;  color: #888; }
+  #countdown-wrap {
+    display: none;
+    width: 100%; background: #2a2a2a; border-radius: 6px;
+    height: 7px; overflow: hidden;
+  }
+  #countdown-bar { height: 100%; background: #1a3799; width: 100%; }
+
+  #back-link {
+    color: #aaa; font-size: .8rem; text-decoration: none;
+    border: 1px solid #444; border-radius: 6px;
+    padding: .3rem .9rem;
+  }
+  #back-link:hover { background: #222; color: #fff; }
+</style>
+</head>
+<body>
+<h1>&#128274; PIN Assistant Deluxe</h1>
+
+<label for='pin-input' style='font-size:.8rem; color:#666; letter-spacing:.05em;'>PIN eingeben</label>
+<input id='pin-input' type='text' inputmode='numeric' pattern='[0-9]*'
+       maxlength='4' placeholder='z.&#8239;B. 1234' autocomplete='off'>
+<div id='pin-error'></div>
+
+<hr class='divider'>
+
+<div id='top-section'>
+  <p id='hint'>Navigiere mit einem Klick auf Weiter durchs Men&#252;, bis du zur PIN-Eingabe aufgefordert wirst.</p>
+  <button class='btn btn-weiter' onclick='weiter()'>Weiter &#8594;</button>
+</div>
+
+<hr class='divider'>
+
+<div id='top-section'>
+  <p id='hint'>Wenn du bei der PIN-Eingabe bist, &#252;bertrage den PIN.</p>
+  <button class='btn btn-transfer' onclick='transferPin()'>PIN &#252;bertragen &#8594;</button>
+  <div id='status-area'>
+    <div id='status-text'></div>
+    <div id='progress-text'></div>
+    <div id='countdown-wrap'><div id='countdown-bar'></div></div>
+  </div>
+</div>
+<hr class='divider' style='margin-top:0;'>
+<div id='top-section'>
+  <p id='hint'>Bl&#228;tter mit &#8222;Weiter&#8220; durchs Men&#252;. Stelle sicher, dass &#8222;PIN&#8220; auf <span style='color:#e05252;font-weight:700;'>Off</span> steht und &#8222;INF&#8220; auf <span style='color:#4caf50;font-weight:700;'>ON</span>. Wenn nicht, &#228;ndere den Zustand mit dem Button.</p>
+  <button class='btn btn-confirm' onclick='bestaetigen()'>Zustand wechseln</button>
+</div>
+<a id='back-link' href='/'>&#8592; Go Back</a>
+
+<script>
+  var PULSE_GAP = 400;
+  var SETTLE    = 3000;
+
+  var allBtns = document.querySelectorAll('.btn');
+  var pinInput = document.getElementById('pin-input');
+  var pinError = document.getElementById('pin-error');
+  var sTxt     = document.getElementById('status-text');
+  var pTxt     = document.getElementById('progress-text');
+  var cdWrap   = document.getElementById('countdown-wrap');
+  var cdBar    = document.getElementById('countdown-bar');
+
+  function lock() {
+    allBtns.forEach(function(b) { b.disabled = true; });
+    pinInput.disabled = true;
+  }
+  function unlock() {
+    allBtns.forEach(function(b) { b.disabled = false; });
+    pinInput.disabled = false;
+    pTxt.textContent = '';
+    cdWrap.style.display = 'none';
+    cdBar.style.transition = 'none';
+    cdBar.style.width = '100%';
+  }
+
+  function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+  async function pulse() { await fetch('/flash'); }
+
+  async function countdown(label) {
+    sTxt.textContent = label || '⏳ Nächste Stelle wird aktiv';
+    cdWrap.style.display = 'block';
+    cdBar.style.transition = 'none';
+    cdBar.style.width = '100%';
+    cdBar.getBoundingClientRect();
+    cdBar.style.transition = 'width ' + (SETTLE / 1000) + 's linear';
+    cdBar.style.width = '0%';
+    var rem = Math.round(SETTLE / 1000);
+    pTxt.textContent = 'Warte ' + rem + 's …';
+    var iv = setInterval(function() {
+      rem--;
+      pTxt.textContent = rem > 0 ? 'Warte ' + rem + 's …' : '';
+    }, 1000);
+    await wait(SETTLE);
+    clearInterval(iv);
+  }
+
+  async function weiter() {
+    lock();
+    try {
+      pTxt.textContent = 'Puls 1 / 1';
+      await pulse();
+    } catch(e) {
+      sTxt.textContent = 'Verbindungsfehler';
+    }
+    unlock();
+    sTxt.textContent = '';
+  }
+
+  async function bestaetigen() {
+    lock();
+    try {
+      sTxt.textContent = 'Langer Puls …';
+      await fetch('/flashlong');
+    } catch(e) {
+      sTxt.textContent = 'Verbindungsfehler';
+    }
+    unlock();
+    sTxt.textContent = '';
+  }
+
+  async function transferPin() {
+    pinError.textContent = '';
+    var pin = pinInput.value.trim();
+    if (!/^[0-9]{4}$/.test(pin)) {
+      pinError.textContent = 'Bitte eine vierstellige PIN eingeben.';
+      return;
+    }
+    lock();
+    try {
+      for (var i = 0; i < 4; i++) {
+        var d = parseInt(pin[i]);
+        var stelle = 'Stelle ' + (i + 1) + ' / 4';
+        if (d === 0) {
+          await countdown(stelle + ': Ziffer 0 — warte …');
+        } else {
+          for (var p = 1; p <= d; p++) {
+            sTxt.textContent = stelle;
+            pTxt.textContent = 'Puls ' + p + ' / ' + d;
+            await pulse();
+            if (p < d) await wait(PULSE_GAP);
+          }
+          await countdown(stelle + ': Übernehme …');
+        }
+      }
+      sTxt.textContent = '✓ PIN übertragen';
+      pTxt.textContent = '';
+    } catch(e) {
+      sTxt.textContent = 'Verbindungsfehler';
+    }
+    unlock();
   }
 </script>
 </body>
@@ -1468,29 +1902,46 @@ void Webserver_Flashlight()
 void Webserver_UrlConfig()
 {
   server.on("/",                    Webserver_HandleRoot);
+  server.on("/sysinfo",             Webserver_HandleSysInfo);
   server.on("/showTelegram",        Webserver_ShowTelegram);
   server.on("/showTelegramAnalysis", Webserver_Telegram_Analysis);
   server.on("/showTelegramRaw",     Webserver_ShowTelegram_Raw);
   server.on("/showLastMeterValue",  Webserver_ShowLastMeterValue);
-  server.on("/showCert",            Webserver_ShowCert);
+
   server.on("/setCert",             Webserver_SetCert);
   server.on("/testBackendConnection", Webserver_TestBackendConnection);
   server.on("/showMeterValues",     Webserver_ShowMeterValues);
   server.on("/showLogBuffer",       Webserver_ShowLogBuffer);
   server.on("/MeterValue_Num2",     Webserver_MeterValue_Num2);
 
-  server.on("/flashlight",           Webserver_Flashlight);
+  server.on("/PinAssistant",         Webserver_Flashlight);
+  server.on("/PinAssistantDeluxe",   Webserver_PinAssistantDeluxe);
   server.on("/flash",                Webserver_FlashPulse);
+  server.on("/flashlong",            Webserver_FlashLongPulse);
   server.on("/upload", [] { Webserver_HandleCertUpload(); Webclient_loadCertToChar(); });
+  server.on("/wifiSetup",  HTTP_POST,  Webserver_HandleWifiSetup);
+  server.on("/wifiStatus",             Webserver_HandleWifiStatus);
+
+  // Captive portal suppression: respond with the expected payload for each OS probe
+  // so the device is seen as "has internet" and no browser popup is triggered.
+  // iOS/macOS
+  server.on("/hotspot-detect.html",      [] { server.send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); });
+  server.on("/library/test/success.html",[] { server.send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); });
+  // Android
+  server.on("/generate_204",             [] { server.send(204, "text/plain", ""); });
+  server.on("/gen_204",                  [] { server.send(204, "text/plain", ""); });
+  // Windows
+  server.on("/connecttest.txt",          [] { server.send(200, "text/plain", "Microsoft Connect Test"); });
+  server.on("/ncsi.txt",                 [] { server.send(200, "text/plain", "Microsoft NCSI"); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
-  server.on("/restart", [] { Webserver_LocationHrefHome(5); delay(100); ESP.restart(); });
-  server.on("/resetLogBuffer", [] { Webserver_LocationHrefHome(); LogBuffer_reset(); });
-  server.on("/StoreMeterValue", [] { Webserver_LocationHrefHome(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
-  server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefHome(); });
-  server.on("/sendboth_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendLog_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefHome(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
-  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefHome(); });
+  server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
+  server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
+  server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
+  server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefsysinfo(); });
+  server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
+  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefsysinfo(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
 
   // OTA update handler
@@ -1664,9 +2115,10 @@ void Param_setup()
 
   iotWebConf.setConfigSavedCallback(&Param_configSaved);
   iotWebConf.getApTimeoutParameter()->visible = true;
+
   iotWebConf.skipApStartup();
-  multipleWifiAddition.init();
   iotWebConf.init();
+  iotWebConf.setApTimeoutMs(30000);
 }
 
 void OTA_setup()
@@ -1783,7 +2235,41 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   }
   if (sx == -1) return false;
 
-  // 3. Extract OBIS Data
+  // 3a. Extract meter serial (OBIS 0-0:96.1.0) for meter_model if not yet known
+  if (meter_model.isEmpty()) {
+    uint8_t obis960[] = {0x01, 0x00, 0x60, 0x01, 0x00, 0xff};
+    for (int i = px; i < sx - 12; i++) {
+      if (memcmp(&buffer[i], obis960, 6) == 0) {
+        for (int j = i + 6; j < i + 40 && j < sx; j++) {
+          uint8_t tl = buffer[j];
+          if ((tl & 0xF0) == 0x00 && (tl & 0x0F) > 1) {
+            int slen = (tl & 0x0F) - 1;
+            if (j + slen >= sx) break;
+            // Look for 3 consecutive uppercase letters (manufacturer code)
+            for (int k = 0; k < slen - 2; k++) {
+              uint8_t a = buffer[j+1+k], b = buffer[j+2+k], c = buffer[j+3+k];
+              if (a >= 'A' && a <= 'Z' && b >= 'A' && b <= 'Z' && c >= 'A' && c <= 'Z') {
+                meter_model = String((char)a) + String((char)b) + String((char)c);
+                break;
+              }
+            }
+            if (meter_model.isEmpty()) {
+              char hex[3];
+              for (int k = 0; k < slen; k++) {
+                sprintf(hex, "%02X", buffer[j+1+k]);
+                if (k) meter_model += ' ';
+                meter_model += hex;
+              }
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // 3b. Extract OBIS Data
   uint8_t obis180[] = {0x01, 0x00, 0x01, 0x08, 0x00, 0xff};
   uint8_t obis280[] = {0x01, 0x00, 0x02, 0x08, 0x00, 0xff};
   uint8_t obis170[] = {0x01, 0x00, 0x01, 0x07, 0x00, 0xff};
@@ -1798,7 +2284,7 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 
   // Only update globals if the main consumption register was found.
   // All other fields are optional — some meters don't transmit them.
-  if (found180) {
+  if (found180 && temp180 > 0) {
     resetMeterValue(LastMeterValue);
     LastMeterValue.meter_value_180 = temp180;
     LastMeterValue.timestamp       = Time_getEpochTime();
@@ -1821,6 +2307,22 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   size_t copy_len = (length <= TELEGRAM_LENGTH) ? length : TELEGRAM_LENGTH;
   memcpy(telegram_str, buffer, copy_len);
   telegram_str[copy_len] = '\0';
+
+  // Extract meter model from identification line (/<MFR><baud><ident>) if not yet known
+  if (meter_model.isEmpty() && telegram_str[0] == '/') {
+    const char *eol = strstr(telegram_str, "\r\n");
+    size_t lineLen = eol ? (size_t)(eol - telegram_str) : 0;
+    if (lineLen >= 4) {
+      char mfr[4]; strncpy(mfr, telegram_str + 1, 3); mfr[3] = '\0';
+      meter_model = mfr;
+      if (lineLen > 5) {
+        char ident[64];
+        size_t identLen = lineLen - 5 < sizeof(ident) - 1 ? lineLen - 5 : sizeof(ident) - 1;
+        strncpy(ident, telegram_str + 5, identLen); ident[identLen] = '\0';
+        meter_model += ' '; meter_model += ident;
+      }
+    }
+  }
 
   // Extract OBIS 1.8.0 (consumption) — required
   const char *obis180 = strstr(telegram_str, "1-0:1.8.0");
@@ -1962,8 +2464,6 @@ int32_t MeterValue_get_from_remote()
 void Telegram_ResetReceiveBuffer()
 {
   telegram_receive_bufferIndex = 0;
-  readingExtraBytes = false;
-  extraIndex = 0;
 }
 
 void handle_Telegram_receive()
@@ -2030,15 +2530,20 @@ void Webclient_send_log_to_backend()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
-  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); return; }
+  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); call_backend_successfull = false; return; }
   memcpy(logDataBuffer, logBuffer, logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
+  if (!meter_model.isEmpty()) {
+    String encoded = meter_model;
+    encoded.replace(" ", "%20");
+    logHeader += "&model=" + encoded;
+  }
   logHeader += " HTTP/1.1\r\nHost: " + backend_host + "\r\n";
   logHeader += "X-Auth-Token: " + String(backend_token) + "\r\n";
   logHeader += "Content-Type: application/octet-stream\r\n";
@@ -2050,6 +2555,7 @@ void Webclient_send_log_to_backend()
   client.write(logDataBuffer, logBufferSize);
   free(logDataBuffer);
 
+  bool logOk = false;
   unsigned long log_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < log_deadline)
   {
@@ -2057,11 +2563,13 @@ void Webclient_send_log_to_backend()
     {
       String line = client.readStringUntil('\n');
       DLOGLN(line);
-      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; break; }
+      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; logOk = true; break; }
       else b_send_log_to_backend = true;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  call_backend_successfull = logOk;
+  if (!logOk) Log_AddEntry(4003);
   client.stop();
 }
 
@@ -2087,16 +2595,14 @@ void Webclient_send_meter_values_to_backend()
   last_call_backend = millis();
 
   if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); call_backend_successfull = true; return; }
-  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); Log_AddEntry(0); call_backend_successfull = true; return; }
-
-  call_backend_successfull = false;
+  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); call_backend_successfull = true; return; }
 
   WiFiClientSecure client;
   client.setTimeout(10000); // 10 s read timeout for readStringUntil()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
   // Determine which byte ranges of the buffer actually contain data.
   //
@@ -2163,9 +2669,10 @@ void Webclient_send_meter_values_to_backend()
 
   // TAF7 range (front of buffer), then TAF14 range (back of buffer).
   // The backend sorts all entries by timestamp, so the order here doesn't matter.
-  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); return; }
-  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); return; }
+  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); call_backend_successfull = false; return; }
+  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); call_backend_successfull = false; return; }
 
+  bool ok = false;
   unsigned long mv_deadline = millis() + 15000;
   while ((client.connected() || client.available()) && millis() < mv_deadline)
   {
@@ -2176,7 +2683,7 @@ void Webclient_send_meter_values_to_backend()
       if (line.startsWith("HTTP/1.1 200"))
       {
         DLOGLN("MeterValues successfully sent");
-        call_backend_successfull = true;
+        ok = true;
         MeterValues_clear_Buffer();
         last_call_backend = millis();
         Log_AddEntry(1021);
@@ -2185,6 +2692,8 @@ void Webclient_send_meter_values_to_backend()
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  call_backend_successfull = ok;
+  if (!ok) Log_AddEntry(4002);
   client.stop();
 }
 
@@ -2314,7 +2823,16 @@ void handle_check_wifi_connection()
     }
     else
     {
-      // Still offline
+      // Still offline — periodisch Reconnect versuchen
+      if (iotWebConf.getState() == iotwebconf::NetworkState::ApMode)
+      {
+        if (millis() - last_reconnect_attempt > 60000)
+        {
+          last_reconnect_attempt = millis();
+          DLOGLN("AP mode: triggering reconnect attempt");
+          iotWebConf.forceApMode(false);
+        }
+      }
     }
   }
 }
@@ -2342,7 +2860,7 @@ void handle_temperature()
 
 void handle_call_backend()
 {
-  if (wifi_connected && millis() - wifi_reconnection_time > 60000)
+  if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
     if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
@@ -2431,6 +2949,14 @@ void handle_MeterValue_trigger()
 void loop()
 {
   iotWebConf.doLoop();
+
+  if (g_apStopAt > 0 && millis() >= g_apStopAt)
+  {
+    g_apStopAt = 0;
+    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
+    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
+  }
+
   ArduinoOTA.handle();
   handle_temperature();
   // handle_Telegram_receive();  // handled by dedicated FreeRTOS task
@@ -2478,10 +3004,8 @@ String Time_formatUptime()
   return String(buffer);
 }
 
-void Webserver_HandleRoot()
+void Webserver_HandleSysInfo()
 {
-  if (iotWebConf.handleCaptivePortal()) return;
-
   String s;
   s.reserve(8000);
   s += R"rawliteral(<!DOCTYPE html>
@@ -2494,6 +3018,7 @@ void Webserver_HandleRoot()
   s += R"rawliteral(</title>)rawliteral";
   s += HTML_STYLE;
   s += R"rawliteral(</head><body>
+<p><a href='/'>&#8592; Home</a></p>
 <p>Go to <a href='config'><b>configuration page</b></a> to change <i>italic</i> values.</p>
 
 <h2>Last Meter Value</h2>
@@ -2598,7 +3123,6 @@ void Webserver_HandleRoot()
     // always matches the budget / entry_size. The warning is only relevant if
     // the user switches between auto and manual, which triggers a re-init via
     // Param_configSaved() automatically. So we never need to show it.
-    bool isAutoMode  = (atoi(Meter_Value_Buffer_Size_Char) <= 0);
     bool sizeChanged = false; // budget-based sizing always matches
 
     if (sizeChanged)
@@ -2647,7 +3171,7 @@ void Webserver_HandleRoot()
   <li><i>Use SSL Cert:</i> )rawliteral";
   s += (UseSslCert_object.isChecked() ? "true" : "false");
   s += R"rawliteral(</li>
-  <li><a href='showCert'>Show Cert</a></li>
+
   <li><a href='setCert'>Set Cert</a></li>
   <li><a href='testBackendConnection'>Test Backend Connection</a></li>
   <li>Last Backend Call ago (min): )rawliteral";
@@ -2693,7 +3217,8 @@ void Webserver_HandleRoot()
 
 <h3>Helpers</h3>
 <ul>
-  <li><a href='flashlight'>Flashlight</a></li>
+  <li><a href='PinAssistant'>PIN Assistant</a></li>
+  <li><a href='PinAssistantDeluxe'>PIN Assistant Deluxe</a></li>
   <li><i>Set Device Offline:</i> )rawliteral";
   s += (DebugSetOffline_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
@@ -2707,6 +3232,9 @@ void Webserver_HandleRoot()
 
 <h3>System Info</h3>
 <ul>
+  <li>Meter Model: )rawliteral";
+  s += meter_model.isEmpty() ? "unknown" : meter_model;
+  s += R"rawliteral(</li>
   <li><i>LED blink:</i> )rawliteral";
   s += (led_blink_object.isChecked() ? "activated" : "deactivated");
   s += R"rawliteral(</li>
@@ -2763,10 +3291,373 @@ void Webserver_HandleRoot()
   server.send(200, "text/html", s);
 }
 
-void Webserver_ShowCert()
+// ---------------------------------------------------------------------------
+// Webserver_HandleRoot – dashboard (/)
+// ---------------------------------------------------------------------------
+void Webserver_HandleRoot()
 {
-  server.send(200, "text/html", String(FullCert));
+  if (iotWebConf.handleCaptivePortal()) return;
+
+  if (redirect_to_sysinfo) {
+    redirect_to_sysinfo = false;
+    if (wifi_connected) {
+      server.sendHeader("Location", "/sysinfo");
+      server.send(302, "text/plain", "");
+      return;
+    }
+  }
+
+  bool isApMode        = !wifi_connected;
+  bool hasReading      = LastMeterValue.timestamp > 0 && LastMeterValue.meter_value_180 > 0;
+  bool hasPinPrecision = hasReading && (LastMeterValue.meter_value_180 % 10000) != 0;
+  bool backendCalled   = last_call_backend > 0;
+  bool backendOk       = call_backend_successfull;
+  uint32_t ageS        = hasReading ? (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp) : 0;
+  const uint32_t kNoTelegramThresholdS = 30;
+  uint32_t backAgoMin  = backendCalled ? (millis() - last_call_backend) / 60000UL : 0;
+
+  String s;
+  s.reserve(4000);
+  s += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<title>SmartMeterLite</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:1rem;color:#1a1a1a;}
+.logo{font-size:1.5rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;padding-top:.4rem;}
+.meter-card{background:#1a3799;color:#fff;border-radius:16px;padding:2rem 2rem 1.6rem;text-align:center;width:100%;max-width:400px;box-shadow:0 4px 20px rgba(26,55,153,.22);}
+.m-lbl{font-size:.76rem;opacity:.72;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.6rem;}
+.m-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:.3rem;}
+.m-row-l{display:flex;align-items:baseline;gap:.35rem;}
+.m-arr{font-size:1.2rem;opacity:.8;flex-shrink:0;}
+.m-val{font-size:2.3rem;font-weight:800;letter-spacing:-.03em;line-height:1;-webkit-text-fill-color:#fff;}
+.m-val2{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;line-height:1;-webkit-text-fill-color:#fff;opacity:.85;}
+.m-unit{font-size:.78rem;opacity:.6;align-self:flex-end;padding-bottom:.1rem;}
+.m-pwr{display:flex;align-items:baseline;gap:.2rem;opacity:.8;}
+.m-pwr-val{font-size:1.05rem;font-weight:700;-webkit-text-fill-color:#fff;}
+.m-pwr-unit{font-size:.72rem;opacity:.75;}
+.m-div{border:none;border-top:1px solid rgba(255,255,255,.15);margin:.45rem 0;}
+.m-age{font-size:.73rem;opacity:.48;margin-top:.35rem;}
+.m-age-warn{color:#ffb300;opacity:1;font-weight:600;}
+.m-net-lbl{font-size:.78rem;opacity:.55;}
+.sc{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.9rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.75rem;}
+.sc-top{display:flex;align-items:center;gap:.75rem;}
+.dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;}
+.dg{background:#4caf50;box-shadow:0 0 6px #4caf5066;}
+.do{background:#ff9800;box-shadow:0 0 6px #ff980066;}
+.dr{background:#f44336;box-shadow:0 0 6px #f4433666;}
+.st strong{display:block;font-size:.92rem;margin-bottom:.1rem;}
+.st small{font-size:.77rem;color:#666;}
+.br{display:flex;gap:.7rem;width:100%;}
+.btn{flex:1;display:flex;align-items:center;justify-content:center;gap:.35rem;padding:.75rem .4rem;border-radius:10px;font-size:.85rem;font-weight:700;text-decoration:none;border:2px solid #1a3799;color:#1a3799;background:#f0f2f7;text-align:center;line-height:1.3;}
+.btn:hover{background:#1a3799;color:#fff;}
+.lc{color:#666;font-size:.85rem;text-decoration:none;border:1px solid #d0d8f0;border-radius:8px;padding:.4rem 1rem;background:#fff;}
+.lc:hover{color:#1a3799;}
+.grafana-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;max-width:400px;padding:.85rem 1rem;border-radius:14px;background:#374151;color:#fff;font-size:.88rem;font-weight:700;text-decoration:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+.grafana-btn:hover{background:#1e293b;}
+footer{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin-top:.5rem;padding-top:.5rem;}
+footer a{color:#999;font-size:.78rem;text-decoration:none;}
+footer a:hover{color:#1a3799;}
+.footer-love{font-size:.78rem;color:#aaa;}
+.wifi-card{background:#fff3cd;border:1px solid #ffc107;border-radius:14px;padding:1rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.6rem;}
+.wifi-card h3{font-size:.92rem;font-weight:700;color:#856404;margin:0;}
+.wifi-card small{font-size:.77rem;color:#856404;opacity:.85;}
+.wifi-form{display:flex;flex-direction:column;gap:.5rem;}
+.wifi-form input[type=text],.wifi-form input[type=password]{width:100%;padding:.55rem .75rem;border-radius:8px;border:1px solid #ccc;font-size:.88rem;background:#fff;}
+.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
+.wifi-form button:hover{background:#142b7a;}
+</style>
+</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+)rawliteral";
+
+  // Leistung bestimmen
+  // Beide Richtungen (1.7.0 + 2.7.0) bekannt → an kWh-Zeilen hängen.
+  // Sonst (nur eine Richtung oder nur 16.7.0) → standalone net-Zeile.
+  bool hasPower   = false;
+  bool netOnly    = false;
+  int32_t importW = 0, exportW = 0, netW = 0;
+  if (hasReading) {
+    if (LastMeterValue.power_import > 0 && LastMeterValue.power_export > 0) {
+      importW  = (int32_t)LastMeterValue.power_import;
+      exportW  = (int32_t)LastMeterValue.power_export;
+      hasPower = true;
+    } else if (LastMeterValue.net_power != 0) {
+      netW     = LastMeterValue.net_power;
+      netOnly  = true;
+      hasPower = true;
+    } else if (LastMeterValue.power_import > 0) {
+      netW     = (int32_t)LastMeterValue.power_import;
+      netOnly  = true;
+      hasPower = true;
+    } else if (LastMeterValue.power_export > 0) {
+      netW     = -(int32_t)LastMeterValue.power_export;
+      netOnly  = true;
+      hasPower = true;
+    }
+  }
+
+  auto pwrStr = [](int32_t w) -> String {
+    char buf[24];
+    if (w >= 1000) snprintf(buf, sizeof(buf), "%.2f&thinsp;kW", w / 1000.0f);
+    else           snprintf(buf, sizeof(buf), "%d&thinsp;W", (int)w);
+    return String(buf);
+  };
+
+  // Meter reading card
+  s += "<div class='meter-card'>"
+       "<div class='m-lbl'>Z&#228;hlerstand</div>";
+
+  // 1.8.0 — Bezug (↓) + Import-Leistung rechts
+  if (hasReading) {
+    char valBuf[32];
+    uint32_t v = LastMeterValue.meter_value_180;
+    snprintf(valBuf, sizeof(valBuf), "%lu,%04lu", (unsigned long)(v / 10000), (unsigned long)(v % 10000));
+    s += "<div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>&#8595;</span><span class='m-val'>" + String(valBuf) + "</span>"
+         "<span class='m-unit'>kWh</span></div>";
+    if (!netOnly && importW > 0)
+      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(importW) + "</span></div>";
+    s += "</div>";
+  } else {
+    s += "<div class='m-age' style='margin:.6rem 0;'>Warte auf Telegramm&#8239;&#8230;</div>";
+  }
+
+  // Nettoleistung zwischen 1.8.0 und 2.8.0
+  if (hasPower) {
+    int32_t calcNet = netOnly ? netW : (importW - exportW);
+    int32_t absP    = calcNet < 0 ? -calcNet : calcNet;
+    const char* arr = calcNet >= 0 ? "&#8595;" : "&#8593;";
+    const char* lbl = calcNet >= 0 ? "Netzbezug" : "Netzeinspeisung";
+    s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>" + String(arr) + "</span>"
+         "<span class='m-pwr-val'>" + pwrStr(absP) + "</span>"
+         "</div>"
+         "<span class='m-net-lbl'>" + String(lbl) + "</span></div>";
+  }
+
+  // 2.8.0 — Einspeisung (↑) + Export-Leistung rechts, nur wenn > 0
+  if (hasReading && LastMeterValue.meter_value_280 > 0) {
+    char val2Buf[32];
+    uint32_t v2 = LastMeterValue.meter_value_280;
+    snprintf(val2Buf, sizeof(val2Buf), "%lu,%04lu", (unsigned long)(v2 / 10000), (unsigned long)(v2 % 10000));
+    s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
+         "<span class='m-arr'>&#8593;</span>"
+         "<span class='m-val2'>" + String(val2Buf) + "</span>"
+         "<span class='m-unit'>kWh</span></div>";
+    if (!netOnly && exportW > 0)
+      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(exportW) + "</span></div>";
+    s += "</div>";
+  }
+
+  if (hasReading) {
+    if (ageS >= kNoTelegramThresholdS)
+      s += "<div class='m-age m-age-warn'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
+    else
+      s += "<div class='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
+  }
+  s += "</div>";
+
+  // WiFi setup card — only shown in AP mode
+  if (isApMode) {
+    s += R"rawliteral(<div class='wifi-card'>
+<h3>&#128246; Kein WLAN verbunden &ndash; Netzwerk einrichten</h3>
+<small>Das Ger&auml;t ist im Access-Point-Modus. Gib dein WLAN-Passwort ein, um eine Verbindung herzustellen.</small>
+<form class='wifi-form' action='/wifiSetup' method='POST'>
+<input type='text'     name='ssid'     placeholder='WLAN-Name (SSID)'    autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'>
+<input type='password' name='password' placeholder='WLAN-Passwort'       autocomplete='current-password'>
+<button type='submit'>Verbinden</button>
+</form>
+</div>)rawliteral";
+  }
+
+  // PIN / INF status
+  s += "<div class='sc'>";
+  if (!hasReading) {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Messwert</strong>"
+         "<small>Noch kein Telegramm empfangen.</small></div></div>"
+         "<div class='br'>"
+         "<a class='btn' href='/PinAssistant'>&#128274; PIN Assistant</a>"
+         "<a class='btn' href='/PinAssistantDeluxe'>&#128274; PIN Assistant Deluxe</a>"
+         "</div>";
+  } else if (ageS >= kNoTelegramThresholdS) {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Telegramm empfangen</strong>"
+         "<small>Lesekopf getrennt oder Verbindungsproblem?</small></div></div>";
+  } else if (hasPinPrecision) {
+    s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>PIN eingegeben &#8211; INF aktiv</strong>"
+         "<small>Messwerte mit Nachkommastellen.</small></div></div>";
+  } else {
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>PIN nicht eingegeben oder INF aus</strong>"
+         "<small>Bitte PIN eingeben und INF auf ON setzen.</small></div></div>"
+         "<div class='br'>"
+         "<a class='btn' href='/PinAssistant'>&#128274; PIN Assistant</a>"
+         "<a class='btn' href='/PinAssistantDeluxe'>&#128274; PIN Assistant Deluxe</a>"
+         "</div>";
+  }
+  s += "</div>";
+
+  // Backend status
+  s += "<div class='sc'>";
+  if (!wifi_connected)
+    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Kein Backend-Kontakt</strong>"
+         "<small>Kein WLAN &ndash; Backend nicht erreichbar.</small></div></div>";
+  else if (!backendCalled)
+    s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Backend noch nicht kontaktiert</strong>"
+         "<small>Noch kein Backend-Call durchgef&#252;hrt.</small></div></div>";
+  else if (backendOk)
+    s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit Backend verbunden</strong>"
+         "<small>Letzter Call vor " + String(backAgoMin) + " min.</small></div></div>";
+  else
+    s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Backend-Fehler</strong>"
+         "<small>Letzter Backend-Call fehlgeschlagen.</small></div></div>";
+  s += "</div>";
+
+  s += R"rawliteral(<a class='grafana-btn' href='https://portal.smartmeterlite.de' target='_blank' rel='noopener'>&#128200; portal.smartmeterlite.de &rarr;</a>
+<a class='lc' href='/sysinfo'>&#9881;&#65039; Konfiguration &amp; Details</a>
+<footer>
+<a href='https://smartmeterlite.de' target='_blank' rel='noopener'>smartmeterlite.de</a>
+<a href='https://www.linkedin.com/in/laurin-vierrath/' target='_blank' rel='noopener'>&#128039; From Laurin with Love</a>
+</footer>
+</body></html>)rawliteral";
+
+  server.send(200, "text/html", s);
 }
+
+void Webserver_HandleWifiSetup()
+{
+  String ssid     = server.arg("ssid");
+  String password = server.arg("password");
+
+  ssid.trim();
+
+  if (ssid.length() == 0) {
+    server.sendHeader("Location", "/");
+    server.send(302, "text/plain", "");
+    return;
+  }
+
+  strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     ssid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
+  strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, password.c_str(), IOTWEBCONF_WORD_LEN - 1);
+  iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
+  iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
+
+  iotWebConf.saveConfig();
+  redirect_to_sysinfo = false;
+  DLOGLN("WiFi-Setup: credentials saved, starting direct connection attempt.");
+
+  // Lock the AP: forceApMode(true) prevents IotWebConf from stopping it via timeout
+  // before the browser has received the IP.
+  iotWebConf.forceApMode(true);
+
+  // Direct WiFi.begin(): ESP32 switches to AP_STA mode, AP stays up.
+  WiFi.begin(ssid.c_str(), password.c_str());
+  g_wifiSetupPending = true;
+  g_apStopAt         = 0;
+
+  // Lade-Seite mit JS-Polling ausliefern
+  String page = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>SmartMeterLite &ndash; Verbinde&hellip;</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;gap:1rem;color:#1a1a1a;}
+.logo{font-size:1.5rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;}
+.card{background:#fff;border-radius:16px;border:1px solid #d0d8f0;padding:2rem;width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;gap:1.1rem;text-align:center;}
+.spinner{width:40px;height:40px;border:4px solid #d0d8f0;border-top-color:#1a3799;border-radius:50%;animation:spin 0.9s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg{font-size:.95rem;color:#444;}
+.ssid{font-weight:700;color:#1a3799;}
+.hint{font-size:.82rem;color:#888;line-height:1.5;}
+.err{color:#c0392b;font-size:.88rem;display:none;}
+.result{display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
+.ip-box{background:#f0f2f7;border-radius:10px;padding:.9rem 1.2rem;font-size:1.05rem;color:#333;letter-spacing:.04em;}
+.ip-last{font-weight:800;color:#1a3799;font-size:1.2rem;}
+.steps{text-align:left;font-size:.84rem;color:#444;line-height:1.8;width:100%;}
+.steps li{margin-left:1.1rem;}
+.open-btn{display:block;width:100%;padding:.8rem;border-radius:10px;background:#1a3799;color:#fff;font-size:.95rem;font-weight:700;text-decoration:none;text-align:center;}
+.open-btn:hover{background:#142b7a;}
+</style>
+</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<div class="card">
+  <div id="connecting">
+    <div class="spinner"></div>
+    <p class="msg" style="margin-top:1rem;">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+  </div>
+  <div class="result" id="result">
+    <p class="msg">&#10003;&nbsp; Verbunden! Deine IP-Adresse:</p>
+    <div class="ip-box" id="ip-display"></div>
+    <ol class="steps">
+      <li>Notiere dir die IP-Adresse &ndash; besonders das letzte Byte (fett).</li>
+      <li>Wechsle jetzt mit deinem Ger&auml;t ins WLAN <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>.</li>
+      <li>Klicke dann auf den Button unten.</li>
+    </ol>
+    <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>
+  </div>
+  <p class="err" id="err">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+</div>
+<script>
+var attempts = 0, max = 20;
+function poll() {
+  fetch('/wifiStatus')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.connected) {
+        var parts = d.ip.split('.');
+        var last  = parts.pop();
+        var prefix = parts.join('.') + '.';
+        document.getElementById('ip-display').innerHTML =
+          prefix + '<span class="ip-last">' + last + '</span>';
+        var url = 'http://' + d.ip + '/';
+        document.getElementById('open-btn').href = url;
+        document.getElementById('connecting').style.display = 'none';
+        document.getElementById('result').style.display     = 'flex';
+      } else if (++attempts < max) {
+        setTimeout(poll, 2000);
+      } else {
+        document.getElementById('connecting').style.display = 'none';
+        document.getElementById('err').style.display        = 'block';
+      }
+    })
+    .catch(function(){ if (++attempts < max) setTimeout(poll, 2000); });
+}
+setTimeout(poll, 2000);
+</script>
+</body></html>)rawliteral";
+
+  server.send(200, "text/html", page);
+}
+
+void Webserver_HandleWifiStatus()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    String ip = WiFi.localIP().toString();
+    if (g_wifiSetupPending)
+    {
+      g_wifiSetupPending = false;
+      // Give the HTTP response 2 s to be delivered, then stop the AP.
+      g_apStopAt = millis() + 2000;
+      DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
+    }
+    server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
+  }
+  else
+  {
+    server.send(200, "application/json", "{\"connected\":false}");
+  }
+}
+
+
 
 void Webserver_ShowTelegram_Raw()
 {
@@ -2841,6 +3732,7 @@ void Webserver_ShowLastMeterValue()
 void Param_configSaved()
 {
   DLOGLN("Configuration was updated.");
+  redirect_to_sysinfo = true;
   Led_update_Blink();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);

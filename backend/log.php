@@ -71,6 +71,8 @@ function getStatusDescription(int $statusCode): string
         // --- Backend connection ---
         case 4000: return "Connection to server failed (certificate?)";
         case 4001: return "Error transmitting Buffer Chunk";
+        case 4002: return "Meter values send failed (no HTTP 200)";
+        case 4003: return "Log send failed (no HTTP 200)";
 
         // --- MyStrom / PV ---
         case 5000: return "myStrom: connection failed";
@@ -85,6 +87,20 @@ function getStatusDescription(int $statusCode): string
         case 8004: return "No cert received";
 
         default:   return "Unknown status code ($statusCode)";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Update meter model if supplied
+// ---------------------------------------------------------------------------
+if (!empty($_GET['model'])) {
+    $model = substr(preg_replace('/[^\x20-\x7E]/', '', $_GET['model']), 0, 64);
+    if ($model !== '') {
+        global $_link;
+        $stmt = mysqli_prepare($_link, "UPDATE clients SET meter_model = ? WHERE device_id = ?");
+        mysqli_stmt_bind_param($stmt, "ss", $model, $id);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
     }
 }
 
