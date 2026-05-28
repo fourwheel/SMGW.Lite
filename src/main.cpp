@@ -2618,24 +2618,24 @@ void myStrom_get_Meter_value()
   DLOGLN(F("myStrom_get_Meter_value Connecting..."));
   WiFiClient client;
   client.setTimeout(1000);
-  if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = -1; return; }
+  if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = 0; return; }
 
   DLOGLN(F("myStrom_get_Meter_value Connected!"));
   client.println(F("GET /report HTTP/1.0"));
   client.print(F("Host: ")); client.println(mystrom_PV_IP);
   client.println(F("Connection: close"));
-  if (client.println() == 0) { Log_AddEntry(5001); client.stop(); LastMeterValue.solar = -2; return; }
+  if (client.println() == 0) { Log_AddEntry(5001); client.stop(); LastMeterValue.solar = 0; return; }
 
   char status[32] = {0};
   client.readBytesUntil('\r', status, sizeof(status));
-  if (strcmp(status + 9, "200 OK") != 0) { client.stop(); LastMeterValue.solar = -3; return; }
+  if (strcmp(status + 9, "200 OK") != 0) { client.stop(); LastMeterValue.solar = 0; return; }
 
   char endOfHeaders[] = "\r\n\r\n";
-  if (!client.find(endOfHeaders)) { client.stop(); LastMeterValue.solar = -4; return; }
+  if (!client.find(endOfHeaders)) { client.stop(); LastMeterValue.solar = 0; return; }
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, client);
-  if (error) { Log_AddEntry(5002); client.stop(); LastMeterValue.solar = -5; return; }
+  if (error) { Log_AddEntry(5002); client.stop(); LastMeterValue.solar = 0; return; }
 
   LastMeterValue.temperature = doc["temperature"].as<float>() * 100;
   LastMeterValue.solar       = doc["energy_since_boot"].as<int>();

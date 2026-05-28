@@ -148,9 +148,11 @@ for ($i = 0; $i < $dataCount; $i++) {
     $meter_solar = $parsed['solar'] ?? null;
     $obis280     = $parsed['m280']  ?? null;
 
-    // 0xFFFFFFFF is the client sentinel for "no valid solar reading available"
-    // (e.g. MyStrom unreachable). Treat it as null so the DB receives NULL.
-    if ($meter_solar === 4294967295) $meter_solar = null;
+    // Values near UINT32_MAX are error sentinels from the firmware:
+    // the myStrom function returns -1…-5 on failure, which wrap to uint32_t
+    // as 0xFFFFFFFF…0xFFFFFFFB (4294967295…4294967291).
+    // Any value >= 0xFFFFFFF0 is treated as "no valid reading" → NULL.
+    if ($meter_solar !== null && $meter_solar >= 4294967280) $meter_solar = null;
 
     // Skip uninitialised / empty slots.
     // The ESP32 zeroes the entire buffer on init and after a successful send,
@@ -322,9 +324,9 @@ foreach ($entries as $item) {
     // Temperature is stored as integer * 100 on the ESP32 (e.g. 2150 = 21.50 degC)
     $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : 0.0;
 
-    // Default optional fields to 0 when they were not included in this payload
-    $solar_val   = $item["meter_solar"] ?? 0;
-    $obis280_val = $item["obis280"]     ?? 0;
+    // Optional fields are NULL when not included in this payload (vs. 0 which is a valid reading)
+    $solar_val   = $item["meter_solar"] ?? null;
+    $obis280_val = $item["obis280"]     ?? null;
 
     mysqli_stmt_bind_param($insert, "siidddd",
         $id,
