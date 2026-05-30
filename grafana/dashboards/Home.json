@@ -1,0 +1,129 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "# Willkommen beim SmartMeterLite-Portal\n\nHier findest du alle Auswertungen deines intelligenten Stromzählers. Wähle eines der Dashboards unten, um loszulegen.\n\n> **Hinweis:** Über den Gerätenamen-Filter (Variable `id`) wählst du in jedem Dashboard, welches deiner Geräte du betrachten möchtest.",
+        "mode": "markdown"
+      },
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "gridPos": {
+        "h": 14,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 2,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "## 📊 Messwerte im Detail\n\nAktuelle Messwerte deines SmartMeterLite-Geräts in Echtzeit und im Zeitverlauf:\n\n- **Zählerstand** (Bezug & Einspeisung)\n- **Momentanleistung** und Energieflussrichtung\n- **CO₂-Emission** des aktuellen Strommixes\n- **Börsenstrompreis** (Day-Ahead)\n- Berechnete **Jahresenergie** auf Basis der Messwerte\n\nIdeal für den täglichen Blick auf Verbrauch und Einspeisung.\n\n---\n\n[**→ Dashboard öffnen**](/d/eejzz2fvkpgjkc)",
+        "mode": "markdown"
+      },
+      "title": "Messwerte im Detail",
+      "type": "text"
+    },
+    {
+      "gridPos": {
+        "h": 14,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "id": 3,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "## 📅 Stunden- und Tagesprofil\n\nAggregierte Auswertungen über längere Zeiträume:\n\n- **Stundenprofil:** Verbrauch und Einspeisung je Stunde eines Tages\n- **Tagesprofil:** Tägliche Energiemengen im Wochenvergleich\n- Zeitraum frei wählbar über den Grafana-Zeitfilter\n\nPerfekt für Verbrauchsanalysen: *Wann verbrauche ich am meisten? Wie viel habe ich letzte Woche eingespeist?*\n\n---\n\n[**→ Dashboard öffnen**](/d/aej609tmsks8wc)",
+        "mode": "markdown"
+      },
+      "title": "Stunden- und Tagesprofil",
+      "type": "text"
+    },
+    {
+      "gridPos": {
+        "h": 14,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "id": 4,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "## ⚙️ Konfiguration & Troubleshooting\n\nAlles rund um Einrichtung und Betrieb deines Geräts:\n\n- **IP-Adressen** deiner Geräte im Heimnetz\n- Erklärung aller **Konfigurationsparameter**\n- Anleitung: **WLAN-Zugangsdaten ändern**\n- **Factory Reset** mit GPIO-Pinout-Übersicht\n- **Häufige Fehlercodes** und ihre Bedeutung\n- **PIN-Assistent** für die optische Schnittstelle\n\n---\n\n[**→ Dashboard öffnen**](/d/la4rkc7)",
+        "mode": "markdown"
+      },
+      "title": "Konfiguration & Troubleshooting",
+      "type": "text"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 38,
+  "tags": [
+    "home"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Home",
+  "uid": "home",
+  "version": 1,
+  "weekStart": ""
+}

@@ -2517,14 +2517,28 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 
   // Only update globals if the main consumption register was found.
   // All other fields are optional — some meters don't transmit them.
+  //
+  // Build the update in a local struct first, then assign to LastMeterValue in
+  // one shot. This avoids a SMP race condition: telegramTask runs on Core 0
+  // while the webserver / MeterValue_store run on Core 1. The old approach
+  // called resetMeterValue() (which zeroed meter_value_180) and then assigned
+  // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
+  // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
-    resetMeterValue(LastMeterValue);
-    LastMeterValue.meter_value_180 = temp180;
-    LastMeterValue.timestamp       = Time_getEpochTime();
-    if (found280) LastMeterValue.meter_value_280 = temp280;
-    LastMeterValue.power_import = temp170;
-    LastMeterValue.power_export = temp270;
-    LastMeterValue.net_power    = (int32_t)temp167; // reinterpret two's complement
+    MeterValue newVal = {};
+    // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
+    if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
+    // Always preserve the externally-sourced temperature reading
+    newVal.temperature     = LastMeterValue.temperature;
+    newVal.meter_value_180 = temp180;
+    newVal.meter_value_280 = found280 ? temp280 : 0;
+    newVal.power_import    = temp170;
+    newVal.power_export    = temp270;
+    newVal.net_power       = (int32_t)temp167;
+    newVal.timestamp       = Time_getEpochTime();
+    // Single struct assignment: meter_value_180 goes from old value to temp180,
+    // never through 0, eliminating the race window.
+    LastMeterValue = newVal;
     return true;
   }
   return false;
@@ -2951,16 +2965,23 @@ bool MeterValue_store(bool override)
 
   if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
 
-  if (LastMeterValue.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
+  // Snapshot LastMeterValue once. myStrom_get_Meter_value() above is a blocking
+  // network call; while it is blocked, telegramTask (Core 0) may update
+  // LastMeterValue concurrently. Taking a snapshot after the blocking call and
+  // using it exclusively below prevents reading an inconsistent (partially-written)
+  // struct from the other core.
+  MeterValue snap = LastMeterValue;
+
+  if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
 
   // Skip storing if the value has not changed since the last successful store.
   // Time thresholds differ: TAF14 (non-override) waits 15 min,
   // TAF7 (override) only 1 min, to capture short power spikes.
   if (((override == false && millis() - last_meter_value_successful < 900000) ||
        (override == true  && millis() - last_meter_value_successful < 60000))
-    && LastMeterValue.meter_value_180 == PrevMeterValue.meter_value_180
-    && LastMeterValue.meter_value_280 == PrevMeterValue.meter_value_280
-    && LastMeterValue.solar           == PrevMeterValue.solar)
+    && snap.meter_value_180 == PrevMeterValue.meter_value_180
+    && snap.meter_value_280 == PrevMeterValue.meter_value_280
+    && snap.solar           == PrevMeterValue.solar)
   {
     Log_AddEntry(1201);
     return false;
@@ -2981,11 +3002,11 @@ bool MeterValue_store(bool override)
     // Fields that are disabled (temperature, solar, obis280) are silently
     // skipped inside MeterValue_write() — they consume no bytes.
     MeterValue_write(write_i,
-      LastMeterValue.timestamp,
-      LastMeterValue.meter_value_180,
-      LastMeterValue.temperature,
-      LastMeterValue.solar,
-      LastMeterValue.meter_value_280
+      snap.timestamp,
+      snap.meter_value_180,
+      snap.temperature,
+      snap.solar,
+      snap.meter_value_280
     );
 
     if (override)
@@ -3020,7 +3041,7 @@ bool MeterValue_store(bool override)
     return false;
   }
 
-  PrevMeterValue = LastMeterValue; // remember last stored value for change detection
+  PrevMeterValue = snap; // remember last stored value for change detection
   return true;
 }
 
