@@ -140,14 +140,37 @@ for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
     ];
 }
 
-// Sort descending by timestamp; use uptime (ms since boot) as tiebreaker
-// for entries that share the same second.
-usort($logEntries, function($a, $b) {
-    if ($a['timestamp'] !== $b['timestamp'])
-        return $b['timestamp'] <=> $a['timestamp'];
-    return $b['uptime'] <=> $a['uptime'];
-});
+// ---------------------------------------------------------------------------
+// Persist log entries to the database
+// ---------------------------------------------------------------------------
+
+// Delete entries older than 30 days for this device (rolling cleanup)
+$stmt = mysqli_prepare($_link,
+    "DELETE FROM device_logs WHERE device_id = ? AND received_at < NOW() - INTERVAL 30 DAY");
+mysqli_stmt_bind_param($stmt, "s", $id);
+mysqli_stmt_execute($stmt);
+mysqli_stmt_close($stmt);
+
+// Batch-insert with INSERT IGNORE to skip duplicates (same device + timestamp +
+// uptime + status_code) that occur when the device re-sends the same buffer.
+$inserted = 0;
+if (!empty($logEntries)) {
+    $stmt = mysqli_prepare($_link,
+        "INSERT IGNORE INTO device_logs (device_id, timestamp_client, uptime_ms, status_code)
+         VALUES (?, ?, ?, ?)");
+    foreach ($logEntries as $entry) {
+        mysqli_stmt_bind_param($stmt, "siii",
+            $id,
+            $entry['timestamp'],
+            $entry['uptime'],
+            $entry['statusCode']
+        );
+        mysqli_stmt_execute($stmt);
+        $inserted += mysqli_stmt_affected_rows($stmt);
+    }
+    mysqli_stmt_close($stmt);
+}
 
 http_response_code(200);
-echo "Log received (" . count($logEntries) . " entries).";
+echo "Log received (" . count($logEntries) . " entries, $inserted new).";
 ?>

@@ -66,6 +66,27 @@ ALTER TABLE `sml_v1`
   MODIFY `i` int(11) NOT NULL AUTO_INCREMENT;
 COMMIT;
 
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `device_logs`
+-- Stores the binary log buffer sent by each ESP32 device.
+-- Entries older than 30 days are deleted automatically by log.php on each POST.
+--
+
+CREATE TABLE `device_logs` (
+  `id`               int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `device_id`        varchar(3)       NOT NULL,
+  `timestamp_client` int(10) UNSIGNED NOT NULL COMMENT 'Unix epoch from the device clock',
+  `uptime_ms`        int(10) UNSIGNED NOT NULL COMMENT 'millis() at the time of the log entry',
+  `status_code`      int(11)          NOT NULL,
+  `received_at`      datetime         NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  -- Prevents duplicate rows when the device re-sends the same buffer
+  UNIQUE KEY `uq_log_entry` (`device_id`, `timestamp_client`, `uptime_ms`, `status_code`),
+  KEY `idx_device_received` (`device_id`, `received_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Triggers for table `clients`
 -- Automatically hashes the token with SHA-256 on insert and update,
