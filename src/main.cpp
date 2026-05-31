@@ -1601,7 +1601,7 @@ void Webserver_Flashlight()
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
-<title>PIN Assistant</title>
+<title>SmartMeterLite – PIN Assistant</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -1809,7 +1809,7 @@ void Webserver_PinAssistantDeluxe()
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
-<title>PIN Assistant Deluxe</title>
+<title>SmartMeterLite – PIN Assistant Deluxe</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -2072,6 +2072,13 @@ void Webserver_UrlConfig()
   server.on("/connecttest.txt",          [] { server.send(200, "text/plain", "Microsoft Connect Test"); });
   server.on("/ncsi.txt",                 [] { server.send(200, "text/plain", "Microsoft NCSI"); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
+  server.on("/favicon.ico", [] {
+    server.send(200, "image/svg+xml",
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+      "<rect width='32' height='32' rx='6' fill='#1a3799'/>"
+      "<polygon points='19,2 9,18 16,18 13,30 23,14 16,14' fill='#ffffff'/>"
+      "</svg>");
+  });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
@@ -2304,6 +2311,10 @@ protected:
            "&#9989; Konfiguration gespeichert &ndash; <a href='/'>Zur Startseite</a></div>";
   }
   String getEnd() override { return "</div></body></html>"; }
+  String getHeadExtension() override {
+    return "<link rel='icon' type='image/svg+xml' href='/favicon.ico'>"
+           "<script>document.title='SmartMeterLite – Konfiguration';</script>";
+  }
 };
 
 SmartMeterHtmlFormatProvider customHtmlFormatProvider;
@@ -3267,9 +3278,7 @@ void Webserver_HandleSysInfo()
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>)rawliteral";
-  s += thingName;
-  s += R"rawliteral(</title>)rawliteral";
+<title>SmartMeterLite – Details</title>)rawliteral";
   s += HTML_STYLE_MODERN;
   s += R"rawliteral(</head>
 <body>
@@ -3662,10 +3671,10 @@ footer a:hover{color:#1a3799;}
     uint32_t v = LastMeterValue.meter_value_180;
     snprintf(valBuf, sizeof(valBuf), "%lu,%04lu", (unsigned long)(v / 10000), (unsigned long)(v % 10000));
     s += "<div class='m-row'><div class='m-row-l'>"
-         "<span class='m-arr'>&#8595;</span><span class='m-val'>" + String(valBuf) + "</span>"
+         "<span class='m-arr'>&#8595;</span><span class='m-val' id='val180'>" + String(valBuf) + "</span>"
          "<span class='m-unit'>kWh</span></div>";
     if (!netOnly && importW > 0)
-      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(importW) + "</span></div>";
+      s += "<div class='m-pwr'><span class='m-pwr-val' id='pwr-import'>" + pwrStr(importW) + "</span></div>";
     s += "</div>";
   } else {
     s += "<div class='m-age' style='margin:.6rem 0;'>Warte auf Telegramm&#8239;&#8230;</div>";
@@ -3678,10 +3687,10 @@ footer a:hover{color:#1a3799;}
     const char* arr = calcNet >= 0 ? "&#8595;" : "&#8593;";
     const char* lbl = calcNet >= 0 ? "Netzbezug" : "Netzeinspeisung";
     s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
-         "<span class='m-arr'>" + String(arr) + "</span>"
-         "<span class='m-pwr-val'>" + pwrStr(absP) + "</span>"
+         "<span class='m-arr' id='net-arr'>" + String(arr) + "</span>"
+         "<span class='m-pwr-val' id='net-val'>" + pwrStr(absP) + "</span>"
          "</div>"
-         "<span class='m-net-lbl'>" + String(lbl) + "</span></div>";
+         "<span class='m-net-lbl' id='net-lbl'>" + String(lbl) + "</span></div>";
   }
 
   // 2.8.0 — Einspeisung (↑) + Export-Leistung rechts, nur wenn > 0
@@ -3691,18 +3700,18 @@ footer a:hover{color:#1a3799;}
     snprintf(val2Buf, sizeof(val2Buf), "%lu,%04lu", (unsigned long)(v2 / 10000), (unsigned long)(v2 % 10000));
     s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
          "<span class='m-arr'>&#8593;</span>"
-         "<span class='m-val2'>" + String(val2Buf) + "</span>"
+         "<span class='m-val2' id='val280'>" + String(val2Buf) + "</span>"
          "<span class='m-unit'>kWh</span></div>";
     if (!netOnly && exportW > 0)
-      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(exportW) + "</span></div>";
+      s += "<div class='m-pwr'><span class='m-pwr-val' id='pwr-export'>" + pwrStr(exportW) + "</span></div>";
     s += "</div>";
   }
 
   if (hasReading) {
     if (ageS >= kNoTelegramThresholdS)
-      s += "<div class='m-age m-age-warn'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
+      s += "<div class='m-age m-age-warn' id='m-age'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
     else
-      s += "<div class='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
+      s += "<div class='m-age' id='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
   }
   s += "</div>";
 
@@ -3767,6 +3776,45 @@ footer a:hover{color:#1a3799;}
 <a href='https://www.linkedin.com/in/laurin-vierrath/' target='_blank' rel='noopener'>&#128039; From Laurin with Love</a>
 </footer>
 </body></html>)rawliteral";
+  // Inject live-update script — needsReload/had280 are set from current server state
+  s += "<script>var needsReload=";
+  s += hasReading ? "false" : "true";
+  s += ";var had280=";
+  s += (hasReading && LastMeterValue.meter_value_280 > 0) ? "true" : "false";
+  s += R"rawliteral(;
+function _set(id,txt){var e=document.getElementById(id);if(e)e.textContent=txt;}
+function _pwr(w){var a=Math.abs(w);return a>=1000?(a/1000).toFixed(2)+' kW':a+' W';}
+function _meter(v){return Math.floor(v/10000)+','+String(v%10000).padStart(4,'0');}
+function _live(d){
+  if(needsReload&&d.meter_value_180>0){location.reload();return;}
+  if(!had280&&d.meter_value_280>0){location.reload();return;}
+  _set('val180',_meter(d.meter_value_180));
+  if(d.meter_value_280>0)_set('val280',_meter(d.meter_value_280));
+  var imp=d.power_import,exp=d.power_export,net=d.net_power;
+  if(imp>0&&exp>0){
+    _set('pwr-import',_pwr(imp));_set('pwr-export',_pwr(exp));
+    var calc=imp-exp;
+    _set('net-arr',calc>=0?'↓':'↑');
+    _set('net-val',_pwr(Math.abs(calc)));
+    _set('net-lbl',calc>=0?'Netzbezug':'Netzeinspeisung');
+  }else if(net!==0){
+    _set('net-arr',net>=0?'↓':'↑');
+    _set('net-val',_pwr(net));
+    _set('net-lbl',net>=0?'Netzbezug':'Netzeinspeisung');
+  }else if(imp>0){
+    _set('net-arr','↓');_set('net-val',_pwr(imp));_set('net-lbl','Netzbezug');
+  }else if(exp>0){
+    _set('net-arr','↑');_set('net-val',_pwr(exp));_set('net-lbl','Netzeinspeisung');
+  }
+  var ageS=d.timestamp>0?Math.round(Date.now()/1000-d.timestamp):0;
+  var el=document.getElementById('m-age');
+  if(el){
+    if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
+    else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+' s';}
+  }
+}
+setInterval(function(){fetch('/showLastMeterValue').then(function(r){return r.json();}).then(_live).catch(function(){});},2000);
+</script>)rawliteral";
 
   server.send(200, "text/html", s);
 }
@@ -3966,7 +4014,10 @@ void Webserver_ShowTelegram()
   s += String(millis() - lastByteTime) + " ms ago";
   s += R"rawliteral(</div>
 <div class="kv last"><span class="kl">Last complete telegram</span>)rawliteral";
-  s += Time_formatTimestamp(timestamp_telegram) + " (" + String(Time_getEpochTime() - timestamp_telegram) + " s ago)";
+  if (LastMeterValue.timestamp > 0)
+    s += Time_formatTimestamp(LastMeterValue.timestamp) + " (" + String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago)";
+  else
+    s += "–";
   s += R"rawliteral(</div>
 </div>
 <div class="card" style="max-width:420px;">
