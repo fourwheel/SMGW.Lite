@@ -121,6 +121,7 @@ if ($contentLength > 36864) {
 
 $inputData    = file_get_contents("php://input");
 $logEntrySize = 12; // 3 x 4 bytes
+$totalSlots   = intdiv(strlen($inputData), $logEntrySize);
 $logEntries   = [];
 
 for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
@@ -133,11 +134,32 @@ for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
     if ($statusCode === -1) continue;
 
     $logEntries[] = [
+        'physIdx'     => intdiv($i, $logEntrySize),
         'timestamp'   => $timestamp,
         'uptime'      => $uptime,
         'statusCode'  => $statusCode,
         'description' => getStatusDescription($statusCode),
     ];
+}
+
+// Reconstruct the ring-buffer traversal order without sorting by uptime:
+// The entry with the smallest uptime is the oldest — it sits right after the
+// write pointer. We use its physical slot as the origin and sort every entry
+// by its modular distance from that origin, which reproduces the exact order
+// the firmware wrote the entries. Ties in minimum uptime use the lower physIdx
+// as origin, which is correct for both the not-yet-full and the wrapped case.
+if (!empty($logEntries)) {
+    $minUptime = min(array_column($logEntries, 'uptime'));
+    $origin    = PHP_INT_MAX;
+    foreach ($logEntries as $e) {
+        if ($e['uptime'] === $minUptime) {
+            $origin = min($origin, $e['physIdx']);
+        }
+    }
+    usort($logEntries, fn($a, $b) =>
+        (($a['physIdx'] - $origin + $totalSlots) % $totalSlots)
+        <=> (($b['physIdx'] - $origin + $totalSlots) % $totalSlots)
+    );
 }
 
 // ---------------------------------------------------------------------------
