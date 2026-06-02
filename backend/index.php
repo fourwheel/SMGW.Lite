@@ -346,87 +346,42 @@ echo $inserted . " values inserted.";
 
 
 // ---------------------------------------------------------------------------
-// Diagnostic log — written whenever at least one entry was rejected.
-// File: log/YYYY-MM-DD-HH-ii-ss-{ID}-diag.txt
-// Fixed-width plain text; rejected rows include a verbose explanation.
+// Diagnostic log — persisted to sml_diag whenever at least one entry was
+// rejected. Stores both accepted and rejected rows for full batch context.
+// Entries older than 30 days are removed on a rolling basis.
 // ---------------------------------------------------------------------------
-$rejected_count = count($diag_rows) - $inserted;
-if ($rejected_count > 0) {
-    $diag_file = "log/" . date("Y-m-d-H-i-s") . "-" . preg_replace('/[^A-Za-z0-9_-]/', '', $id) . "-diag.txt";
-    $fh = fopen($diag_file, "w");
-    if ($fh) {
-        // ── Header ───────────────────────────────────────────────────────────
-        fwrite($fh, "Device  : $id\n");
-        fwrite($fh, "Received: " . date("Y-m-d H:i:s") . " UTC\n");
-        fwrite($fh, "Batch   : " . count($diag_rows) . " entries received, $inserted inserted, $rejected_count rejected\n");
-        fwrite($fh, "\n");
+$batch_received = count($diag_rows);
+$batch_rejected = $batch_received - $inserted;
 
-        // ── Column header ────────────────────────────────────────────────────
-        $sep = str_repeat("-", 118) . "\n";
-        fwrite($fh, sprintf("     %-3s  %-19s  %-11s  %-11s  %-9s  %-7s  %-8s  %-11s  %-11s  %s\n",
-            "#", "Timestamp (UTC)", "Unix TS", "Meter", "Solar", "Temp°C", "Power W", "Prev TS", "Prev Meter", "Status"
-        ));
-        fwrite($fh, $sep);
+if ($batch_rejected > 0) {
+    $stmt = mysqli_prepare($_link,
+        "DELETE FROM sml_diag WHERE device_id = ? AND received_at < NOW() - INTERVAL 30 DAY");
+    mysqli_stmt_bind_param($stmt, "s", $id);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
 
-        // ── Rows ─────────────────────────────────────────────────────────────
-        foreach ($diag_rows as $i => $r) {
-            $ok    = ($r['status'] === "OK");
-            $mark  = $ok ? "   " : ">>>";
-            $solar = ($r['solar'] !== "") ? (string)$r['solar'] : "-";
-            $temp  = ($r['temp']  !== "") ? (string)$r['temp']  : "-";
+    $stmt = mysqli_prepare($_link,
+        "INSERT INTO sml_diag
+            (device_id, received_at, batch_received, batch_inserted, batch_rejected,
+             entry_index, timestamp_client, meter, solar, temp_c, power_w,
+             prev_ts, prev_meter, status, is_ok)
+         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
-            fwrite($fh, sprintf("%s  %-3d  %-19s  %-11d  %-11d  %-9s  %-7s  %-8d  %-11d  %-11d  %s\n",
-                $mark,
-                $i + 1,
-                $r['ts_fmt'],
-                $r['ts'],
-                $r['meter'],
-                $solar,
-                $temp,
-                $r['power_w'],
-                $r['prev_ts'],
-                $r['prev_m'],
-                $r['status']
-            ));
+    foreach ($diag_rows as $i => $r) {
+        $solar  = ($r['solar'] !== "") ? (float)$r['solar'] : null;
+        $temp_c = ($r['temp']  !== "") ? (float)$r['temp']  : null;
+        $is_ok  = ($r['status'] === "OK") ? 1 : 0;
+        $idx    = $i + 1;
 
-            if (!$ok) {
-                $delta_t = $r['ts'] - $r['prev_ts'];
-                $delta_m = $r['meter'] - $r['prev_m'];
-                switch (true) {
-                    case $r['status'] === "older_than_db_prev":
-                        fwrite($fh, "       ↳ Entry TS (" . $r['ts'] . ") < last DB TS (" . $r['prev_ts'] . "),  Δt = {$delta_t} s\n");
-                        fwrite($fh, "         Wahrscheinliche Ursache: gepufferter TAF-14-Wert, der ankam, nachdem ein\n");
-                        fwrite($fh, "         neuerer TAF-7-Wert bereits in einer früheren Backend-Übertragung gespeichert\n");
-                        fwrite($fh, "         wurde (z. B. ESP hat 200 OK nicht empfangen und nochmals gesendet).\n");
-                        break;
-                    case $r['status'] === "duplicate_timestamp":
-                        fwrite($fh, "       ↳ TS (" . $r['ts'] . ") == last DB TS — exaktes Duplikat.\n");
-                        fwrite($fh, "         Wahrscheinliche Ursache: ESP32 hat die Übertragung wiederholt, weil das\n");
-                        fwrite($fh, "         200 OK vom Server nicht angekommen ist; der Wert wurde bereits gespeichert.\n");
-                        break;
-                    case str_starts_with($r['status'], "meter_rollback"):
-                        fwrite($fh, "       ↳ Zählerstand (" . $r['meter'] . ") < Vorwert (" . $r['prev_m'] . "),  Δmeter = {$delta_m}\n");
-                        fwrite($fh, "         Wahrscheinliche Ursache: Zählerüberlauf, Neustart des Zählers oder\n");
-                        fwrite($fh, "         falsches Gerät sendet unter dieser ID.\n");
-                        break;
-                    case str_starts_with($r['status'], "power_out_of_range"):
-                        $delta_wh = round($delta_m / 10.0, 1);
-                        fwrite($fh, "       ↳ Berechnete Leistung außerhalb [0 W … 40 kW].\n");
-                        fwrite($fh, "         Δt = {$delta_t} s,  Δmeter = {$delta_m} raw = {$delta_wh} Wh,  implizierte Leistung = " . $r['power_w'] . " W\n");
-                        fwrite($fh, "         Wahrscheinliche Ursache: sehr großes Zeitfenster zwischen zwei Messwerten\n");
-                        fwrite($fh, "         oder implausible Zählersprung (z. B. nach Neustart).\n");
-                        break;
-                    default:
-                        fwrite($fh, "       ↳ Status: " . $r['status'] . "\n");
-                }
-                fwrite($fh, "\n");
-            }
-        }
-
-        // ── Footer ───────────────────────────────────────────────────────────
-        fwrite($fh, $sep);
-        fwrite($fh, "Summary: " . count($diag_rows) . " received, $inserted inserted, $rejected_count rejected.\n");
-        fclose($fh);
+        // Types: s device_id, i×6 batch/entry ints, d×2 solar+temp (nullable),
+        //        i×3 power/prev ints, s status, i is_ok
+        mysqli_stmt_bind_param($stmt, "siiiiiiddiiisi",
+            $id, $batch_received, $inserted, $batch_rejected,
+            $idx, $r['ts'], $r['meter'], $solar, $temp_c,
+            $r['power_w'], $r['prev_ts'], $r['prev_m'], $r['status'], $is_ok
+        );
+        mysqli_stmt_execute($stmt);
     }
+    mysqli_stmt_close($stmt);
 }
 ?>

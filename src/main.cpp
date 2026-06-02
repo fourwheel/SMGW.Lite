@@ -141,7 +141,9 @@ bool MeterValue_trigger_non_override = false;
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
-unsigned long last_reconnect_attempt = 0;
+unsigned long last_reconnect_attempt      = 0;
+unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
+unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
 
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
@@ -231,6 +233,7 @@ unsigned long last_remote_meter_value = 0;
 void handle_call_backend();
 void handle_check_wifi_connection();
 void handle_MeterValue_trigger();
+void handle_telegram_watchdog();
 void handle_MeterValue_store();
 void handle_temperature();
 void Led_update_Blink();
@@ -772,6 +775,7 @@ void MeterValue_init_Buffer()
 }
 
 bool b_send_log_to_backend = false;
+bool b_send_log_urgent     = false; // triggers immediate log.php call, independent of meter value cycle
 
 String Log_StatusCodeToString(int statusCode)
 {
@@ -810,6 +814,7 @@ String Log_StatusCodeToString(int statusCode)
   case 3002: return "Telegram timeout";
   case 3003: return "SML Protocoll";
   case 3004: return "IEC Protocoll";
+  case 3005: return "No telegram received for 5 min";
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
@@ -2169,6 +2174,7 @@ void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
   LogBuffer_reset();
+  last_telegram_received = millis(); // start watchdog timer from boot
   Log_AddEntry(1001);
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
@@ -2765,6 +2771,11 @@ void handle_Telegram_receive()
       parsed = Telegram_parse_IEC(telegram_receive_buffer, telegram_receive_bufferIndex);
       if (parsed) last_detected_protocol = TelegramProtocol::IEC;
     }
+    if (parsed)
+    {
+      last_telegram_received = millis(); // reset watchdog
+      last_urgent_log_call   = 0;       // restart alert cycle if meter comes back online
+    }
     if(last_detected_protocol != prev_detected_protocol){
       if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
       else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddEntry(3004);
@@ -2986,16 +2997,27 @@ bool MeterValue_store(bool override)
   if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
 
   // Skip storing if the value has not changed since the last successful store.
-  // Time thresholds differ: TAF14 (non-override) waits 15 min,
-  // TAF7 (override) only 1 min, to capture short power spikes.
-  if (((override == false && millis() - last_meter_value_successful < 900000) ||
-       (override == true  && millis() - last_meter_value_successful < 60000))
-    && snap.meter_value_180 == PrevMeterValue.meter_value_180
+  if (snap.meter_value_180 == PrevMeterValue.meter_value_180
     && snap.meter_value_280 == PrevMeterValue.meter_value_280
     && snap.solar           == PrevMeterValue.solar)
   {
-    Log_AddEntry(1201);
-    return false;
+    // Timestamp unchanged = no new telegram received (e.g. meter reader slipped off).
+    // Never re-store a frozen reading regardless of elapsed time — this prevents
+    // an infinite loop where TAF7 keeps re-queuing the same stale entry after the
+    // backend accepts it with HTTP 200 and clears the buffer.
+    if (snap.timestamp == PrevMeterValue.timestamp)
+    {
+      Log_AddEntry(1201);
+      return false;
+    }
+    // New telegram received but counter value unchanged — apply time-based cooldown.
+    // TAF14 (non-override) waits 15 min, TAF7 (override) only 1 min.
+    if ((override == false && millis() - last_meter_value_successful < 900000) ||
+        (override == true  && millis() - last_meter_value_successful < 60000))
+    {
+      Log_AddEntry(1201);
+      return false;
+    }
   }
 
   // Select write index based on priority:
@@ -3123,10 +3145,38 @@ void handle_temperature()
   }
 }
 
+// ---------------------------------------------------------------------------
+// handle_telegram_watchdog
+// Fires status 1024 and an urgent log.php call if no telegram has been
+// received for 5 minutes (e.g. optical reader slipped off the meter).
+// Repeats every 30 minutes while the meter remains silent.
+// Resets automatically when a new telegram arrives (see handle_Telegram_receive).
+// ---------------------------------------------------------------------------
+void handle_telegram_watchdog()
+{
+  if (millis() - last_telegram_received < 300000UL) return; // within 5-min grace period
+
+  // Fire on first alert (last_urgent_log_call == 0) or every 30 min thereafter.
+  if (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL)
+  {
+    Log_AddEntry(3005);
+    b_send_log_urgent    = true;
+    last_urgent_log_call = millis();
+  }
+}
+
 void handle_call_backend()
 {
   if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
+    // Urgent log call — triggered by alerts like "no telegram for 5 min".
+    // Runs independently of the meter value backend cycle.
+    if (b_send_log_urgent)
+    {
+      b_send_log_urgent = false;
+      Webclient_Send_Log_to_backend_wrapper();
+    }
+
     if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
@@ -3228,6 +3278,7 @@ void loop()
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
+  handle_telegram_watchdog();
   handle_call_backend();
 }
 

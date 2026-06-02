@@ -67,6 +67,7 @@ function getStatusDescription(int $statusCode): string
         case 3002: return "Telegram timeout";
         case 3003: return "Protocol detected: SML";
         case 3004: return "Protocol detected: IEC 62056-21";
+        case 3005: return "No telegram received for 5 min";
 
         // --- Backend connection ---
         case 4000: return "Connection to server failed (certificate?)";
