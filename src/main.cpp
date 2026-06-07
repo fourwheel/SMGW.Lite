@@ -259,7 +259,6 @@ String Time_formatUptime();
 String Time_getFormattedTime();
 unsigned long Time_getEpochTime();
 int Time_getMinutes();
-bool Telegram_prefix_suffix_correct();
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
@@ -809,6 +808,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1204: return "prefix suffix not correct";
   case 1205: return "Error Buffer Size Exceeded";
   case 1206: return "Buffer Full, cannot store non-override value";
+  case 1207: return "meter_value_180 < PrevMeterValue — truncated telegram discarded";
   case 3000: return "Complete Telegram received";
   case 3001: return "Telegram Buffer overflow";
   case 3002: return "Telegram timeout";
@@ -2542,6 +2542,10 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
   // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
+    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180) {
+      Log_AddEntry(1207);
+      return false;
+    }
     MeterValue newVal = {};
     // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
     if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
@@ -2607,8 +2611,14 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   float kWh180 = atof(valueStr);
   if (kWh180 <= 0.0f) return false; // implausible value
 
+  uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
+  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
+    Log_AddEntry(1207);
+    return false;
+  }
+
   resetMeterValue(LastMeterValue);
-  LastMeterValue.meter_value_180 = (uint32_t)(kWh180 * 10000.0f);
+  LastMeterValue.meter_value_180 = new180;
   LastMeterValue.timestamp       = Time_getEpochTime();
 
   // Helper lambda: find OBIS label in IEC text, parse the float value after '('
