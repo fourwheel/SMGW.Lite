@@ -2546,6 +2546,10 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
       Log_AddEntry(1207);
       return false;
     }
+    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280) {
+      Log_AddEntry(1207);
+      return false;
+    }
     MeterValue newVal = {};
     // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
     if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
@@ -2611,16 +2615,6 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   float kWh180 = atof(valueStr);
   if (kWh180 <= 0.0f) return false; // implausible value
 
-  uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
-  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
-    Log_AddEntry(1207);
-    return false;
-  }
-
-  resetMeterValue(LastMeterValue);
-  LastMeterValue.meter_value_180 = new180;
-  LastMeterValue.timestamp       = Time_getEpochTime();
-
   // Helper lambda: find OBIS label in IEC text, parse the float value after '('
   auto parseIecObis = [&](const char* label, float* out) -> bool {
     const char *p = strstr(telegram_str, label);
@@ -2638,9 +2632,27 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
     return true;
   };
 
-  float v280 = 0.0f, v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
-  if (parseIecObis("1-0:2.8.0", &v280))
-    LastMeterValue.meter_value_280 = (uint32_t)(v280 * 10000.0f);
+  uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
+  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
+    Log_AddEntry(1207);
+    return false;
+  }
+
+  float v280_raw = 0.0f;
+  bool has280 = parseIecObis("1-0:2.8.0", &v280_raw);
+  uint32_t new280 = has280 ? (uint32_t)(v280_raw * 10000.0f) : 0;
+  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280) {
+    Log_AddEntry(1207);
+    return false;
+  }
+
+  resetMeterValue(LastMeterValue);
+  LastMeterValue.meter_value_180 = new180;
+  LastMeterValue.timestamp       = Time_getEpochTime();
+
+  float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
+  if (has280)
+    LastMeterValue.meter_value_280 = new280;
   if (parseIecObis("1-0:1.7.0", &v170))
     LastMeterValue.power_import = (uint32_t)(v170 * 1000.0f); // kW → W
   if (parseIecObis("1-0:2.7.0", &v270))
