@@ -917,7 +917,7 @@ String Log_BufferToString(int showNumber)
       if (showed_number >= showNumber) break;
     }
   }
-  return logString + "</table>";
+  return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
 }
 
 void resetMeterValue(MeterValue &val)
@@ -1530,7 +1530,7 @@ void Webclient_loadCertToChar()
   File file = SPIFFS.open("/cert.pem", FILE_READ);
   if (file && file.size() > 0)
   {
-    size_t size = file.size();
+    size_t size = min(file.size(), sizeof(FullCert) - 1);
     file.readBytes(FullCert, size);
     FullCert[size] = '\0';
     file.close();
@@ -2647,19 +2647,24 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
     return false;
   }
 
-  resetMeterValue(LastMeterValue);
-  LastMeterValue.meter_value_180 = new180;
-  LastMeterValue.timestamp       = Time_getEpochTime();
-
   float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
-  if (has280)
-    LastMeterValue.meter_value_280 = new280;
-  if (parseIecObis("1-0:1.7.0", &v170))
-    LastMeterValue.power_import = (uint32_t)(v170 * 1000.0f); // kW → W
-  if (parseIecObis("1-0:2.7.0", &v270))
-    LastMeterValue.power_export = (uint32_t)(v270 * 1000.0f);
-  if (parseIecObis("1-0:16.7.0", &v167))
-    LastMeterValue.net_power = (int32_t)(v167 * 1000.0f);     // signed, kW → W
+  parseIecObis("1-0:1.7.0",  &v170);
+  parseIecObis("1-0:2.7.0",  &v270);
+  parseIecObis("1-0:16.7.0", &v167);
+
+  // Build update in a local struct first, then assign to LastMeterValue in one shot.
+  // Avoids the SMP race window where resetMeterValue() zeroes meter_value_180 and the
+  // other core sees 0 before the new value is written (same fix as in Telegram_parse_SML).
+  MeterValue newVal = {};
+  if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
+  newVal.temperature     = LastMeterValue.temperature;
+  newVal.meter_value_180 = new180;
+  newVal.meter_value_280 = has280 ? new280 : 0;
+  newVal.timestamp       = Time_getEpochTime();
+  newVal.power_import    = (uint32_t)(v170 * 1000.0f);
+  newVal.power_export    = (uint32_t)(v270 * 1000.0f);
+  newVal.net_power       = (int32_t)(v167 * 1000.0f);
+  LastMeterValue = newVal;
 
   return true;
 }
@@ -4118,7 +4123,7 @@ void Webserver_ShowTelegram()
   int k = 0;
   for (int i = 0; i < TELEGRAM_LENGTH; i++)
   {
-    if (i < TELEGRAM_LENGTH - 5 &&
+    if (i >= k && i < TELEGRAM_LENGTH - 5 &&
         telegram_receive_buffer[i-k]   == 7 && telegram_receive_buffer[i+1-k] == 1 &&
         telegram_receive_buffer[i+2-k] == 0 && telegram_receive_buffer[i+3-k] == 1 &&
         telegram_receive_buffer[i+4-k] == 8)
