@@ -137,6 +137,7 @@ MeterValue PrevMeterValue = {};
 
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
+bool startup_print_done              = false; // one-time diagnostic after first telegram
 
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
@@ -2797,6 +2798,18 @@ void handle_Telegram_receive()
     {
       last_telegram_received = millis(); // reset watchdog
       last_urgent_log_call   = 0;       // restart alert cycle if meter comes back online
+      if (!startup_print_done) {
+        startup_print_done = true;
+        Serial.printf("\n--- Startup Meter Diagnostic ---\n");
+        Serial.printf("Protocol : %s\n", last_detected_protocol == TelegramProtocol::SML ? "SML" : "IEC 62056-21");
+        Serial.printf("Meter    : %s\n", meter_model.isEmpty() ? "(unknown)" : meter_model.c_str());
+        Serial.printf("1.8.0    : %.1f Wh\n", LastMeterValue.meter_value_180 * 0.1f);
+        Serial.printf("2.8.0    : %.1f Wh\n", LastMeterValue.meter_value_280 * 0.1f);
+        Serial.printf("P Import : %lu W\n", (unsigned long)LastMeterValue.power_import);
+        Serial.printf("P Export : %lu W\n", (unsigned long)LastMeterValue.power_export);
+        Serial.printf("P Net    : %ld W\n", (long)LastMeterValue.net_power);
+        Serial.printf("--- End Diagnostic ---\n\n");
+      }
     }
     if(last_detected_protocol != prev_detected_protocol){
       if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
