@@ -2923,7 +2923,7 @@ void Webclient_send_meter_values_to_backend()
 
   String header  = "POST " + String(backend_path);
   header += "?ID=" + String(backend_ID);
-  header += "&token=header";
+  header += "&chipTemp=" + String(temperatureRead(), 1);
   header += "&uptime=" + String(millis() / 60000);
   header += "&time=" + String(Time_getFormattedTime());
   // Self-describing field manifest — the backend uses this to parse the binary payload.
@@ -3587,6 +3587,9 @@ void Webserver_HandleSysInfo()
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Free Heap</span>)rawliteral";
   s += String(ESP.getFreeHeap());
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Chip Temperature</span>)rawliteral";
+  s += String(temperatureRead(), 1) + " &deg;C";
   s += R"rawliteral(</div>
 <div class="kv last"><span class="kl">Log Buffer (max)</span>)rawliteral";
   s += String(LOG_BUFFER_SIZE);
