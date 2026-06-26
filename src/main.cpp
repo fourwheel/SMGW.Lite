@@ -138,6 +138,7 @@ MeterValue PrevMeterValue = {};
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
+bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
 
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
@@ -145,6 +146,7 @@ unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
 unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
 unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
+unsigned long last_dyntaf_store           = 0;
 
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
@@ -193,15 +195,19 @@ int staticDelay = 0;
 
 // Cached integer versions of config string params — updated in Param_configSaved() and setup().
 // Avoids calling atoi() on every loop() tick.
-int cached_taf7_param          = 15;
-int cached_taf14_param         = 60;
-int cached_backend_call_minute = 2;
+int   cached_taf7_param             = 15;
+int   cached_taf14_param            = 60;
+int   cached_backend_call_minute    = 2;
+int   cached_tafdyn_absolute        = 100;
+float cached_tafdyn_multiplicator   = 3.0f;
 
 // Backend vars
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
-bool g_wifiSetupPending  = false;
-unsigned long g_apStopAt = 0;     // millis() timestamp to stop AP, 0 = not scheduled
+bool          g_wifiSetupPending  = false;
+bool          g_wifiSetupFailed   = false;
+unsigned long g_wifiSetupStartMs  = 0;
+unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 unsigned long last_call_backend = (unsigned long)-61000L;
 
@@ -231,6 +237,7 @@ int IPlastOctet = -1;
 unsigned long last_remote_meter_value = 0;
 
 // -- Forward declarations.
+void handle_dynTaf();
 void handle_call_backend();
 void handle_check_wifi_connection();
 void handle_MeterValue_trigger();
@@ -314,7 +321,7 @@ char tafdyn_absolute[NUMBER_LEN];
 char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
-char activate_IEC_Parser[STRING_LEN];
+char dynTaf_enabled[STRING_LEN];
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "0";    // 0 = auto (16 KB reference budget), >0 = manual KB
 
 // ---------------------------------------------------------------------------
@@ -337,7 +344,7 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys",           "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
-IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+IotWebConfCheckboxParameter dynTaf_enabled_object = IotWebConfCheckboxParameter("Dyn. Tarif (experimental)", "activate_IEC_Parser", dynTaf_enabled, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -803,6 +810,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1021: return "call_backend successful";
   case 1022: return "taf14 trigger not possible, buffer full";
   case 1023: return "No backend host configured, skipping";
+  case 1024: return "Boot snapshot triggered";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
@@ -2245,9 +2253,10 @@ void setup()
       DLOGLN("Zero-touch: defaults written to NVS.");
     }
   }
-  cached_taf7_param          = max(1, atoi(taf7_param));
-  cached_taf14_param         = max(1, atoi(taf14_param));
-  cached_backend_call_minute = max(1, atoi(backend_call_minute));
+  cached_taf7_param           = max(1, atoi(taf7_param));
+  cached_taf14_param          = max(1, atoi(taf14_param));
+  cached_backend_call_minute  = max(1, atoi(backend_call_minute));
+  // cached_tafdyn_* are hardcoded — not updated from IotWebConf params
   Led_update_Blink();
   Webserver_UrlConfig();
   OTA_setup();
@@ -2328,7 +2337,7 @@ SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 
 void Param_setup()
 {
-  groupTelegram.addItem(&activate_IEC_Parser_object);
+  groupTelegram.addItem(&dynTaf_enabled_object);
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -2336,6 +2345,8 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
+  // tafdyn params intentionally NOT registered — adding them would shift the NVS
+  // layout and force re-configuration of deployed devices. Values are hardcoded.
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
   groupSys.addItem(&led_blink_object);
@@ -2808,12 +2819,13 @@ void handle_Telegram_receive()
         Serial.printf("\n--- Startup Meter Diagnostic ---\n");
         Serial.printf("Protocol : %s\n", last_detected_protocol == TelegramProtocol::SML ? "SML" : "IEC 62056-21");
         Serial.printf("Meter    : %s\n", meter_model.isEmpty() ? "(unknown)" : meter_model.c_str());
-        Serial.printf("1.8.0    : %.1f Wh\n", LastMeterValue.meter_value_180 * 0.1f);
-        Serial.printf("2.8.0    : %.1f Wh\n", LastMeterValue.meter_value_280 * 0.1f);
+        Serial.printf("1.8.0    : %lu (0.1 Wh)\n", (unsigned long)LastMeterValue.meter_value_180);
+        Serial.printf("2.8.0    : %lu (0.1 Wh)\n", (unsigned long)LastMeterValue.meter_value_280);
         Serial.printf("P Import : %lu W\n", (unsigned long)LastMeterValue.power_import);
         Serial.printf("P Export : %lu W\n", (unsigned long)LastMeterValue.power_export);
         Serial.printf("P Net    : %ld W\n", (long)LastMeterValue.net_power);
         Serial.printf("--- End Diagnostic ---\n\n");
+
       }
     }
     if(last_detected_protocol != prev_detected_protocol){
@@ -3229,22 +3241,88 @@ void handle_call_backend()
   }
 }
 
-// void dynTaf()
-// {
-//   int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;
-//   if (dT > 0 && LastMeterValue.meter_value_180 > PrevMeterValue.meter_value_180)
-//   {
-//     currentPower = (float)(360 * (LastMeterValue.meter_value_180 - PrevMeterValue.meter_value_180)) / (dT);
-//     if (currentPower > LastPower * int(tafdyn_multiplicator) ||
-//         currentPower < LastPower / int(tafdyn_multiplicator) ||
-//         abs(currentPower - LastPower) >= int(tafdyn_absolute))
-//     {
-//       MeterValue_store(false);
-//       Log_AddEntry(1018);
-//     }
-//     LastPower = currentPower;
-//   }
-// }
+// ---------------------------------------------------------------------------
+// handle_dynTaf
+// Triggers a non-override buffer store whenever instantaneous net power
+// changes significantly since the last stored reading.
+//
+// Signal:  net power = power_import - power_export (from OBIS 1.7.0 / 2.7.0),
+//          falling back to net_power (OBIS 16.7.0).
+//          Returns without triggering if the meter does not transmit any
+//          instantaneous power value.
+//
+// Reference: PrevMeterValue — the reading that was last successfully stored.
+//            Updated automatically by MeterValue_store() on every successful
+//            store (TAF7, TAF14, or DynTaf), so the baseline always reflects
+//            what is already in the backend.
+//
+// Trigger conditions (OR-linked, both configurable):
+//   Absolute: |currentPower - lastPower| >= effectiveAbsolute (W)
+//   Ratio:    magnitude changed by factor >= effectiveMultiplicator
+//
+// Both thresholds scale with time since the last successful store (any kind).
+// At DYNTAF_FULL_THRESHOLD_MS the configured values apply unchanged.
+// Below that, thresholds scale up linearly so recent TAF7/TAF14 stores raise
+// the bar for an immediate DynTaf re-trigger.
+// ---------------------------------------------------------------------------
+static const uint32_t DYNTAF_FULL_THRESHOLD_MS = 5000; // ms after which base thresholds apply
+
+void handle_dynTaf()
+{
+  if (LastMeterValue.timestamp == 0) return;
+  if (meter_value_buffer_full) { Log_AddEntry(1022); return; }
+
+  // Scale thresholds based on time since any successful store.
+  uint32_t elapsed = millis() - last_meter_value_successful;
+  float scale = (elapsed >= DYNTAF_FULL_THRESHOLD_MS)
+                  ? 1.0f
+                  : (float)DYNTAF_FULL_THRESHOLD_MS / (float)(elapsed + 1);
+
+  int32_t effectiveAbsolute       = (int32_t)((float)cached_tafdyn_absolute * scale);
+  float   effectiveMultiplicator  = 1.0f + (cached_tafdyn_multiplicator - 1.0f) * scale;
+
+  // Derive current net power from instantaneous telegram values.
+  // Prefer explicit import/export (1.7.0 / 2.7.0) over signed net (16.7.0).
+  int32_t currentPower;
+  if (LastMeterValue.power_import > 0 || LastMeterValue.power_export > 0)
+    currentPower = (int32_t)LastMeterValue.power_import - (int32_t)LastMeterValue.power_export;
+  else if (LastMeterValue.net_power != 0)
+    currentPower = LastMeterValue.net_power;
+  else
+    return; // meter does not transmit instantaneous power — DynTaf not available
+
+  // Derive reference power from the last successfully stored reading.
+  int32_t lastPower;
+  if (PrevMeterValue.power_import > 0 || PrevMeterValue.power_export > 0)
+    lastPower = (int32_t)PrevMeterValue.power_import - (int32_t)PrevMeterValue.power_export;
+  else
+    lastPower = PrevMeterValue.net_power;
+
+  // Absolute delta trigger
+  int32_t delta = currentPower - lastPower;
+  if (delta < 0) delta = -delta;
+  bool triggerAbs = (delta >= effectiveAbsolute);
+
+  // Multiplicator trigger: fire when power magnitude changed by factor N
+  bool triggerMulti = false;
+  if (effectiveMultiplicator > 1.0f)
+  {
+    int32_t absLast = lastPower    < 0 ? -lastPower    : lastPower;
+    int32_t absCurr = currentPower < 0 ? -currentPower : currentPower;
+    if (absLast > 0)
+    {
+      float ratio = (float)absCurr / (float)absLast;
+      triggerMulti = (ratio >= effectiveMultiplicator || ratio <= 1.0f / effectiveMultiplicator);
+    }
+  }
+
+  if (triggerAbs || triggerMulti)
+  {
+    Log_AddEntry(1018);
+    MeterValue_trigger_non_override = true;
+    last_dyntaf_store = millis();
+  }
+}
 
 unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
@@ -3277,8 +3355,22 @@ void handle_MeterValue_store()
   }
 }
 
+// Minimum plausible epoch for a reliable NTP sync (2020-01-01 00:00:00 UTC).
+static const unsigned long EPOCH_MIN_PLAUSIBLE = 1577836800UL;
+
 void handle_MeterValue_trigger()
 {
+  // Boot snapshot: fire once as soon as the first telegram has been received
+  // AND the system time is reliably NTP-synced (not the 1970 default).
+  if (!boot_snapshot_done && startup_print_done && Time_getEpochTime() > EPOCH_MIN_PLAUSIBLE)
+  {
+    boot_snapshot_done              = true;
+    Log_AddEntry(1024);
+    MeterValue_trigger_override     = true;
+    MeterValue_trigger_non_override = false;
+    return;
+  }
+
   if (MeterValue_trigger_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15) &&
@@ -3298,7 +3390,11 @@ void handle_MeterValue_trigger()
     if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_AddEntry(1206); }
     else { Log_AddEntry(1011); MeterValue_trigger_non_override = true; }
   }
-  // if (tafdyn_b_object.isChecked()) { dynTaf(); }
+  else if (MeterValue_trigger_override == false &&
+           MeterValue_trigger_non_override == false)
+  {
+    if (dynTaf_enabled_object.isChecked()) handle_dynTaf();
+  }
 }
 
 void loop()
@@ -3532,8 +3628,17 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl e">TAF 14</span>)rawliteral";
   s += (taf14_b_object.isChecked() ? "activated" : "not activated");
   s += R"rawliteral(</div>
-<div class="kv last"><span class="kl e">TAF 14 Interval</span>)rawliteral";
-  s += String(atoi(taf14_param));
+<div class="kv"><span class="kl e">TAF 14 Interval</span>)rawliteral";
+  s += String(atoi(taf14_param)) + " s";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Dyn TAF</span>)rawliteral";
+  s += "activated (hardcoded)";
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
+  s += String(cached_tafdyn_absolute) + " W";
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Dyn TAF Multiplicator</span>)rawliteral";
+  s += String(cached_tafdyn_multiplicator, 1) + " x";
   s += R"rawliteral(</div>
 </div>
 
@@ -3941,8 +4046,10 @@ void Webserver_HandleWifiSetup()
 
   // Direct WiFi.begin(): ESP32 switches to AP_STA mode, AP stays up.
   WiFi.begin(ssid.c_str(), password.c_str());
-  g_wifiSetupPending = true;
-  g_apStopAt         = 0;
+  g_wifiSetupPending  = true;
+  g_wifiSetupFailed   = false;
+  g_wifiSetupStartMs  = millis();
+  g_apStopAt          = 0;
 
   // Lade-Seite mit JS-Polling ausliefern
   String page = R"rawliteral(<!DOCTYPE html>
@@ -3961,7 +4068,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .msg{font-size:.95rem;color:#444;}
 .ssid{font-weight:700;color:#1a3799;}
 .hint{font-size:.82rem;color:#888;line-height:1.5;}
-.err{color:#c0392b;font-size:.88rem;display:none;}
+.connecting-wrap{display:flex;flex-direction:column;align-items:center;gap:1rem;width:100%;}
+.cancel-btn{margin-top:.2rem;background:none;border:1px solid #d0d8f0;border-radius:8px;padding:.4rem 1.1rem;font-size:.82rem;color:#666;cursor:pointer;}
+.cancel-btn:hover{background:#f0f2f7;}
+.err-wrap{display:none;flex-direction:column;align-items:center;gap:.8rem;width:100%;}
+.err{color:#c0392b;font-size:.88rem;text-align:center;}
+.retry-btn{display:block;width:100%;padding:.75rem;border-radius:10px;background:#1a3799;color:#fff;font-size:.9rem;font-weight:700;text-decoration:none;text-align:center;}
+.retry-btn:hover{background:#142b7a;}
 .result{display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
 .ip-box{background:#f0f2f7;border-radius:10px;padding:.9rem 1.2rem;font-size:1.05rem;color:#333;letter-spacing:.04em;}
 .ip-last{font-weight:800;color:#1a3799;font-size:1.2rem;}
@@ -3974,9 +4087,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 <body>
 <div class="logo">&#9889; SmartMeterLite</div>
 <div class="card">
-  <div id="connecting">
+  <div class="connecting-wrap" id="connecting">
     <div class="spinner"></div>
-    <p class="msg" style="margin-top:1rem;">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+    <p class="msg">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+    <p class="hint">Dies kann bis zu 30&nbsp;Sekunden dauern.</p>
+    <button class="cancel-btn" onclick="location.href='/'">Abbrechen</button>
   </div>
   <div class="result" id="result">
     <p class="msg">&#10003;&nbsp; Verbunden! Deine IP-Adresse:</p>
@@ -3988,13 +4103,36 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     </ol>
     <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>
   </div>
-  <p class="err" id="err">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+  <div class="result" id="probably-done">
+    <p class="msg">&#10003;&nbsp; Verbunden &ndash; Hotspot geschlossen.</p>
+    <ol class="steps">
+      <li>Verbinde dein Ger&auml;t mit dem WLAN <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>.</li>
+      <li>Klicke dann auf den Button unten.</li>
+    </ol>
+    <a class="open-btn" href="http://)rawliteral" + String(thingName) + R"rawliteral(.local/">SmartMeterLite &ouml;ffnen &rarr;</a>
+  </div>
+  <div class="err-wrap" id="err-wrap">
+    <p class="err" id="err-msg"></p>
+    <p class="hint">Verbinde dich erneut mit <strong class="ssid">)rawliteral" + String(thingName) + R"rawliteral(</strong> und klicke dann unten.</p>
+    <a class="retry-btn" href="/">Erneut versuchen</a>
+  </div>
 </div>
 <script>
-var attempts = 0, max = 20;
+var attempts = 0, max = 20, consecFails = 0, hadPoll = false;
+function showError(msg) {
+  document.getElementById('connecting').style.display = 'none';
+  document.getElementById('err-msg').textContent = msg;
+  document.getElementById('err-wrap').style.display = 'flex';
+}
+function showProbablyDone() {
+  document.getElementById('connecting').style.display    = 'none';
+  document.getElementById('probably-done').style.display = 'flex';
+}
 function poll() {
-  fetch('/wifiStatus')
-    .then(function(r){ return r.json(); })
+  var ctrl = new AbortController();
+  var tid  = setTimeout(function(){ ctrl.abort(); }, 4000);
+  fetch('/wifiStatus', {signal: ctrl.signal})
+    .then(function(r){ clearTimeout(tid); consecFails = 0; hadPoll = true; return r.json(); })
     .then(function(d){
       if (d.connected) {
         var parts = d.ip.split('.');
@@ -4006,14 +4144,21 @@ function poll() {
         document.getElementById('open-btn').href = url;
         document.getElementById('connecting').style.display = 'none';
         document.getElementById('result').style.display     = 'flex';
+      } else if (d.failed) {
+        showError('Verbindung fehlgeschlagen – SSID oder Passwort prüfen.');
       } else if (++attempts < max) {
         setTimeout(poll, 2000);
       } else {
-        document.getElementById('connecting').style.display = 'none';
-        document.getElementById('err').style.display        = 'block';
+        showError('Zeitüberschreitung – Gerät nicht erreichbar.');
       }
     })
-    .catch(function(){ if (++attempts < max) setTimeout(poll, 2000); });
+    .catch(function(){
+      clearTimeout(tid);
+      // AP unreachable: if we had prior contact, assume the device connected and closed the hotspot
+      if (hadPoll && ++consecFails >= 2) { showProbablyDone(); return; }
+      if (++attempts < max) setTimeout(poll, 2000);
+      else showError('Zeitüberschreitung – Gerät nicht erreichbar.');
+    });
 }
 setTimeout(poll, 2000);
 </script>
@@ -4030,16 +4175,32 @@ void Webserver_HandleWifiStatus()
     if (g_wifiSetupPending)
     {
       g_wifiSetupPending = false;
-      // Give the HTTP response 2 s to be delivered, then stop the AP.
       g_apStopAt = millis() + 2000;
       DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
     }
     server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
+    return;
   }
-  else
+
+  if (g_wifiSetupPending)
   {
-    server.send(200, "application/json", "{\"connected\":false}");
+    wl_status_t st  = WiFi.status();
+    bool hardFail   = (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL);
+    bool timedOut   = (millis() - g_wifiSetupStartMs) > 15000UL;
+    if (hardFail || timedOut)
+    {
+      g_wifiSetupPending = false;
+      g_wifiSetupFailed  = true;
+      WiFi.disconnect();
+      iotWebConf.forceApMode(true); // restore AP so the browser can reach /
+      DLOGLN("WiFi-Setup: connection failed, restoring AP.");
+    }
   }
+
+  if (g_wifiSetupFailed)
+    server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
+  else
+    server.send(200, "application/json", "{\"connected\":false,\"failed\":false}");
 }
 
 
@@ -4168,9 +4329,10 @@ void Param_configSaved()
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);
 
-  cached_taf7_param          = max(1, atoi(taf7_param));
-  cached_taf14_param         = max(1, atoi(taf14_param));
-  cached_backend_call_minute = max(1, atoi(backend_call_minute));
+  cached_taf7_param           = max(1, atoi(taf7_param));
+  cached_taf14_param          = max(1, atoi(taf14_param));
+  cached_backend_call_minute  = max(1, atoi(backend_call_minute));
+  // cached_tafdyn_* are hardcoded — not updated from IotWebConf params
 
   // Only re-initialise the ring-buffer (which clears all pending values!)
   // when a setting that affects the binary layout actually changed.
