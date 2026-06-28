@@ -139,6 +139,7 @@ bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
 bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
+bool last_store_was_override         = false; // true when the last successful store was a TAF7 override
 
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
@@ -811,6 +812,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1022: return "taf14 trigger not possible, buffer full";
   case 1023: return "No backend host configured, skipping";
   case 1024: return "Boot snapshot triggered";
+  case 1025: return "TAF7: removed recent non-override entry for grid precision";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
@@ -3327,6 +3329,10 @@ void handle_dynTaf()
 unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
 
+// If a non-override entry was stored within this window before a TAF7 trigger,
+// it is removed so the TAF7 snapshot lands precisely on the grid mark.
+static const unsigned long TAF7_REPLACE_WINDOW_MS = 5000UL;
+
 void handle_MeterValue_store()
 {
   if (!MeterValue_trigger_override && !MeterValue_trigger_non_override) return; // nothing to do
@@ -3336,13 +3342,25 @@ void handle_MeterValue_store()
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
+    // Remove the most recent non-override entry if it was stored shortly before
+    // this TAF7 trigger — keeps the grid mark uncluttered.
+    if (!last_store_was_override &&
+        last_meter_value_successful > 0 &&
+        millis() - last_meter_value_successful < TAF7_REPLACE_WINDOW_MS &&
+        meter_value_NON_override_i < Meter_Value_Buffer_Size - 1)
+    {
+      meter_value_NON_override_i++;
+      // Zero the reclaimed slot so MeterValue_slot_empty() correctly sees it as free.
+      memset(MeterValueBuffer + MeterValue_Offset(meter_value_NON_override_i), 0, MeterValue_EntrySize());
+      Log_AddEntry(1025);
+    }
     retVal = MeterValue_store(true);
-    if (retVal == true) last_taf7_meter_value = millis();
+    if (retVal == true) { last_taf7_meter_value = millis(); last_store_was_override = true; }
   }
   else if (MeterValue_trigger_non_override == true)
   {
     retVal = MeterValue_store(false);
-    if (retVal == true) last_taf14_meter_value = millis();
+    if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
   }
 
   if (retVal == true)
@@ -3374,8 +3392,7 @@ void handle_MeterValue_trigger()
   if (MeterValue_trigger_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15) &&
-      (millis() - last_taf7_meter_value > 45000) &&
-      (millis() - last_meter_value_successful >= 20000))
+      (millis() - last_taf7_meter_value > 45000))
   {
     Log_AddEntry(1010);
     MeterValue_trigger_override     = true;
