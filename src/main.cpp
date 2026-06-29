@@ -316,7 +316,8 @@ char tafdyn_absolute[NUMBER_LEN];
 char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
-char dynTaf_enabled[STRING_LEN];
+char activate_IEC_Parser[STRING_LEN];
+// char dynTaf_enabled[STRING_LEN]; // used by dynTaf_enabled_object (#if 0)
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "0";    // 0 = auto (16 KB reference budget), >0 = manual KB
 
 // ---------------------------------------------------------------------------
@@ -339,7 +340,8 @@ IotWebConfParameterGroup groupAdditionalMeter = IotWebConfParameterGroup("groupA
 IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys",           "Advanced Sys Config");
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
-IotWebConfCheckboxParameter dynTaf_enabled_object = IotWebConfCheckboxParameter("Dyn. Tarif (experimental)", "activate_IEC_Parser", dynTaf_enabled, STRING_LEN, false);
+IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+// IotWebConfCheckboxParameter dynTaf_enabled_object = IotWebConfCheckboxParameter("Dyn. Tarif (experimental)", "activate_IEC_Parser", dynTaf_enabled, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -1534,7 +1536,7 @@ void Webclient_loadCertToChar()
   File file = SPIFFS.open("/cert.pem", FILE_READ);
   if (file && file.size() > 0)
   {
-    size_t size = min(file.size(), sizeof(FullCert) - 1);
+    size_t size = min((size_t)file.size(), sizeof(FullCert) - 1);
     file.readBytes(FullCert, size);
     FullCert[size] = '\0';
     file.close();
@@ -2332,7 +2334,8 @@ SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 
 void Param_setup()
 {
-  groupTelegram.addItem(&dynTaf_enabled_object);
+  groupTelegram.addItem(&activate_IEC_Parser_object);
+  // groupTelegram.addItem(&dynTaf_enabled_object); // dynTaf disabled
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
