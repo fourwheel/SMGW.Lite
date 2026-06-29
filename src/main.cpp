@@ -139,14 +139,14 @@ bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
 bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
-bool last_store_was_override         = false; // true when the last successful store was a TAF7 override
+// bool last_store_was_override         = false; // used by handle_MeterValue_store (#if 0)
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
 unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
 unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
-unsigned long last_dyntaf_store           = 0;
+// unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
 // These control which optional fields are packed into the ring-buffer and
@@ -197,8 +197,8 @@ int staticDelay = 0;
 int   cached_taf7_param             = 15;
 int   cached_taf14_param            = 60;
 int   cached_backend_call_minute    = 2;
-int   cached_tafdyn_absolute        = 100;
-float cached_tafdyn_multiplicator   = 3.0f;
+// int   cached_tafdyn_absolute        = 100;    // used by handle_dynTaf (#if 0)
+// float cached_tafdyn_multiplicator   = 3.0f;
 // Backend vars
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
@@ -3641,20 +3641,17 @@ void Webserver_HandleSysInfo()
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl e">TAF 14 Interval</span>)rawliteral";
   s += String(atoi(taf14_param)) + " s";
-  s += R"rawliteral(</div>
-</div>
-)rawliteral";
+  s += R"rawliteral(</div>)rawliteral";
   // Dyn TAF rows — commented out (feature disabled)
   // s += R"rawliteral(<div class="kv"><span class="kl">Dyn TAF</span>)rawliteral";
   // s += "activated (hardcoded)";
-  // s += R"rawliteral(</div>
-  // <div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
+  // s += R"rawliteral(</div><div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
   // s += String(cached_tafdyn_absolute) + " W";
-  // s += R"rawliteral(</div>
-  // <div class="kv last"><span class="kl">Dyn TAF Multiplicator</span>)rawliteral";
+  // s += R"rawliteral(</div><div class="kv last"><span class="kl">Dyn TAF Multiplicator</span>)rawliteral";
   // s += String(cached_tafdyn_multiplicator, 1) + " x";
   // s += R"rawliteral(</div>)rawliteral";
   s += R"rawliteral(
+</div>
 <div class="card">
 <div class="card-title">Additional Meters &amp; Sensors</div>
 <div class="kv"><span class="kl e">Temperature Sensor</span>)rawliteral";
