@@ -102,7 +102,7 @@ const char wifiInitialApPassword[] = "password";
 #define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
 
 // Serial config scanner
-#define SERIAL_SCAN_TIMEOUT_MS  4000   // max listen time per candidate config (ms)
+#define SERIAL_SCAN_TIMEOUT_MS  10000  // max listen time per candidate config (ms)
 #define SERIAL_SCAN_MIN_BYTES   8      // minimum bytes required to attempt detection
 
 // Telegram vars
@@ -2147,18 +2147,18 @@ td:first-child{font-family:monospace;font-size:.88rem}
 <div class="card">
 <div class="card-title">Baud / Parity Scan</div>
 <table>
-<tr><td>9600-8N1</td><td id="s0" class="pending">&#8203;</td></tr>
-<tr><td>9600-8E1</td><td id="s1" class="pending">&#8203;</td></tr>
-<tr><td>9600-7E1</td><td id="s2" class="pending">&#8203;</td></tr>
-<tr><td>2400-7E1</td><td id="s3" class="pending">&#8203;</td></tr>
-<tr><td>2400-8N1</td><td id="s4" class="pending">&#8203;</td></tr>
-<tr><td>4800-8N1</td><td id="s5" class="pending">&#8203;</td></tr>
-<tr><td>4800-7E1</td><td id="s6" class="pending">&#8203;</td></tr>
-<tr><td>1200-7E1</td><td id="s7" class="pending">&#8203;</td></tr>
-<tr><td>1200-8N1</td><td id="s8" class="pending">&#8203;</td></tr>
-<tr><td>300-7E1</td><td id="s9" class="pending">&#8203;</td></tr>
-<tr><td>19200-8N1</td><td id="s10" class="pending">&#8203;</td></tr>
-<tr><td>38400-8N1</td><td id="s11" class="pending">&#8203;</td></tr>
+<tr><td>9600-8E1</td><td id="s0" class="pending">&#8203;</td></tr>
+<tr><td>9600-7E1</td><td id="s1" class="pending">&#8203;</td></tr>
+<tr><td>2400-7E1</td><td id="s2" class="pending">&#8203;</td></tr>
+<tr><td>2400-8N1</td><td id="s3" class="pending">&#8203;</td></tr>
+<tr><td>4800-8N1</td><td id="s4" class="pending">&#8203;</td></tr>
+<tr><td>4800-7E1</td><td id="s5" class="pending">&#8203;</td></tr>
+<tr><td>1200-7E1</td><td id="s6" class="pending">&#8203;</td></tr>
+<tr><td>1200-8N1</td><td id="s7" class="pending">&#8203;</td></tr>
+<tr><td>300-7E1</td><td id="s8" class="pending">&#8203;</td></tr>
+<tr><td>19200-8N1</td><td id="s9" class="pending">&#8203;</td></tr>
+<tr><td>38400-8N1</td><td id="s10" class="pending">&#8203;</td></tr>
+<tr><td>9600-8N1</td><td id="s11" class="pending">&#8203;</td></tr>
 </table>
 <div id="result"></div>
 <a class="btn" href="/sysinfo" id="back-btn" style="display:none">&#8592; Zur&uuml;ck</a>
@@ -2307,7 +2307,6 @@ struct SerialScanEntry {
 };
 
 static const SerialScanEntry SERIAL_SCAN_TABLE[] = {
-    {  9600, SERIAL_8N1,  "9600-8N1"  },
     {  9600, SERIAL_8E1,  "9600-8E1"  },
     {  9600, SERIAL_7E1,  "9600-7E1"  },
     {  2400, SERIAL_7E1,  "2400-7E1"  },
@@ -2319,6 +2318,7 @@ static const SerialScanEntry SERIAL_SCAN_TABLE[] = {
     {   300, SERIAL_7E1,   "300-7E1"  },
     { 19200, SERIAL_8N1, "19200-8N1"  },
     { 38400, SERIAL_8N1, "38400-8N1"  },
+    {  9600, SERIAL_8N1,  "9600-8N1"  },  // tested last — this is the default
 };
 static const int SERIAL_SCAN_TABLE_SIZE = (int)(sizeof(SERIAL_SCAN_TABLE) / sizeof(SERIAL_SCAN_TABLE[0]));
 
