@@ -137,12 +137,16 @@ MeterValue PrevMeterValue = {};
 
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
-
+bool startup_print_done              = false; // one-time diagnostic after first telegram
+bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
+// bool last_store_was_override         = false; // used by handle_MeterValue_store (#if 0)
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
-unsigned long last_reconnect_attempt = 0;
-
+unsigned long last_reconnect_attempt      = 0;
+unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
+unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
+// unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 // ---------------------------------------------------------------------------
 // Runtime feature flags — set from IotWebConf config parameters.
 // These control which optional fields are packed into the ring-buffer and
@@ -190,15 +194,16 @@ int staticDelay = 0;
 
 // Cached integer versions of config string params — updated in Param_configSaved() and setup().
 // Avoids calling atoi() on every loop() tick.
-int cached_taf7_param          = 15;
-int cached_taf14_param         = 60;
-int cached_backend_call_minute = 2;
-
+int   cached_taf7_param             = 15;
+int   cached_taf14_param            = 60;
+int   cached_backend_call_minute    = 2;
+// int   cached_tafdyn_absolute        = 100;    // used by handle_dynTaf (#if 0)
+// float cached_tafdyn_multiplicator   = 3.0f;
 // Backend vars
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
-bool g_wifiSetupPending  = false;
-unsigned long g_apStopAt = 0;     // millis() timestamp to stop AP, 0 = not scheduled
+bool          g_wifiSetupPending  = false;
+unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 unsigned long last_call_backend = (unsigned long)-61000L;
 
@@ -231,6 +236,7 @@ unsigned long last_remote_meter_value = 0;
 void handle_call_backend();
 void handle_check_wifi_connection();
 void handle_MeterValue_trigger();
+void handle_telegram_watchdog();
 void handle_MeterValue_store();
 void handle_temperature();
 void Led_update_Blink();
@@ -256,7 +262,6 @@ String Time_formatUptime();
 String Time_getFormattedTime();
 unsigned long Time_getEpochTime();
 int Time_getMinutes();
-bool Telegram_prefix_suffix_correct();
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
@@ -312,6 +317,7 @@ char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char activate_IEC_Parser[STRING_LEN];
+// char dynTaf_enabled[STRING_LEN]; // used by dynTaf_enabled_object (#if 0)
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "0";    // 0 = auto (16 KB reference budget), >0 = manual KB
 
 // ---------------------------------------------------------------------------
@@ -335,6 +341,7 @@ IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
 IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
+// IotWebConfCheckboxParameter dynTaf_enabled_object = IotWebConfCheckboxParameter("Dyn. Tarif (experimental)", "activate_IEC_Parser", dynTaf_enabled, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -772,6 +779,7 @@ void MeterValue_init_Buffer()
 }
 
 bool b_send_log_to_backend = false;
+bool b_send_log_urgent     = false; // triggers immediate log.php call, independent of meter value cycle
 
 String Log_StatusCodeToString(int statusCode)
 {
@@ -799,17 +807,21 @@ String Log_StatusCodeToString(int statusCode)
   case 1021: return "call_backend successful";
   case 1022: return "taf14 trigger not possible, buffer full";
   case 1023: return "No backend host configured, skipping";
+  case 1024: return "Boot snapshot triggered";
+  // case 1025: return "TAF7: removed recent non-override entry for grid precision";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
   case 1204: return "prefix suffix not correct";
   case 1205: return "Error Buffer Size Exceeded";
   case 1206: return "Buffer Full, cannot store non-override value";
+  case 1207: return "meter_value_180 < PrevMeterValue — truncated telegram discarded";
   case 3000: return "Complete Telegram received";
   case 3001: return "Telegram Buffer overflow";
   case 3002: return "Telegram timeout";
   case 3003: return "SML Protocoll";
   case 3004: return "IEC Protocoll";
+  case 3005: return "No telegram received for 5 min";
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
@@ -911,7 +923,7 @@ String Log_BufferToString(int showNumber)
       if (showed_number >= showNumber) break;
     }
   }
-  return logString + "</table>";
+  return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
 }
 
 void resetMeterValue(MeterValue &val)
@@ -1524,7 +1536,7 @@ void Webclient_loadCertToChar()
   File file = SPIFFS.open("/cert.pem", FILE_READ);
   if (file && file.size() > 0)
   {
-    size_t size = file.size();
+    size_t size = min((size_t)file.size(), sizeof(FullCert) - 1);
     file.readBytes(FullCert, size);
     FullCert[size] = '\0';
     file.close();
@@ -1601,7 +1613,7 @@ void Webserver_Flashlight()
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
-<title>PIN Assistant</title>
+<title>SmartMeterLite – PIN Assistant</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -1809,7 +1821,7 @@ void Webserver_PinAssistantDeluxe()
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>
-<title>PIN Assistant Deluxe</title>
+<title>SmartMeterLite – PIN Assistant Deluxe</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -2072,6 +2084,13 @@ void Webserver_UrlConfig()
   server.on("/connecttest.txt",          [] { server.send(200, "text/plain", "Microsoft Connect Test"); });
   server.on("/ncsi.txt",                 [] { server.send(200, "text/plain", "Microsoft NCSI"); });
   server.on("/config", [] { iotWebConf.handleConfig(); });
+  server.on("/favicon.ico", [] {
+    server.send(200, "image/svg+xml",
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+      "<rect width='32' height='32' rx='6' fill='#1a3799'/>"
+      "<polygon points='19,2 9,18 16,18 13,30 23,14 16,14' fill='#ffffff'/>"
+      "</svg>");
+  });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
@@ -2162,6 +2181,7 @@ void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
   LogBuffer_reset();
+  last_telegram_received = millis(); // start watchdog timer from boot
   Log_AddEntry(1001);
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
@@ -2231,9 +2251,9 @@ void setup()
       DLOGLN("Zero-touch: defaults written to NVS.");
     }
   }
-  cached_taf7_param          = max(1, atoi(taf7_param));
-  cached_taf14_param         = max(1, atoi(taf14_param));
-  cached_backend_call_minute = max(1, atoi(backend_call_minute));
+  cached_taf7_param           = max(1, atoi(taf7_param));
+  cached_taf14_param          = max(1, atoi(taf14_param));
+  cached_backend_call_minute  = max(1, atoi(backend_call_minute));
   Led_update_Blink();
   Webserver_UrlConfig();
   OTA_setup();
@@ -2304,6 +2324,10 @@ protected:
            "&#9989; Konfiguration gespeichert &ndash; <a href='/'>Zur Startseite</a></div>";
   }
   String getEnd() override { return "</div></body></html>"; }
+  String getHeadExtension() override {
+    return "<link rel='icon' type='image/svg+xml' href='/favicon.ico'>"
+           "<script>document.title='SmartMeterLite – Konfiguration';</script>";
+  }
 };
 
 SmartMeterHtmlFormatProvider customHtmlFormatProvider;
@@ -2311,6 +2335,7 @@ SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 void Param_setup()
 {
   groupTelegram.addItem(&activate_IEC_Parser_object);
+  // groupTelegram.addItem(&dynTaf_enabled_object); // dynTaf disabled
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -2318,6 +2343,8 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
+  // tafdyn params intentionally NOT registered — adding them would shift the NVS
+  // layout and force re-configuration of deployed devices. Values are hardcoded.
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
   groupSys.addItem(&led_blink_object);
@@ -2517,14 +2544,36 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 
   // Only update globals if the main consumption register was found.
   // All other fields are optional — some meters don't transmit them.
+  //
+  // Build the update in a local struct first, then assign to LastMeterValue in
+  // one shot. This avoids a SMP race condition: telegramTask runs on Core 0
+  // while the webserver / MeterValue_store run on Core 1. The old approach
+  // called resetMeterValue() (which zeroed meter_value_180) and then assigned
+  // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
+  // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
-    resetMeterValue(LastMeterValue);
-    LastMeterValue.meter_value_180 = temp180;
-    LastMeterValue.timestamp       = Time_getEpochTime();
-    if (found280) LastMeterValue.meter_value_280 = temp280;
-    LastMeterValue.power_import = temp170;
-    LastMeterValue.power_export = temp270;
-    LastMeterValue.net_power    = (int32_t)temp167; // reinterpret two's complement
+    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180) {
+      Log_AddEntry(1207);
+      return false;
+    }
+    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280) {
+      Log_AddEntry(1207);
+      return false;
+    }
+    MeterValue newVal = {};
+    // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
+    if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
+    // Always preserve the externally-sourced temperature reading
+    newVal.temperature     = LastMeterValue.temperature;
+    newVal.meter_value_180 = temp180;
+    newVal.meter_value_280 = found280 ? temp280 : 0;
+    newVal.power_import    = temp170;
+    newVal.power_export    = temp270;
+    newVal.net_power       = (int32_t)temp167;
+    newVal.timestamp       = Time_getEpochTime();
+    // Single struct assignment: meter_value_180 goes from old value to temp180,
+    // never through 0, eliminating the race window.
+    LastMeterValue = newVal;
     return true;
   }
   return false;
@@ -2576,10 +2625,6 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   float kWh180 = atof(valueStr);
   if (kWh180 <= 0.0f) return false; // implausible value
 
-  resetMeterValue(LastMeterValue);
-  LastMeterValue.meter_value_180 = (uint32_t)(kWh180 * 10000.0f);
-  LastMeterValue.timestamp       = Time_getEpochTime();
-
   // Helper lambda: find OBIS label in IEC text, parse the float value after '('
   auto parseIecObis = [&](const char* label, float* out) -> bool {
     const char *p = strstr(telegram_str, label);
@@ -2597,15 +2642,38 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
     return true;
   };
 
-  float v280 = 0.0f, v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
-  if (parseIecObis("1-0:2.8.0", &v280))
-    LastMeterValue.meter_value_280 = (uint32_t)(v280 * 10000.0f);
-  if (parseIecObis("1-0:1.7.0", &v170))
-    LastMeterValue.power_import = (uint32_t)(v170 * 1000.0f); // kW → W
-  if (parseIecObis("1-0:2.7.0", &v270))
-    LastMeterValue.power_export = (uint32_t)(v270 * 1000.0f);
-  if (parseIecObis("1-0:16.7.0", &v167))
-    LastMeterValue.net_power = (int32_t)(v167 * 1000.0f);     // signed, kW → W
+  uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
+  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
+    Log_AddEntry(1207);
+    return false;
+  }
+
+  float v280_raw = 0.0f;
+  bool has280 = parseIecObis("1-0:2.8.0", &v280_raw);
+  uint32_t new280 = has280 ? (uint32_t)(v280_raw * 10000.0f) : 0;
+  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280) {
+    Log_AddEntry(1207);
+    return false;
+  }
+
+  float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
+  parseIecObis("1-0:1.7.0",  &v170);
+  parseIecObis("1-0:2.7.0",  &v270);
+  parseIecObis("1-0:16.7.0", &v167);
+
+  // Build update in a local struct first, then assign to LastMeterValue in one shot.
+  // Avoids the SMP race window where resetMeterValue() zeroes meter_value_180 and the
+  // other core sees 0 before the new value is written (same fix as in Telegram_parse_SML).
+  MeterValue newVal = {};
+  if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
+  newVal.temperature     = LastMeterValue.temperature;
+  newVal.meter_value_180 = new180;
+  newVal.meter_value_280 = has280 ? new280 : 0;
+  newVal.timestamp       = Time_getEpochTime();
+  newVal.power_import    = (uint32_t)(v170 * 1000.0f);
+  newVal.power_export    = (uint32_t)(v270 * 1000.0f);
+  newVal.net_power       = (int32_t)(v167 * 1000.0f);
+  LastMeterValue = newVal;
 
   return true;
 }
@@ -2740,6 +2808,24 @@ void handle_Telegram_receive()
       parsed = Telegram_parse_IEC(telegram_receive_buffer, telegram_receive_bufferIndex);
       if (parsed) last_detected_protocol = TelegramProtocol::IEC;
     }
+    if (parsed)
+    {
+      last_telegram_received = millis(); // reset watchdog
+      last_urgent_log_call   = 0;       // restart alert cycle if meter comes back online
+      if (!startup_print_done) {
+        startup_print_done = true;
+        Serial.printf("\n--- Startup Meter Diagnostic ---\n");
+        Serial.printf("Protocol : %s\n", last_detected_protocol == TelegramProtocol::SML ? "SML" : "IEC 62056-21");
+        Serial.printf("Meter    : %s\n", meter_model.isEmpty() ? "(unknown)" : meter_model.c_str());
+        Serial.printf("1.8.0    : %lu (0.1 Wh)\n", (unsigned long)LastMeterValue.meter_value_180);
+        Serial.printf("2.8.0    : %lu (0.1 Wh)\n", (unsigned long)LastMeterValue.meter_value_280);
+        Serial.printf("P Import : %lu W\n", (unsigned long)LastMeterValue.power_import);
+        Serial.printf("P Export : %lu W\n", (unsigned long)LastMeterValue.power_export);
+        Serial.printf("P Net    : %ld W\n", (long)LastMeterValue.net_power);
+        Serial.printf("--- End Diagnostic ---\n\n");
+
+      }
+    }
     if(last_detected_protocol != prev_detected_protocol){
       if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
       else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddEntry(3004);
@@ -2865,7 +2951,7 @@ void Webclient_send_meter_values_to_backend()
 
   String header  = "POST " + String(backend_path);
   header += "?ID=" + String(backend_ID);
-  header += "&token=header";
+  header += "&chipTemp=" + String(temperatureRead(), 1);
   header += "&uptime=" + String(millis() / 60000);
   header += "&time=" + String(Time_getFormattedTime());
   // Self-describing field manifest — the backend uses this to parse the binary payload.
@@ -2951,19 +3037,37 @@ bool MeterValue_store(bool override)
 
   if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
 
-  if (LastMeterValue.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
+  // Snapshot LastMeterValue once. myStrom_get_Meter_value() above is a blocking
+  // network call; while it is blocked, telegramTask (Core 0) may update
+  // LastMeterValue concurrently. Taking a snapshot after the blocking call and
+  // using it exclusively below prevents reading an inconsistent (partially-written)
+  // struct from the other core.
+  MeterValue snap = LastMeterValue;
+
+  if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
 
   // Skip storing if the value has not changed since the last successful store.
-  // Time thresholds differ: TAF14 (non-override) waits 15 min,
-  // TAF7 (override) only 1 min, to capture short power spikes.
-  if (((override == false && millis() - last_meter_value_successful < 900000) ||
-       (override == true  && millis() - last_meter_value_successful < 60000))
-    && LastMeterValue.meter_value_180 == PrevMeterValue.meter_value_180
-    && LastMeterValue.meter_value_280 == PrevMeterValue.meter_value_280
-    && LastMeterValue.solar           == PrevMeterValue.solar)
+  if (snap.meter_value_180 == PrevMeterValue.meter_value_180
+    && snap.meter_value_280 == PrevMeterValue.meter_value_280
+    && snap.solar           == PrevMeterValue.solar)
   {
-    Log_AddEntry(1201);
-    return false;
+    // Timestamp unchanged = no new telegram received (e.g. meter reader slipped off).
+    // Never re-store a frozen reading regardless of elapsed time — this prevents
+    // an infinite loop where TAF7 keeps re-queuing the same stale entry after the
+    // backend accepts it with HTTP 200 and clears the buffer.
+    if (snap.timestamp == PrevMeterValue.timestamp)
+    {
+      Log_AddEntry(1201);
+      return false;
+    }
+    // New telegram received but counter value unchanged — apply time-based cooldown.
+    // TAF14 (non-override) waits 15 min, TAF7 (override) only 1 min.
+    if ((override == false && millis() - last_meter_value_successful < 900000) ||
+        (override == true  && millis() - last_meter_value_successful < 60000))
+    {
+      Log_AddEntry(1201);
+      return false;
+    }
   }
 
   // Select write index based on priority:
@@ -2981,11 +3085,11 @@ bool MeterValue_store(bool override)
     // Fields that are disabled (temperature, solar, obis280) are silently
     // skipped inside MeterValue_write() — they consume no bytes.
     MeterValue_write(write_i,
-      LastMeterValue.timestamp,
-      LastMeterValue.meter_value_180,
-      LastMeterValue.temperature,
-      LastMeterValue.solar,
-      LastMeterValue.meter_value_280
+      snap.timestamp,
+      snap.meter_value_180,
+      snap.temperature,
+      snap.solar,
+      snap.meter_value_280
     );
 
     if (override)
@@ -3020,7 +3124,7 @@ bool MeterValue_store(bool override)
     return false;
   }
 
-  PrevMeterValue = LastMeterValue; // remember last stored value for change detection
+  PrevMeterValue = snap; // remember last stored value for change detection
   return true;
 }
 
@@ -3091,10 +3195,38 @@ void handle_temperature()
   }
 }
 
+// ---------------------------------------------------------------------------
+// handle_telegram_watchdog
+// Fires status 1024 and an urgent log.php call if no telegram has been
+// received for 5 minutes (e.g. optical reader slipped off the meter).
+// Repeats every 30 minutes while the meter remains silent.
+// Resets automatically when a new telegram arrives (see handle_Telegram_receive).
+// ---------------------------------------------------------------------------
+void handle_telegram_watchdog()
+{
+  if (millis() - last_telegram_received < 300000UL) return; // within 5-min grace period
+
+  // Fire on first alert (last_urgent_log_call == 0) or every 30 min thereafter.
+  if (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL)
+  {
+    Log_AddEntry(3005);
+    b_send_log_urgent    = true;
+    last_urgent_log_call = millis();
+  }
+}
+
 void handle_call_backend()
 {
   if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
+    // Urgent log call — triggered by alerts like "no telegram for 5 min".
+    // Runs independently of the meter value backend cycle.
+    if (b_send_log_urgent)
+    {
+      b_send_log_urgent = false;
+      Webclient_Send_Log_to_backend_wrapper();
+    }
+
     if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
@@ -3107,25 +3239,93 @@ void handle_call_backend()
   }
 }
 
-// void dynTaf()
-// {
-//   int dT = LastMeterValue.timestamp - PrevMeterValue.timestamp;
-//   if (dT > 0 && LastMeterValue.meter_value_180 > PrevMeterValue.meter_value_180)
-//   {
-//     currentPower = (float)(360 * (LastMeterValue.meter_value_180 - PrevMeterValue.meter_value_180)) / (dT);
-//     if (currentPower > LastPower * int(tafdyn_multiplicator) ||
-//         currentPower < LastPower / int(tafdyn_multiplicator) ||
-//         abs(currentPower - LastPower) >= int(tafdyn_absolute))
-//     {
-//       MeterValue_store(false);
-//       Log_AddEntry(1018);
-//     }
-//     LastPower = currentPower;
-//   }
-// }
-
 unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
+
+// ---------------------------------------------------------------------------
+// handle_dynTaf — commented out, feature temporarily disabled
+// Triggers a non-override buffer store whenever instantaneous net power
+// changes significantly since the last stored reading.
+//
+// Signal:  net power = power_import - power_export (from OBIS 1.7.0 / 2.7.0),
+//          falling back to net_power (OBIS 16.7.0).
+//          Returns without triggering if the meter does not transmit any
+//          instantaneous power value.
+//
+// Reference: PrevMeterValue — the reading that was last successfully stored.
+//            Updated automatically by MeterValue_store() on every successful
+//            store (TAF7, TAF14, or DynTaf), so the baseline always reflects
+//            what is already in the backend.
+//
+// Trigger conditions (OR-linked, both configurable):
+//   Absolute: |currentPower - lastPower| >= effectiveAbsolute (W)
+//   Ratio:    magnitude changed by factor >= effectiveMultiplicator
+//
+// Both thresholds scale with time since the last successful store (any kind).
+// At DYNTAF_FULL_THRESHOLD_MS the configured values apply unchanged.
+// Below that, thresholds scale up linearly so recent TAF7/TAF14 stores raise
+// the bar for an immediate DynTaf re-trigger.
+// ---------------------------------------------------------------------------
+#if 0
+static const uint32_t DYNTAF_FULL_THRESHOLD_MS = 5000; // ms after which base thresholds apply
+
+void handle_dynTaf()
+{
+  if (LastMeterValue.timestamp == 0) return;
+  if (meter_value_buffer_full) { Log_AddEntry(1022); return; }
+
+  // Scale thresholds based on time since any successful store.
+  uint32_t elapsed = millis() - last_meter_value_successful;
+  float scale = (elapsed >= DYNTAF_FULL_THRESHOLD_MS)
+                  ? 1.0f
+                  : (float)DYNTAF_FULL_THRESHOLD_MS / (float)(elapsed + 1);
+
+  int32_t effectiveAbsolute      = (int32_t)((float)cached_tafdyn_absolute * scale);
+  float   effectiveMultiplicator = 1.0f + (cached_tafdyn_multiplicator - 1.0f) * scale;
+
+  // Derive current net power from instantaneous telegram values.
+  // Prefer explicit import/export (1.7.0 / 2.7.0) over signed net (16.7.0).
+  int32_t currentPower;
+  if (LastMeterValue.power_import > 0 || LastMeterValue.power_export > 0)
+    currentPower = (int32_t)LastMeterValue.power_import - (int32_t)LastMeterValue.power_export;
+  else if (LastMeterValue.net_power != 0)
+    currentPower = LastMeterValue.net_power;
+  else
+    return; // meter does not transmit instantaneous power — DynTaf not available
+
+  // Derive reference power from the last successfully stored reading.
+  int32_t lastPower;
+  if (PrevMeterValue.power_import > 0 || PrevMeterValue.power_export > 0)
+    lastPower = (int32_t)PrevMeterValue.power_import - (int32_t)PrevMeterValue.power_export;
+  else
+    lastPower = PrevMeterValue.net_power;
+
+  // Absolute delta trigger
+  int32_t delta = currentPower - lastPower;
+  if (delta < 0) delta = -delta;
+  bool triggerAbs = (delta >= effectiveAbsolute);
+
+  // Multiplicator trigger: fire when power magnitude changed by factor N
+  bool triggerMulti = false;
+  if (effectiveMultiplicator > 1.0f)
+  {
+    int32_t absLast = lastPower    < 0 ? -lastPower    : lastPower;
+    int32_t absCurr = currentPower < 0 ? -currentPower : currentPower;
+    if (absLast > 0)
+    {
+      float ratio = (float)absCurr / (float)absLast;
+      triggerMulti = (ratio >= effectiveMultiplicator || ratio <= 1.0f / effectiveMultiplicator);
+    }
+  }
+
+  if (triggerAbs || triggerMulti)
+  {
+    Log_AddEntry(1018);
+    MeterValue_trigger_non_override = true;
+    last_dyntaf_store = millis();
+  }
+}
+#endif
 
 void handle_MeterValue_store()
 {
@@ -3136,13 +3336,29 @@ void handle_MeterValue_store()
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
+#if 0
+    // Remove the most recent non-override entry if it was stored shortly before
+    // this TAF7 trigger — keeps the grid mark uncluttered.
+    static const unsigned long TAF7_REPLACE_WINDOW_MS = 5000UL;
+    if (!last_store_was_override &&
+        last_meter_value_successful > 0 &&
+        millis() - last_meter_value_successful < TAF7_REPLACE_WINDOW_MS &&
+        meter_value_NON_override_i < Meter_Value_Buffer_Size - 1)
+    {
+      meter_value_NON_override_i++;
+      memset(MeterValueBuffer + MeterValue_Offset(meter_value_NON_override_i), 0, MeterValue_EntrySize());
+      Log_AddEntry(1025);
+    }
+#endif
     retVal = MeterValue_store(true);
     if (retVal == true) last_taf7_meter_value = millis();
+    // if (retVal == true) { last_taf7_meter_value = millis(); last_store_was_override = true; }
   }
   else if (MeterValue_trigger_non_override == true)
   {
     retVal = MeterValue_store(false);
     if (retVal == true) last_taf14_meter_value = millis();
+    // if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
   }
 
   if (retVal == true)
@@ -3155,13 +3371,26 @@ void handle_MeterValue_store()
   }
 }
 
+// Minimum plausible epoch for a reliable NTP sync (2020-01-01 00:00:00 UTC).
+static const unsigned long EPOCH_MIN_PLAUSIBLE = 1577836800UL;
+
 void handle_MeterValue_trigger()
 {
+  // Boot snapshot: fire once as soon as the first telegram has been received
+  // AND the system time is reliably NTP-synced (not the 1970 default).
+  if (!boot_snapshot_done && startup_print_done && Time_getEpochTime() > EPOCH_MIN_PLAUSIBLE)
+  {
+    boot_snapshot_done              = true;
+    Log_AddEntry(1024);
+    MeterValue_trigger_override     = true;
+    MeterValue_trigger_non_override = false;
+    return;
+  }
+
   if (MeterValue_trigger_override == false &&
       taf7_b_object.isChecked() &&
       ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15) &&
-      (millis() - last_taf7_meter_value > 45000) &&
-      (millis() - last_meter_value_successful >= 20000))
+      (millis() - last_taf7_meter_value > 45000))
   {
     Log_AddEntry(1010);
     MeterValue_trigger_override     = true;
@@ -3176,7 +3405,10 @@ void handle_MeterValue_trigger()
     if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_AddEntry(1206); }
     else { Log_AddEntry(1011); MeterValue_trigger_non_override = true; }
   }
-  // if (tafdyn_b_object.isChecked()) { dynTaf(); }
+  // else if (MeterValue_trigger_override == false && MeterValue_trigger_non_override == false)
+  // {
+  //   if (dynTaf_enabled_object.isChecked()) handle_dynTaf();
+  // }
 }
 
 void loop()
@@ -3196,6 +3428,7 @@ void loop()
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
+  handle_telegram_watchdog();
   handle_call_backend();
 }
 
@@ -3246,9 +3479,7 @@ void Webserver_HandleSysInfo()
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>)rawliteral";
-  s += thingName;
-  s += R"rawliteral(</title>)rawliteral";
+<title>SmartMeterLite – Details</title>)rawliteral";
   s += HTML_STYLE_MODERN;
   s += R"rawliteral(</head>
 <body>
@@ -3411,11 +3642,19 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl e">TAF 14</span>)rawliteral";
   s += (taf14_b_object.isChecked() ? "activated" : "not activated");
   s += R"rawliteral(</div>
-<div class="kv last"><span class="kl e">TAF 14 Interval</span>)rawliteral";
-  s += String(atoi(taf14_param));
-  s += R"rawliteral(</div>
+<div class="kv"><span class="kl e">TAF 14 Interval</span>)rawliteral";
+  s += String(atoi(taf14_param)) + " s";
+  s += R"rawliteral(</div>)rawliteral";
+  // Dyn TAF rows — commented out (feature disabled)
+  // s += R"rawliteral(<div class="kv"><span class="kl">Dyn TAF</span>)rawliteral";
+  // s += "activated (hardcoded)";
+  // s += R"rawliteral(</div><div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
+  // s += String(cached_tafdyn_absolute) + " W";
+  // s += R"rawliteral(</div><div class="kv last"><span class="kl">Dyn TAF Multiplicator</span>)rawliteral";
+  // s += String(cached_tafdyn_multiplicator, 1) + " x";
+  // s += R"rawliteral(</div>)rawliteral";
+  s += R"rawliteral(
 </div>
-
 <div class="card">
 <div class="card-title">Additional Meters &amp; Sensors</div>
 <div class="kv"><span class="kl e">Temperature Sensor</span>)rawliteral";
@@ -3484,6 +3723,9 @@ void Webserver_HandleSysInfo()
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Free Heap</span>)rawliteral";
   s += String(ESP.getFreeHeap());
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Chip Temperature</span>)rawliteral";
+  s += String(temperatureRead(), 1) + " &deg;C";
   s += R"rawliteral(</div>
 <div class="kv last"><span class="kl">Log Buffer (max)</span>)rawliteral";
   s += String(LOG_BUFFER_SIZE);
@@ -3641,10 +3883,10 @@ footer a:hover{color:#1a3799;}
     uint32_t v = LastMeterValue.meter_value_180;
     snprintf(valBuf, sizeof(valBuf), "%lu,%04lu", (unsigned long)(v / 10000), (unsigned long)(v % 10000));
     s += "<div class='m-row'><div class='m-row-l'>"
-         "<span class='m-arr'>&#8595;</span><span class='m-val'>" + String(valBuf) + "</span>"
+         "<span class='m-arr'>&#8595;</span><span class='m-val' id='val180'>" + String(valBuf) + "</span>"
          "<span class='m-unit'>kWh</span></div>";
     if (!netOnly && importW > 0)
-      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(importW) + "</span></div>";
+      s += "<div class='m-pwr'><span class='m-pwr-val' id='pwr-import'>" + pwrStr(importW) + "</span></div>";
     s += "</div>";
   } else {
     s += "<div class='m-age' style='margin:.6rem 0;'>Warte auf Telegramm&#8239;&#8230;</div>";
@@ -3657,10 +3899,10 @@ footer a:hover{color:#1a3799;}
     const char* arr = calcNet >= 0 ? "&#8595;" : "&#8593;";
     const char* lbl = calcNet >= 0 ? "Netzbezug" : "Netzeinspeisung";
     s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
-         "<span class='m-arr'>" + String(arr) + "</span>"
-         "<span class='m-pwr-val'>" + pwrStr(absP) + "</span>"
+         "<span class='m-arr' id='net-arr'>" + String(arr) + "</span>"
+         "<span class='m-pwr-val' id='net-val'>" + pwrStr(absP) + "</span>"
          "</div>"
-         "<span class='m-net-lbl'>" + String(lbl) + "</span></div>";
+         "<span class='m-net-lbl' id='net-lbl'>" + String(lbl) + "</span></div>";
   }
 
   // 2.8.0 — Einspeisung (↑) + Export-Leistung rechts, nur wenn > 0
@@ -3670,18 +3912,18 @@ footer a:hover{color:#1a3799;}
     snprintf(val2Buf, sizeof(val2Buf), "%lu,%04lu", (unsigned long)(v2 / 10000), (unsigned long)(v2 % 10000));
     s += "<hr class='m-div'><div class='m-row'><div class='m-row-l'>"
          "<span class='m-arr'>&#8593;</span>"
-         "<span class='m-val2'>" + String(val2Buf) + "</span>"
+         "<span class='m-val2' id='val280'>" + String(val2Buf) + "</span>"
          "<span class='m-unit'>kWh</span></div>";
     if (!netOnly && exportW > 0)
-      s += "<div class='m-pwr'><span class='m-pwr-val'>" + pwrStr(exportW) + "</span></div>";
+      s += "<div class='m-pwr'><span class='m-pwr-val' id='pwr-export'>" + pwrStr(exportW) + "</span></div>";
     s += "</div>";
   }
 
   if (hasReading) {
     if (ageS >= kNoTelegramThresholdS)
-      s += "<div class='m-age m-age-warn'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
+      s += "<div class='m-age m-age-warn' id='m-age'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
     else
-      s += "<div class='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
+      s += "<div class='m-age' id='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
   }
   s += "</div>";
 
@@ -3746,6 +3988,45 @@ footer a:hover{color:#1a3799;}
 <a href='https://www.linkedin.com/in/laurin-vierrath/' target='_blank' rel='noopener'>&#128039; From Laurin with Love</a>
 </footer>
 </body></html>)rawliteral";
+  // Inject live-update script — needsReload/had280 are set from current server state
+  s += "<script>var needsReload=";
+  s += hasReading ? "false" : "true";
+  s += ";var had280=";
+  s += (hasReading && LastMeterValue.meter_value_280 > 0) ? "true" : "false";
+  s += R"rawliteral(;
+function _set(id,txt){var e=document.getElementById(id);if(e)e.textContent=txt;}
+function _pwr(w){var a=Math.abs(w);return a>=1000?(a/1000).toFixed(2)+' kW':a+' W';}
+function _meter(v){return Math.floor(v/10000)+','+String(v%10000).padStart(4,'0');}
+function _live(d){
+  if(needsReload&&d.meter_value_180>0){location.reload();return;}
+  if(!had280&&d.meter_value_280>0){location.reload();return;}
+  _set('val180',_meter(d.meter_value_180));
+  if(d.meter_value_280>0)_set('val280',_meter(d.meter_value_280));
+  var imp=d.power_import,exp=d.power_export,net=d.net_power;
+  if(imp>0&&exp>0){
+    _set('pwr-import',_pwr(imp));_set('pwr-export',_pwr(exp));
+    var calc=imp-exp;
+    _set('net-arr',calc>=0?'↓':'↑');
+    _set('net-val',_pwr(Math.abs(calc)));
+    _set('net-lbl',calc>=0?'Netzbezug':'Netzeinspeisung');
+  }else if(net!==0){
+    _set('net-arr',net>=0?'↓':'↑');
+    _set('net-val',_pwr(net));
+    _set('net-lbl',net>=0?'Netzbezug':'Netzeinspeisung');
+  }else if(imp>0){
+    _set('net-arr','↓');_set('net-val',_pwr(imp));_set('net-lbl','Netzbezug');
+  }else if(exp>0){
+    _set('net-arr','↑');_set('net-val',_pwr(exp));_set('net-lbl','Netzeinspeisung');
+  }
+  var ageS=d.timestamp>0?Math.round(Date.now()/1000-d.timestamp):0;
+  var el=document.getElementById('m-age');
+  if(el){
+    if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
+    else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+' s';}
+  }
+}
+setInterval(function(){fetch('/showLastMeterValue').then(function(r){return r.json();}).then(_live).catch(function(){});},2000);
+</script>)rawliteral";
 
   server.send(200, "text/html", s);
 }
@@ -3778,8 +4059,8 @@ void Webserver_HandleWifiSetup()
 
   // Direct WiFi.begin(): ESP32 switches to AP_STA mode, AP stays up.
   WiFi.begin(ssid.c_str(), password.c_str());
-  g_wifiSetupPending = true;
-  g_apStopAt         = 0;
+  g_wifiSetupPending  = true;
+  g_apStopAt          = 0;
 
   // Lade-Seite mit JS-Polling ausliefern
   String page = R"rawliteral(<!DOCTYPE html>
@@ -3867,7 +4148,6 @@ void Webserver_HandleWifiStatus()
     if (g_wifiSetupPending)
     {
       g_wifiSetupPending = false;
-      // Give the HTTP response 2 s to be delivered, then stop the AP.
       g_apStopAt = millis() + 2000;
       DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
     }
@@ -3945,7 +4225,10 @@ void Webserver_ShowTelegram()
   s += String(millis() - lastByteTime) + " ms ago";
   s += R"rawliteral(</div>
 <div class="kv last"><span class="kl">Last complete telegram</span>)rawliteral";
-  s += Time_formatTimestamp(timestamp_telegram) + " (" + String(Time_getEpochTime() - timestamp_telegram) + " s ago)";
+  if (LastMeterValue.timestamp > 0)
+    s += Time_formatTimestamp(LastMeterValue.timestamp) + " (" + String(Time_getEpochTime() - LastMeterValue.timestamp) + " s ago)";
+  else
+    s += "–";
   s += R"rawliteral(</div>
 </div>
 <div class="card" style="max-width:420px;">
@@ -3957,7 +4240,7 @@ void Webserver_ShowTelegram()
   int k = 0;
   for (int i = 0; i < TELEGRAM_LENGTH; i++)
   {
-    if (i < TELEGRAM_LENGTH - 5 &&
+    if (i >= k && i < TELEGRAM_LENGTH - 5 &&
         telegram_receive_buffer[i-k]   == 7 && telegram_receive_buffer[i+1-k] == 1 &&
         telegram_receive_buffer[i+2-k] == 0 && telegram_receive_buffer[i+3-k] == 1 &&
         telegram_receive_buffer[i+4-k] == 8)
@@ -4002,9 +4285,9 @@ void Param_configSaved()
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
   Log_AddEntry(1003);
 
-  cached_taf7_param          = max(1, atoi(taf7_param));
-  cached_taf14_param         = max(1, atoi(taf14_param));
-  cached_backend_call_minute = max(1, atoi(backend_call_minute));
+  cached_taf7_param           = max(1, atoi(taf7_param));
+  cached_taf14_param          = max(1, atoi(taf14_param));
+  cached_backend_call_minute  = max(1, atoi(backend_call_minute));
 
   // Only re-initialise the ring-buffer (which clears all pending values!)
   // when a setting that affects the binary layout actually changed.
