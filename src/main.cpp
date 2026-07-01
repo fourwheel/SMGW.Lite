@@ -41,6 +41,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include "Arduino.h"
+#include "soc/uart_reg.h"  // UART_INT_RAW_REG / UART_INT_CLR_REG for parity-error detection
 
 // ---------------------------------------------------------------------------
 // Serial debug macros
@@ -310,10 +311,11 @@ static uint32_t active_uart_config = SERIAL_8N1;
 
 // Serial scan state — written by SerialScan_run() (telegramTask), read by web handlers
 enum class ScanState : uint8_t { IDLE, RUNNING, DONE };
-static volatile ScanState scan_state            = ScanState::IDLE;
-static volatile int       scan_current          = -1;  // index being tested
-static volatile int       scan_found            = -1;  // index that succeeded, -1 = none
-static volatile bool      serial_scan_requested = false;
+static volatile ScanState  scan_state            = ScanState::IDLE;
+static volatile int        scan_current          = -1;  // index being tested
+static volatile int        scan_found            = -1;  // first positive index, -1 = none
+static volatile uint32_t   scan_found_mask       = 0;   // bitmask of all positive indices
+static volatile bool       serial_scan_requested = false;
 static const    int       SERIAL_SCAN_COUNT     = 12;  // must match SERIAL_SCAN_TABLE size
 
 // Params, which you can set via webserver
@@ -2118,6 +2120,7 @@ void Webserver_UrlConfig()
   server.on("/serialScan", [] {
     scan_state            = ScanState::IDLE;
     scan_found            = -1;
+    scan_found_mask       = 0;
     scan_current          = -1;
     serial_scan_requested = true;
     server.send(200, "text/html", R"rawliteral(<!DOCTYPE html>
@@ -2168,17 +2171,18 @@ var timer=setInterval(poll,700);
 function poll(){
   fetch('/serialScanStatus').then(function(r){return r.json()}).then(function(d){
     var n=d.total||12;
+    var mask=d.foundMask||0;
     for(var i=0;i<n;i++){
       var el=document.getElementById('s'+i);
       if(!el)continue;
-      if(d.state==='running'&&d.currentIndex===i){
+      var hit=(mask>>i)&1;
+      if(hit){
+        el.className='found';
+        el.textContent=d.foundIndex===i?'✓ Aktiv':'✓ Signal';
+      }else if(d.state==='running'&&d.currentIndex===i){
         el.className='testing';el.textContent='... teste';
-      }else if(d.foundIndex===i){
-        el.className='found';el.textContent='✓ Gefunden!';
-      }else if((d.state==='running'&&i<d.currentIndex)||(d.state==='done'&&d.foundIndex===-1)){
+      }else if((d.state==='running'&&i<d.currentIndex)||d.state==='done'){
         el.className='fail';el.textContent='kein Signal';
-      }else if(d.state==='done'&&d.foundIndex>=0&&i>d.foundIndex){
-        el.className='pending';el.textContent='';
       }
     }
     if(d.state==='done'){
@@ -2186,8 +2190,11 @@ function poll(){
       var res=document.getElementById('result');
       res.style.display='block';
       if(d.foundIndex>=0){
+        var cnt=0;for(var i=0;i<n;i++)if((mask>>i)&1)cnt++;
         res.className='ok';
-        res.textContent='✓ Aktive Konfiguration: '+d.activeLabel;
+        res.textContent=cnt>1
+          ?'✓ '+cnt+' Treffer — Aktive Konfiguration: '+d.activeLabel
+          :'✓ Aktive Konfiguration: '+d.activeLabel;
       }else{
         res.className='err';
         res.textContent='✗ Kein Meter erkannt — Standard 9600-8N1 aktiv.';
@@ -2209,6 +2216,7 @@ poll();
     }
     json += "\",\"currentIndex\":" + String((int)scan_current);
     json += ",\"foundIndex\":"     + String((int)scan_found);
+    json += ",\"foundMask\":"      + String((unsigned int)scan_found_mask);
     json += ",\"total\":"          + String(SERIAL_SCAN_COUNT);
     json += ",\"activeLabel\":\""  + SerialScan_activeLabel() + "\"}";
     server.send(200, "application/json", json);
@@ -2361,8 +2369,9 @@ static void SerialScan_run()
 {
     static uint8_t scan_buf[512];
 
-    scan_state = ScanState::RUNNING;
-    scan_found = -1;
+    scan_state      = ScanState::RUNNING;
+    scan_found      = -1;
+    scan_found_mask = 0;
 
     for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++) {
         scan_current = i;
@@ -2374,6 +2383,13 @@ static void SerialScan_run()
 
         vTaskDelay(pdMS_TO_TICKS(120));
         while (mySerial.available()) mySerial.read();
+        // Disable the parity-error interrupt so the IDF UART ISR cannot clear UART_INT_RAW
+        // bit 2 while we are collecting. Without this, the ISR clears the raw flag in its
+        // own handler before we ever get to read it, making parity errors invisible to us.
+        // The hardware still sets INT_RAW bit 2 on every parity error; we just read it
+        // ourselves afterwards. Bit 2 is the parity-error bit on all ESP32 variants.
+        CLEAR_PERI_REG_MASK(UART_INT_ENA_REG(1), 1UL << 2);
+        WRITE_PERI_REG(UART_INT_CLR_REG(1), 1UL << 2);  // clear stale flag
 
         size_t idx        = 0;
         unsigned long start    = millis();
@@ -2389,16 +2405,23 @@ static void SerialScan_run()
             vTaskDelay(pdMS_TO_TICKS(10));
         }
 
-        if (SerialScan_looks_valid(scan_buf, idx)) {
-            active_baud_rate   = e.baudRate;
-            active_uart_config = e.uartConfig;
-            scan_found = i;
-            Log_AddEntry(3010);
-            break;
+        bool hadParityError = (READ_PERI_REG(UART_INT_RAW_REG(1)) & (1UL << 2)) != 0;
+        SET_PERI_REG_MASK(UART_INT_ENA_REG(1), 1UL << 2);  // restore interrupt
+
+        if (SerialScan_looks_valid(scan_buf, idx) && !hadParityError) {
+            scan_found_mask |= (1UL << i);
+            if (scan_found == -1) scan_found = i;  // keep first match as primary
         }
     }
 
-    if (scan_found == -1) {
+    if (scan_found >= 0) {
+        const SerialScanEntry& best = SERIAL_SCAN_TABLE[scan_found];
+        active_baud_rate   = best.baudRate;
+        active_uart_config = best.uartConfig;
+        mySerial.end();
+        mySerial.begin(best.baudRate, best.uartConfig, RX_PIN, TX_PIN);
+        Log_AddEntry(3010);
+    } else {
         active_baud_rate   = 9600;
         active_uart_config = SERIAL_8N1;
         mySerial.end();
