@@ -28,6 +28,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <ESPmDNS.h>
 #include <HardwareSerial.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -100,6 +101,10 @@ const char wifiInitialApPassword[] = "password";
 #define OPTICAL_FLASH_LED_ON  LOW   // level that lights up the IR LED
 #define OPTICAL_FLASH_MS      300   // short pulse duration [ms]
 #define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
+
+// Serial config scanner
+#define SERIAL_SCAN_TIMEOUT_MS  4000   // max listen time per candidate config (ms)
+#define SERIAL_SCAN_MIN_BYTES   8      // minimum bytes required to attempt detection
 
 // Telegram vars
 #define TELEGRAM_LENGTH 1024
@@ -264,6 +269,10 @@ String Time_formatUptime();
 String Time_getFormattedTime();
 unsigned long Time_getEpochTime();
 int Time_getMinutes();
+static void SerialScan_clearConfig();
+static bool SerialScan_run();
+String      SerialScan_activeLabel();
+
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
@@ -297,6 +306,11 @@ HardwareSerial mySerial(1); // RX, TX
 #elif defined(ESP8266)
 SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
+
+// Active serial configuration — set by SerialScan_init() at boot.
+// All mySerial.begin() calls use these instead of hardcoded 9600/8N1.
+static uint32_t active_baud_rate   = 9600;
+static uint32_t active_uart_config = SERIAL_8N1;
 
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
@@ -824,6 +838,10 @@ String Log_StatusCodeToString(int statusCode)
   case 3003: return "SML Protocoll";
   case 3004: return "IEC Protocoll";
   case 3005: return "No telegram received for 5 min";
+  case 3010: return "Serial scan: valid config found and stored";
+  case 3011: return "Serial scan: no valid config found, using default 9600-8N1";
+  case 3012: return "Serial scan: loaded stored config from NVS";
+  case 3013: return "Serial scan: triggered via web, rebooting to scan";
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
@@ -1585,7 +1603,7 @@ void Webserver_FlashPulse()
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(OPTICAL_FLASH_MS);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
-  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  mySerial.begin(active_baud_rate, active_uart_config, RX_PIN, TX_PIN);
   server.send(200, "text/plain", "ok");
 }
 
@@ -1599,7 +1617,7 @@ void Webserver_FlashLongPulse()
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(OPTICAL_FLASH_LONG_MS);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
-  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  mySerial.begin(active_baud_rate, active_uart_config, RX_PIN, TX_PIN);
   server.send(200, "text/plain", "ok");
 }
 
@@ -2095,6 +2113,18 @@ void Webserver_UrlConfig()
       "<polygon points='19,2 9,18 16,18 13,30 23,14 16,14' fill='#ffffff'/>"
       "</svg>");
   });
+  server.on("/serialScan", [] {
+    Log_AddEntry(3013);
+    SerialScan_clearConfig();
+    server.send(200, "text/html",
+      "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+      "<meta http-equiv='refresh' content='60;url=/'></head><body>"
+      "<p>Serial config cleared. Rebooting to scan all baud/parity combinations...</p>"
+      "<p>This takes up to ~60 seconds. The page will reload automatically.</p>"
+      "</body></html>");
+    delay(300);
+    ESP.restart();
+  });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
@@ -2173,6 +2203,177 @@ void Webserver_UrlConfig()
   });
 }
 
+// =========================================================================
+// Serial Configuration Scanner
+// =========================================================================
+// Tries common baud rate / parity combinations in order to find the one the
+// attached meter actually uses. Detection is based on recognising a valid SML
+// escape sequence or an IEC 62056-21 data-message start character in the
+// received bytes. The found config is persisted in NVS so subsequent boots
+// skip the scan. Trigger a new scan by calling /serialScan from the web UI.
+
+struct SerialScanEntry {
+    uint32_t    baudRate;
+    uint32_t    uartConfig;
+    const char* label;
+};
+
+static const SerialScanEntry SERIAL_SCAN_TABLE[] = {
+    {  9600, SERIAL_8N1,  "9600-8N1"  },
+    {  9600, SERIAL_8E1,  "9600-8E1"  },
+    {  9600, SERIAL_7E1,  "9600-7E1"  },
+    {  2400, SERIAL_7E1,  "2400-7E1"  },
+    {  2400, SERIAL_8N1,  "2400-8N1"  },
+    {  4800, SERIAL_8N1,  "4800-8N1"  },
+    {  4800, SERIAL_7E1,  "4800-7E1"  },
+    {  1200, SERIAL_7E1,  "1200-7E1"  },
+    {  1200, SERIAL_8N1,  "1200-8N1"  },
+    {   300, SERIAL_7E1,   "300-7E1"  },
+    { 19200, SERIAL_8N1, "19200-8N1"  },
+    { 38400, SERIAL_8N1, "38400-8N1"  },
+};
+static const int SERIAL_SCAN_TABLE_SIZE = (int)(sizeof(SERIAL_SCAN_TABLE) / sizeof(SERIAL_SCAN_TABLE[0]));
+
+// Returns the label string for a baud/config pair (for display/logging)
+static String SerialScan_label(uint32_t baud, uint32_t cfg)
+{
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++)
+        if (SERIAL_SCAN_TABLE[i].baudRate == baud && SERIAL_SCAN_TABLE[i].uartConfig == cfg)
+            return String(SERIAL_SCAN_TABLE[i].label);
+    return String(baud) + "-?";
+}
+
+// Returns true if buf looks like a valid SML or IEC 62056-21 telegram.
+static bool SerialScan_looks_valid(const uint8_t* buf, size_t len)
+{
+    if (len < (size_t)SERIAL_SCAN_MIN_BYTES) return false;
+
+    // SML: four consecutive escape bytes 0x1B mark every valid frame start
+    for (size_t i = 0; i + 3 < len; i++) {
+        if (buf[i] == 0x1b && buf[i+1] == 0x1b && buf[i+2] == 0x1b && buf[i+3] == 0x1b)
+            return true;
+    }
+
+    // IEC 62056-21: first byte '/' followed by several printable ASCII characters
+    if (buf[0] == '/') {
+        int printable = 0;
+        for (size_t i = 1; i < len && i < 32; i++)
+            if (buf[i] >= 0x20 && buf[i] <= 0x7E) printable++;
+        if (printable >= 4) return true;
+    }
+
+    return false;
+}
+
+static void SerialScan_saveConfig(uint32_t baud, uint32_t cfg)
+{
+    Preferences prefs;
+    prefs.begin("serial_cfg", false);
+    prefs.putUInt("baud", baud);
+    prefs.putUInt("cfg",  cfg);
+    prefs.end();
+    Serial.printf("[SerialScan] Config saved: %s\n", SerialScan_label(baud, cfg).c_str());
+}
+
+static bool SerialScan_loadConfig(uint32_t& baud, uint32_t& cfg)
+{
+    Preferences prefs;
+    prefs.begin("serial_cfg", true);
+    uint32_t b = prefs.getUInt("baud", 0);
+    uint32_t c = prefs.getUInt("cfg",  0);
+    prefs.end();
+    if (b == 0) return false;
+    baud = b;
+    cfg  = c;
+    return true;
+}
+
+static void SerialScan_clearConfig()
+{
+    Preferences prefs;
+    prefs.begin("serial_cfg", false);
+    prefs.clear();
+    prefs.end();
+}
+
+// Scans all candidates, updates active_baud_rate / active_uart_config on success.
+// Leaves mySerial running with the found (or default) configuration.
+static bool SerialScan_run()
+{
+    static uint8_t scan_buf[512];
+
+    Serial.println("[SerialScan] Starting baud/parity scan...");
+
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++) {
+        const SerialScanEntry& e = SERIAL_SCAN_TABLE[i];
+        Serial.printf("[SerialScan] Trying %s ...\n", e.label);
+
+        mySerial.end();
+        delay(60);
+        mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+
+        // Flush framing noise that arrives right after a config change
+        delay(120);
+        while (mySerial.available()) mySerial.read();
+
+        size_t idx = 0;
+        unsigned long start    = millis();
+        unsigned long lastByte = 0;
+
+        while (millis() - start < (unsigned long)SERIAL_SCAN_TIMEOUT_MS) {
+            while (mySerial.available() && idx < sizeof(scan_buf)) {
+                scan_buf[idx++] = mySerial.read();
+                lastByte = millis();
+            }
+            // Stop waiting early once we have data and the line went quiet for 200 ms
+            if (idx >= (size_t)SERIAL_SCAN_MIN_BYTES && lastByte > 0 && millis() - lastByte > 200)
+                break;
+            delay(5);
+        }
+
+        Serial.printf("[SerialScan]   received %u bytes\n", (unsigned)idx);
+
+        if (SerialScan_looks_valid(scan_buf, idx)) {
+            Serial.printf("[SerialScan] Valid telegram detected at %s!\n", e.label);
+            active_baud_rate   = e.baudRate;
+            active_uart_config = e.uartConfig;
+            SerialScan_saveConfig(e.baudRate, e.uartConfig);
+            Log_AddEntry(3010);
+            return true;
+        }
+    }
+
+    // No match found — fall back to safe default
+    Serial.println("[SerialScan] No valid config found, using default 9600-8N1.");
+    active_baud_rate   = 9600;
+    active_uart_config = SERIAL_8N1;
+    mySerial.end();
+    mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+    Log_AddEntry(3011);
+    return false;
+}
+
+// Called once from setup(). Loads stored config from NVS or runs a full scan.
+static void SerialScan_init()
+{
+    uint32_t baud = 0, cfg = 0;
+    if (SerialScan_loadConfig(baud, cfg)) {
+        active_baud_rate   = baud;
+        active_uart_config = cfg;
+        mySerial.end();
+        mySerial.begin(baud, cfg, RX_PIN, TX_PIN);
+        Serial.printf("[SerialScan] Loaded from NVS: %s\n", SerialScan_label(baud, cfg).c_str());
+        Log_AddEntry(3012);
+    } else {
+        SerialScan_run();
+    }
+}
+
+String SerialScan_activeLabel()
+{
+    return SerialScan_label(active_baud_rate, active_uart_config);
+}
+
 void telegramTask(void * pvParameters) {
   for(;;) {
     handle_Telegram_receive();
@@ -2194,7 +2395,7 @@ void setup()
   unsigned long _t = millis();
   while (!Serial && millis() - _t < 3000) delay(10);
 #endif
-  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  SerialScan_init(); // loads stored baud/parity from NVS or scans all candidates
   DLOGLN();
   DLOGLN("Starting up...Hello!");
 
@@ -3605,13 +3806,17 @@ void Webserver_HandleSysInfo()
 
 <div class="card">
 <div class="card-title">Telegram Parse Config</div>
-<div class="kv last"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
+<div class="kv"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
   s += Telegram_protocol_to_string(last_detected_protocol);
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Serial config (active)</span>)rawliteral";
+  s += SerialScan_activeLabel();
   s += R"rawliteral(</div>
 <div class="btns" style="margin-top:.6rem;">
 <a class="btn btn-s" href="showTelegram">Show Telegram</a>
 <a class="btn btn-s" href="showTelegramRaw">Raw</a>
 <a class="btn btn-s" href="showTelegramAnalysis">Analysis</a>
+<a class="btn btn-s" href="serialScan" onclick="return confirm('Clear stored serial config and reboot for auto-scan?')">Baud/Parity Scan</a>
 </div>
 </div>
 
