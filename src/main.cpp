@@ -42,6 +42,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <DallasTemperature.h>
 #include "Arduino.h"
 #include "soc/uart_reg.h"  // UART_INT_RAW_REG / UART_INT_CLR_REG for parity-error detection
+#include <Preferences.h>  // NVS persistence for serial config
 
 // ---------------------------------------------------------------------------
 // Serial debug macros
@@ -271,6 +272,10 @@ unsigned long Time_getEpochTime();
 int Time_getMinutes();
 static void SerialScan_run();
 String      SerialScan_activeLabel();
+static int  SerialScan_activeIndex();
+static bool SerialConfig_setByIndex(int idx);
+static void SerialConfig_save(int idx);
+static void SerialConfig_load();
 
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
@@ -316,7 +321,8 @@ static volatile int        scan_current          = -1;  // index being tested
 static volatile int        scan_found            = -1;  // first positive index, -1 = none
 static volatile uint32_t   scan_found_mask       = 0;   // bitmask of all positive indices
 static volatile bool       serial_scan_requested = false;
-static const    int       SERIAL_SCAN_COUNT     = 12;  // must match SERIAL_SCAN_TABLE size
+static const    int        SERIAL_SCAN_COUNT     = 12;  // must match SERIAL_SCAN_TABLE size
+static          int        serial_config_saved_idx = -1; // NVS-persisted table index, -1 = factory default
 
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
@@ -846,6 +852,7 @@ String Log_StatusCodeToString(int statusCode)
   case 3005: return "No telegram received for 5 min";
   case 3010: return "Serial scan: valid config found";
   case 3011: return "Serial scan: no valid config found, using default 9600-8N1";
+  case 3012: return "Serial config: manually set via web UI";
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
@@ -2135,54 +2142,70 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:1.1rem 1.3rem;width:100%;max-width:500px}
 .card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:.7rem}
 table{width:100%;border-collapse:collapse;font-size:.85rem}
-td{padding:.3rem .4rem;border-bottom:1px solid #f0f2f7}
-td:first-child{font-family:monospace;font-size:.88rem}
+td{padding:.3rem .4rem;border-bottom:1px solid #f0f2f7;vertical-align:middle}
+td:first-child{font-family:monospace;font-size:.88rem;width:40%}
+td:nth-child(2){width:35%}
+td:nth-child(3){width:25%;text-align:right}
 .testing{color:#e8a800;font-weight:600}
 .found{color:#1a9b3a;font-weight:700}
 .fail{color:#bbb}
 .pending{color:#ddd}
 .btn{padding:.65rem .95rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.84rem;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;min-height:44px;margin-top:.8rem}
+.set-btn{padding:.22rem .55rem;border-radius:6px;background:#1a3799;color:#fff;font-size:.75rem;font-weight:600;border:none;cursor:pointer;min-height:28px}
+.set-btn:disabled{background:#ccc;cursor:not-allowed}
+tr.active-cfg td:first-child{color:#1a3799;font-weight:700}
+tr.active-cfg td:first-child::before{content:"▶ "}
 #result{margin-top:.75rem;font-size:.9rem;font-weight:600;display:none}
 .ok{color:#1a9b3a}.err{color:#c0392b}
 </style></head><body>
 <div class="logo">&#9889; SMGWLite</div>
 <a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
 <div class="card">
-<div class="card-title">Baud / Parity Scan</div>
+<div class="card-title">Baud / Parity Scan &amp; Konfiguration</div>
 <table>
-<tr><td>9600-8E1</td><td id="s0" class="pending">&#8203;</td></tr>
-<tr><td>9600-7E1</td><td id="s1" class="pending">&#8203;</td></tr>
-<tr><td>2400-7E1</td><td id="s2" class="pending">&#8203;</td></tr>
-<tr><td>2400-8N1</td><td id="s3" class="pending">&#8203;</td></tr>
-<tr><td>4800-8N1</td><td id="s4" class="pending">&#8203;</td></tr>
-<tr><td>4800-7E1</td><td id="s5" class="pending">&#8203;</td></tr>
-<tr><td>1200-7E1</td><td id="s6" class="pending">&#8203;</td></tr>
-<tr><td>1200-8N1</td><td id="s7" class="pending">&#8203;</td></tr>
-<tr><td>300-7E1</td><td id="s8" class="pending">&#8203;</td></tr>
-<tr><td>19200-8N1</td><td id="s9" class="pending">&#8203;</td></tr>
-<tr><td>38400-8N1</td><td id="s10" class="pending">&#8203;</td></tr>
-<tr><td>9600-8N1</td><td id="s11" class="pending">&#8203;</td></tr>
+<tr id="r0"><td>9600-8E1</td><td id="s0" class="pending">&#8203;</td><td><button class="set-btn" id="b0" onclick="setConfig(0)" >Use Config</button></td></tr>
+<tr id="r1"><td>9600-7E1</td><td id="s1" class="pending">&#8203;</td><td><button class="set-btn" id="b1" onclick="setConfig(1)" >Use Config</button></td></tr>
+<tr id="r2"><td>2400-7E1</td><td id="s2" class="pending">&#8203;</td><td><button class="set-btn" id="b2" onclick="setConfig(2)" >Use Config</button></td></tr>
+<tr id="r3"><td>2400-8N1</td><td id="s3" class="pending">&#8203;</td><td><button class="set-btn" id="b3" onclick="setConfig(3)" >Use Config</button></td></tr>
+<tr id="r4"><td>4800-8N1</td><td id="s4" class="pending">&#8203;</td><td><button class="set-btn" id="b4" onclick="setConfig(4)" >Use Config</button></td></tr>
+<tr id="r5"><td>4800-7E1</td><td id="s5" class="pending">&#8203;</td><td><button class="set-btn" id="b5" onclick="setConfig(5)" >Use Config</button></td></tr>
+<tr id="r6"><td>1200-7E1</td><td id="s6" class="pending">&#8203;</td><td><button class="set-btn" id="b6" onclick="setConfig(6)" >Use Config</button></td></tr>
+<tr id="r7"><td>1200-8N1</td><td id="s7" class="pending">&#8203;</td><td><button class="set-btn" id="b7" onclick="setConfig(7)" >Use Config</button></td></tr>
+<tr id="r8"><td>300-7E1</td><td id="s8" class="pending">&#8203;</td><td><button class="set-btn" id="b8" onclick="setConfig(8)" >Use Config</button></td></tr>
+<tr id="r9"><td>19200-8N1</td><td id="s9" class="pending">&#8203;</td><td><button class="set-btn" id="b9" onclick="setConfig(9)" >Use Config</button></td></tr>
+<tr id="r10"><td>38400-8N1</td><td id="s10" class="pending">&#8203;</td><td><button class="set-btn" id="b10" onclick="setConfig(10)" >Use Config</button></td></tr>
+<tr id="r11"><td>9600-8N1</td><td id="s11" class="pending">&#8203;</td><td><button class="set-btn" id="b11" onclick="setConfig(11)" >Use Config</button></td></tr>
 </table>
 <div id="result"></div>
 <a class="btn" href="/sysinfo" id="back-btn" style="display:none">&#8592; Zur&uuml;ck</a>
 </div>
 <script>
+var activeIdx=-1;
 var timer=setInterval(poll,700);
+function updateActive(n,newActive){
+  for(var i=0;i<n;i++){
+    var r=document.getElementById('r'+i);
+    if(r)r.className=(i===newActive?'active-cfg':'');
+  }
+  activeIdx=newActive;
+}
 function poll(){
   fetch('/serialScanStatus').then(function(r){return r.json()}).then(function(d){
     var n=d.total||12;
     var mask=d.foundMask||0;
+    var scanning=d.state==='running';
+    var newActive=(d.activeIndex!==undefined)?d.activeIndex:-1;
+    if(newActive!==activeIdx)updateActive(n,newActive);
     for(var i=0;i<n;i++){
       var el=document.getElementById('s'+i);
       if(!el)continue;
       var hit=(mask>>i)&1;
       if(hit){
-        el.className='found';
-        el.textContent=d.foundIndex===i?'✓ Aktiv':'✓ Signal';
-      }else if(d.state==='running'&&d.currentIndex===i){
+        el.className='found';el.textContent='✓ Frame OK';
+      }else if(scanning&&d.currentIndex===i){
         el.className='testing';el.textContent='... teste';
-      }else if((d.state==='running'&&i<d.currentIndex)||d.state==='done'){
-        el.className='fail';el.textContent='kein Signal';
+      }else if((scanning&&i<d.currentIndex)||d.state==='done'){
+        el.className='fail';el.textContent='No Frame';
       }
     }
     if(d.state==='done'){
@@ -2203,6 +2226,11 @@ function poll(){
     }
   }).catch(function(){});
 }
+function setConfig(idx){
+  fetch('/setSerialConfig?idx='+idx).then(function(r){return r.json()}).then(function(d){
+    if(d.ok)poll();
+  }).catch(function(){});
+}
 poll();
 </script>
 </body></html>)rawliteral");
@@ -2218,8 +2246,15 @@ poll();
     json += ",\"foundIndex\":"     + String((int)scan_found);
     json += ",\"foundMask\":"      + String((unsigned int)scan_found_mask);
     json += ",\"total\":"          + String(SERIAL_SCAN_COUNT);
+    json += ",\"activeIndex\":"    + String(SerialScan_activeIndex());
     json += ",\"activeLabel\":\""  + SerialScan_activeLabel() + "\"}";
     server.send(200, "application/json", json);
+  });
+  server.on("/setSerialConfig", [] {
+    if (!server.hasArg("idx")) { server.send(400, "application/json", "{\"ok\":false}"); return; }
+    int idx = server.arg("idx").toInt();
+    if (!SerialConfig_setByIndex(idx)) { server.send(400, "application/json", "{\"ok\":false}"); return; }
+    server.send(200, "application/json", "{\"ok\":true,\"label\":\"" + SerialScan_activeLabel() + "\"}");
   });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
@@ -2364,6 +2399,53 @@ String SerialScan_activeLabel()
     return SerialScan_label(active_baud_rate, active_uart_config);
 }
 
+static int SerialScan_activeIndex()
+{
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++)
+        if (SERIAL_SCAN_TABLE[i].baudRate == active_baud_rate &&
+            SERIAL_SCAN_TABLE[i].uartConfig == active_uart_config)
+            return i;
+    return -1;
+}
+
+static void SerialConfig_save(int idx)
+{
+    serial_config_saved_idx = idx;
+    Preferences prefs;
+    if (prefs.begin("smgw", false)) {
+        prefs.putInt("serialCfg", idx);
+        prefs.end();
+    }
+}
+
+static void SerialConfig_load()
+{
+    Preferences prefs;
+    if (!prefs.begin("smgw", true)) return;
+    int idx = prefs.getInt("serialCfg", -1);
+    prefs.end();
+    if (idx < 0 || idx >= SERIAL_SCAN_TABLE_SIZE) return;
+    serial_config_saved_idx = idx;
+    const SerialScanEntry& e = SERIAL_SCAN_TABLE[idx];
+    active_baud_rate   = e.baudRate;
+    active_uart_config = e.uartConfig;
+    mySerial.end();
+    mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+}
+
+static bool SerialConfig_setByIndex(int idx)
+{
+    if (idx < 0 || idx >= SERIAL_SCAN_TABLE_SIZE) return false;
+    const SerialScanEntry& e = SERIAL_SCAN_TABLE[idx];
+    active_baud_rate   = e.baudRate;
+    active_uart_config = e.uartConfig;
+    mySerial.end();
+    mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+    SerialConfig_save(idx);
+    Log_AddEntry(3012);
+    return true;
+}
+
 // Called from telegramTask — uses vTaskDelay so the webserver keeps responding.
 static void SerialScan_run()
 {
@@ -2420,12 +2502,14 @@ static void SerialScan_run()
         active_uart_config = best.uartConfig;
         mySerial.end();
         mySerial.begin(best.baudRate, best.uartConfig, RX_PIN, TX_PIN);
+        SerialConfig_save(scan_found);
         Log_AddEntry(3010);
     } else {
         active_baud_rate   = 9600;
         active_uart_config = SERIAL_8N1;
         mySerial.end();
         mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+        SerialConfig_save(-1);
         Log_AddEntry(3011);
     }
 
@@ -2461,6 +2545,7 @@ void setup()
   while (!Serial && millis() - _t < 3000) delay(10);
 #endif
   mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  SerialConfig_load();  // override with NVS-persisted config if available
   DLOGLN();
   DLOGLN("Starting up...Hello!");
 
@@ -3130,6 +3215,7 @@ void Webclient_send_log_to_backend()
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
+  logHeader += "&serial=" + SerialScan_activeLabel();
   if (!meter_model.isEmpty()) {
     String encoded = meter_model;
     encoded.replace(" ", "%20");
