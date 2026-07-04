@@ -3160,14 +3160,27 @@ void handle_check_wifi_connection()
     }
     else
     {
-      // Still offline — periodisch Reconnect versuchen
-      if (iotWebConf.getState() == iotwebconf::NetworkState::ApMode)
+      // Still offline — periodically trigger reconnect attempt
+      if (millis() - last_reconnect_attempt > 60000)
       {
-        if (millis() - last_reconnect_attempt > 60000)
+        last_reconnect_attempt = millis();
+        iotwebconf::NetworkState state = iotWebConf.getState();
+        if (state == iotwebconf::NetworkState::ApMode)
         {
-          last_reconnect_attempt = millis();
-          DLOGLN("AP mode: triggering reconnect attempt");
+          DLOGLN("AP mode: triggering reconnect via IotWebConf");
           iotWebConf.forceApMode(false);
+        }
+        else
+        {
+          // OffLine or Connecting state: IotWebConf is not actively retrying.
+          // WiFi.reconnect() only works when status == WL_DISCONNECTED, which is
+          // not guaranteed after WL_CONNECTION_LOST. Use WiFi.begin() with the
+          // credentials IotWebConf has stored — same as what manual re-entry does.
+          DLOGLN("Offline: re-calling WiFi.begin() with stored credentials");
+          WiFi.begin(
+            iotWebConf.getWifiSsidParameter()->valueBuffer,
+            iotWebConf.getWifiPasswordParameter()->valueBuffer
+          );
         }
       }
     }
