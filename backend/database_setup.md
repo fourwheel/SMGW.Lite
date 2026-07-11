@@ -8,8 +8,12 @@ CREATE TABLE `clients` (
   `wireframe` varchar(30) DEFAULT NULL,
   `first_reading` datetime DEFAULT NULL,
   `last_reading` datetime DEFAULT NULL,
-  `comment` text DEFAULT NULL
+  `comment` text DEFAULT NULL,
+  `pin_meter` tinyint(1) DEFAULT NULL COMMENT 'NULL = not applicable (tks); 0 = no PIN (whole kWh only); 1 = PIN unlocked (sub-kWh precision)'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Migration for existing installations:
+-- ALTER TABLE `clients` ADD COLUMN `pin_meter` TINYINT(1) DEFAULT NULL COMMENT 'NULL = not applicable (tks); 0 = no PIN (whole kWh only); 1 = PIN unlocked (sub-kWh precision)';
 
 -- --------------------------------------------------------
 
