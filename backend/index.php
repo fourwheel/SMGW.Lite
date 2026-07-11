@@ -229,13 +229,13 @@ update_client_endpoint($id, $wireframe_str);
 // ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client
 // ---------------------------------------------------------------------------
-$prev = ["timestamp" => 0, "meter" => 0, "meter_solar" => null];
+$prev = ["timestamp" => 0, "meter" => 0, "meter_solar" => null, "obis280" => null];
 
 // Use a prepared statement to prevent SQL injection on the $id field.
 // The original code built the query with string concatenation, which allowed
 // an attacker with a valid token to manipulate the query via the ID parameter.
 $stmt = mysqli_prepare($_link,
-    "SELECT `meter_value`, `meter_value_PV`, `timestamp_client`
+    "SELECT `meter_value`, `meter_value_PV`, `obis280`, `timestamp_client`
      FROM `sml_v1`
      WHERE `id` = ?
      ORDER BY `timestamp_client` DESC
@@ -247,6 +247,7 @@ $result = mysqli_stmt_get_result($stmt);
 if ($row = mysqli_fetch_array($result)) {
     $prev["meter"]       = $row['meter_value'];
     $prev["meter_solar"] = $row['meter_value_PV'] !== null ? (float)$row['meter_value_PV'] : null;
+    $prev["obis280"]     = $row['obis280'] !== null ? (int)$row['obis280'] : null;
     $prev["timestamp"]   = $row['timestamp_client'];
 }
 mysqli_stmt_close($stmt);
@@ -268,6 +269,34 @@ $current_time = time(); // single server timestamp for all inserts in this batch
 $inserted  = 0;
 $diag_rows = []; // collects all entries with validation result for diagnostic log
 
+// Detect whether this meter sends sub-kWh precision (PIN unlocked).
+// Without PIN, meter_value is always a multiple of 10,000 (whole kWh in 0.1 Wh units).
+// We look at the 3 most recent distinct meter_value readings: if any is non-divisible
+// by 10,000, the meter has PIN precision and 0W readings must not be filtered out.
+$is_pin_meter = false;
+if ($id !== 'tks') {
+    $stmt_pin = mysqli_prepare($_link,
+        "SELECT COUNT(*) FROM (
+             SELECT DISTINCT meter_value
+             FROM (SELECT meter_value FROM `sml_v1` WHERE `id` = ? ORDER BY `i` DESC LIMIT 100) r
+             LIMIT 3
+         ) d
+         WHERE d.meter_value % 10000 != 0"
+    );
+    mysqli_stmt_bind_param($stmt_pin, "s", $id);
+    mysqli_stmt_execute($stmt_pin);
+    mysqli_stmt_bind_result($stmt_pin, $decimal_count);
+    mysqli_stmt_fetch($stmt_pin);
+    mysqli_stmt_close($stmt_pin);
+    $is_pin_meter = ($decimal_count > 0);
+
+    $stmt_upd = mysqli_prepare($_link, "UPDATE `clients` SET `pin_meter` = ? WHERE `device_id` = ?");
+    $pin_val = $is_pin_meter ? 1 : 0;
+    mysqli_stmt_bind_param($stmt_upd, "is", $pin_val, $id);
+    mysqli_stmt_execute($stmt_upd);
+    mysqli_stmt_close($stmt_upd);
+}
+
 foreach ($entries as $item) {
 
     if ($enable_entry_log) echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
@@ -287,8 +316,11 @@ foreach ($entries as $item) {
         $rejection = "duplicate_timestamp";
     }
     // Skip entries where both meter counters are unchanged — no new energy was measured.
-    // Excluded for "tks" (fridge thermometer) which always reports the same meter value.
-    elseif ($id !== 'tks' && $item["meter"] == $prev["meter"] && $item["meter_solar"] === $prev["meter_solar"]) {
+    // Only applies to meters without PIN (whole-kWh precision): on those, identical values
+    // carry no information. PIN meters can legitimately report 0 W (e.g. during vacation)
+    // with unchanged readings, so we keep those entries.
+    // "tks" (fridge thermometer) is excluded entirely — it always reports the same meter value.
+    elseif ($id !== 'tks' && !$is_pin_meter && $item["meter"] == $prev["meter"] && ($item["meter_solar"] ?? null) === $prev["meter_solar"] && ($item["obis280"] ?? null) === $prev["obis280"]) {
         $rejection = "identical_meter_values";
     }
 
@@ -333,7 +365,8 @@ foreach ($entries as $item) {
     // this one, not the one loaded from the database
     $prev["timestamp"]   = $item["timestamp"];
     $prev["meter"]       = $item["meter"];
-    $prev["meter_solar"] = $item["meter_solar"];
+    $prev["meter_solar"] = $item["meter_solar"] ?? null;
+    $prev["obis280"]     = $item["obis280"] ?? null;
 
     // Clamp meter value to zero just in case (should never be negative here)
     $meter_val = max(0, $item["meter"]);
