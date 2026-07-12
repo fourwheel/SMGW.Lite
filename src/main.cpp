@@ -41,6 +41,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include "Arduino.h"
+#include "soc/uart_reg.h"  // UART_INT_RAW_REG / UART_INT_CLR_REG for parity-error detection
+#include <Preferences.h>  // NVS persistence for serial config
 
 // ---------------------------------------------------------------------------
 // Serial debug macros
@@ -100,6 +102,10 @@ const char wifiInitialApPassword[] = "password";
 #define OPTICAL_FLASH_LED_ON  LOW   // level that lights up the IR LED
 #define OPTICAL_FLASH_MS      300   // short pulse duration [ms]
 #define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
+
+// Serial config scanner
+#define SERIAL_SCAN_TIMEOUT_MS  10000  // max listen time per candidate config (ms)
+#define SERIAL_SCAN_MIN_BYTES   8      // minimum bytes required to attempt detection
 
 // Telegram vars
 #define TELEGRAM_LENGTH 1024
@@ -264,6 +270,14 @@ String Time_formatUptime();
 String Time_getFormattedTime();
 unsigned long Time_getEpochTime();
 int Time_getMinutes();
+static void SerialScan_run();
+String      SerialScan_activeLabel();
+static int  SerialScan_activeIndex();
+static bool SerialConfig_setByIndex(int idx);
+String      SerialScan_buildTableRows();
+static void SerialConfig_save(int idx);
+static void SerialConfig_load();
+
 void Telegram_ResetReceiveBuffer();
 void handle_Telegram_receive();
 void Webclient_send_log_to_backend();
@@ -297,6 +311,38 @@ HardwareSerial mySerial(1); // RX, TX
 #elif defined(ESP8266)
 SoftwareSerial mySerial(D5, D6); // RX, TX
 #endif
+
+static uint32_t active_baud_rate   = 9600;
+static uint32_t active_uart_config = SERIAL_8N1;
+
+// Serial scan state — written by SerialScan_run() (telegramTask), read by web handlers
+enum class ScanState : uint8_t { IDLE, RUNNING, DONE };
+static volatile ScanState  scan_state            = ScanState::IDLE;
+static volatile int        scan_current          = -1;  // index being tested
+static volatile int        scan_found            = -1;  // first positive index, -1 = none
+static volatile uint32_t   scan_found_mask       = 0;   // bitmask of all positive indices
+static volatile bool       serial_scan_requested = false;
+struct SerialScanEntry {
+    uint32_t    baudRate;
+    uint32_t    uartConfig;
+    const char* label;
+};
+static const SerialScanEntry SERIAL_SCAN_TABLE[] = {
+    {  9600, SERIAL_8N1,  "9600-8N1"  },  
+    {  9600, SERIAL_8E1,  "9600-8E1"  },
+    {  9600, SERIAL_7E1,  "9600-7E1"  },
+    {  2400, SERIAL_7E1,  "2400-7E1"  },
+    {  2400, SERIAL_8N1,  "2400-8N1"  },
+    {  4800, SERIAL_8N1,  "4800-8N1"  },
+    {  4800, SERIAL_7E1,  "4800-7E1"  },
+    {  1200, SERIAL_7E1,  "1200-7E1"  },
+    {  1200, SERIAL_8N1,  "1200-8N1"  },
+    {   300, SERIAL_7E1,   "300-7E1"  },
+    { 19200, SERIAL_8N1, "19200-8N1"  },
+    { 38400, SERIAL_8N1, "38400-8N1"  },
+};
+static const int SERIAL_SCAN_TABLE_SIZE = (int)(sizeof(SERIAL_SCAN_TABLE) / sizeof(SERIAL_SCAN_TABLE[0]));
+static          int        serial_config_saved_idx = -1; // NVS-persisted table index, -1 = factory default
 
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
@@ -488,6 +534,34 @@ small{font-size:.79rem;}
 </style>
 )rawliteral";
 
+const char HTML_STYLE_SERIAL_SCAN[] PROGMEM = R"rawliteral(
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:.8rem;color:#1a1a1a}
+.logo{font-size:1.4rem;font-weight:800;color:#1a3799;letter-spacing:-.02em}
+.back{color:#1a3799;font-size:.85rem;text-decoration:none;width:100%;max-width:500px}
+.card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:1.1rem 1.3rem;width:100%;max-width:500px}
+.card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:.7rem}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+td{padding:.3rem .4rem;border-bottom:1px solid #f0f2f7;vertical-align:middle}
+td:first-child{font-family:monospace;font-size:.88rem;width:40%}
+td:nth-child(2){width:35%}
+td:nth-child(3){width:25%;text-align:right}
+.testing{color:#e8a800;font-weight:600}
+.found{color:#1a9b3a;font-weight:700}
+.fail{color:#bbb}
+.pending{color:#ddd}
+.btn{padding:.65rem .95rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.84rem;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;min-height:44px;margin-top:.8rem}
+.set-btn{padding:.22rem .55rem;border-radius:6px;background:#1a3799;color:#fff;font-size:.75rem;font-weight:600;border:none;cursor:pointer;min-height:28px}
+.set-btn.act{background:#2e7d32;}
+.set-btn:disabled{background:#ccc;cursor:not-allowed}
+tr.active-cfg td:first-child{color:#1a3799;font-weight:700}
+tr.active-cfg td:first-child::before{content:"▶ "}
+#result{margin-top:.75rem;font-size:.9rem;font-weight:600;display:none}
+.ok{color:#1a9b3a}.err{color:#c0392b}
+</style>
+)rawliteral";
+
 unsigned long Time_getEpochTime()
 {
   return static_cast<unsigned long>(time(nullptr));
@@ -516,7 +590,7 @@ int logIndex = -1;
 // The first occurrence is always written; subsequent identical codes are
 // dropped until a different code is logged.
 // ---------------------------------------------------------------------------
-const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022};
+const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 3006};
 int last_logged_statusCode = -1; // last code actually written to the buffer
 
 void LogBuffer_reset()
@@ -824,6 +898,10 @@ String Log_StatusCodeToString(int statusCode)
   case 3003: return "SML Protocoll";
   case 3004: return "IEC Protocoll";
   case 3005: return "No telegram received for 5 min";
+  case 3006: return "Serial Msg received but parse failed (check baud/parity)";
+  case 3010: return "Serial scan: valid config(s) found — activate manually";
+  case 3011: return "Serial scan: no valid configuration found";
+  case 3012: return "Serial config: manually set via web UI";
   
   case 4000: return "Connection to server failed (Cert!?)";
         case 4001: return "Error transmitting Buffer Chunk";
@@ -1585,7 +1663,7 @@ void Webserver_FlashPulse()
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(OPTICAL_FLASH_MS);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
-  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  mySerial.begin(active_baud_rate, active_uart_config, RX_PIN, TX_PIN);
   server.send(200, "text/plain", "ok");
 }
 
@@ -1599,7 +1677,7 @@ void Webserver_FlashLongPulse()
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(OPTICAL_FLASH_LONG_MS);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
-  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  mySerial.begin(active_baud_rate, active_uart_config, RX_PIN, TX_PIN);
   server.send(200, "text/plain", "ok");
 }
 
@@ -2095,6 +2173,103 @@ void Webserver_UrlConfig()
       "<polygon points='19,2 9,18 16,18 13,30 23,14 16,14' fill='#ffffff'/>"
       "</svg>");
   });
+  server.on("/serialScan", [] {
+    scan_state            = ScanState::IDLE;
+    scan_found            = -1;
+    scan_found_mask       = 0;
+    scan_current          = -1;
+    serial_scan_requested = true;
+    String page;
+    page.reserve(4000);
+    page += R"rawliteral(<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Serial Scan</title>
+)rawliteral";
+    page += HTML_STYLE_SERIAL_SCAN;
+    page += R"rawliteral(</head><body>
+<div class="logo">&#9889; SMGWLite</div>
+<a class="back" href="/sysinfo">&#8592; Back</a>
+<div class="card">
+<div class="card-title">Baud / Parity Scan &amp; Configuration</div>
+<table>
+)rawliteral";
+    page += SerialScan_buildTableRows();
+    page += R"rawliteral(</table>
+<div id="result"></div>
+<a class="btn" href="/sysinfo" id="back-btn" style="display:none">&#8592; Back</a>
+</div>
+<script>
+var activeIdx=-1;
+var timer=setInterval(poll,700);
+function updateActive(n,newActive){
+  for(var i=0;i<n;i++){
+    var r=document.getElementById('r'+i);
+    if(r)r.className=(i===newActive?'active-cfg':'');
+    var b=document.getElementById('b'+i);
+    if(b){
+      if(i===newActive){b.textContent='Active';b.classList.add('act');}
+      else{b.textContent='Activate';b.classList.remove('act');}
+    }
+  }
+  activeIdx=newActive;
+}
+function poll(){
+  fetch('/serialScanStatus').then(function(r){return r.json()}).then(function(d){
+    var n=d.total||12;
+    var mask=d.foundMask||0;
+    var scanning=d.state==='running';
+    var newActive=(d.activeIndex!==undefined)?d.activeIndex:-1;
+    if(newActive!==activeIdx)updateActive(n,newActive);
+    for(var i=0;i<n;i++){
+      var el=document.getElementById('s'+i);
+      if(!el)continue;
+      var hit=(mask>>i)&1;
+      if(hit){
+        el.className='found';el.textContent='✓ Frame OK';
+      }else if(scanning&&d.currentIndex===i){
+        el.className='testing';el.textContent='... testing';
+      }else if((scanning&&i<d.currentIndex)||d.state==='done'){
+        el.className='fail';el.textContent='No Frame';
+      }
+    }
+    if(d.state==='done'){
+      clearInterval(timer);
+      document.getElementById('back-btn').style.display='inline-flex';
+    }
+  }).catch(function(){});
+}
+function setConfig(idx){
+  fetch('/setSerialConfig?idx='+idx).then(function(r){return r.json()}).then(function(d){
+    if(d.ok)poll();
+  }).catch(function(){});
+}
+poll();
+</script>
+</body></html>)rawliteral";
+    server.send(200, "text/html", page);
+  });
+  server.on("/serialScanStatus", [] {
+    String json = "{\"state\":\"";
+    switch (scan_state) {
+      case ScanState::RUNNING: json += "running"; break;
+      case ScanState::DONE:    json += "done";    break;
+      default:                 json += "idle";    break;
+    }
+    json += "\",\"currentIndex\":" + String((int)scan_current);
+    json += ",\"foundIndex\":"     + String((int)scan_found);
+    json += ",\"foundMask\":"      + String((unsigned int)scan_found_mask);
+    json += ",\"total\":"          + String(SERIAL_SCAN_TABLE_SIZE);
+    json += ",\"activeIndex\":"    + String(SerialScan_activeIndex());
+    json += ",\"activeLabel\":\""  + SerialScan_activeLabel() + "\"}";
+    server.send(200, "application/json", json);
+  });
+  server.on("/setSerialConfig", [] {
+    if (!server.hasArg("idx")) { server.send(400, "application/json", "{\"ok\":false}"); return; }
+    int idx = server.arg("idx").toInt();
+    if (!SerialConfig_setByIndex(idx)) { server.send(400, "application/json", "{\"ok\":false}"); return; }
+    server.send(200, "application/json", "{\"ok\":true,\"label\":\"" + SerialScan_activeLabel() + "\"}");
+  });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
@@ -2173,9 +2348,210 @@ void Webserver_UrlConfig()
   });
 }
 
+// =========================================================================
+// Serial Configuration Scanner
+// =========================================================================
+// Manually triggered from /serialScan in the web UI. Tries all entries in
+// SERIAL_SCAN_TABLE and identifies the correct one by checking whether received
+// bytes contain an SML escape sequence or an IEC 62056-21 start character.
+// Runs asynchronously inside telegramTask; progress is exposed via
+// /serialScanStatus (JSON) so the browser page can poll live.
+
+String SerialScan_buildTableRows()
+{
+    String rows;
+    rows.reserve(SERIAL_SCAN_TABLE_SIZE * 130);
+    int activeIdx = SerialScan_activeIndex();
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++) {
+        bool isActive = (i == activeIdx);
+        rows += "<tr id=\"r";
+        rows += i;
+        rows += (isActive ? "\" class=\"active-cfg\">" : "\">");
+        rows += "<td>";
+        rows += SERIAL_SCAN_TABLE[i].label;
+        rows += "</td><td id=\"s";
+        rows += i;
+        rows += "\" class=\"pending\">&#8203;</td><td><button class=\"set-btn";
+        rows += (isActive ? " act\" id=\"b" : "\" id=\"b");
+        rows += i;
+        rows += "\" onclick=\"setConfig(";
+        rows += i;
+        rows += (isActive ? ")\">Active</button></td></tr>\n" : ")\">Activate</button></td></tr>\n");
+    }
+    return rows;
+}
+
+static String SerialScan_label(uint32_t baud, uint32_t cfg)
+{
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++)
+        if (SERIAL_SCAN_TABLE[i].baudRate == baud && SERIAL_SCAN_TABLE[i].uartConfig == cfg)
+            return String(SERIAL_SCAN_TABLE[i].label);
+    return String(baud) + "-?";
+}
+
+static bool SerialScan_looks_valid(const uint8_t* buf, size_t len)
+{
+    if (len < (size_t)SERIAL_SCAN_MIN_BYTES) return false;
+
+    // SML: require both start (4x 0x1B) and end (4x 0x1B + 0x1A) markers with at
+    // least 40 bytes of payload between them. The minimum size alone makes accidental
+    // matches from garbled data at the wrong baud rate practically impossible.
+    bool hasStart = false;
+    size_t px = 0;
+    for (size_t i = 0; i + 3 < len; i++) {
+        if (buf[i] == 0x1b && buf[i+1] == 0x1b && buf[i+2] == 0x1b && buf[i+3] == 0x1b) {
+            if (!hasStart) { hasStart = true; px = i; i += 3; continue; }
+            if (i + 4 < len && buf[i+4] == 0x1a && (i - px) >= 40) return true;
+        }
+    }
+
+    // IEC 62056-21: starts with '/' followed by printable ASCII
+    if (buf[0] == '/') {
+        int printable = 0;
+        for (size_t i = 1; i < len && i < 32; i++)
+            if (buf[i] >= 0x20 && buf[i] <= 0x7E) printable++;
+        if (printable >= 4) return true;
+    }
+
+    return false;
+}
+
+String SerialScan_activeLabel()
+{
+    return SerialScan_label(active_baud_rate, active_uart_config);
+}
+
+static int SerialScan_activeIndex()
+{
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++)
+        if (SERIAL_SCAN_TABLE[i].baudRate == active_baud_rate &&
+            SERIAL_SCAN_TABLE[i].uartConfig == active_uart_config)
+            return i;
+    return -1;
+}
+
+static void SerialConfig_save(int idx)
+{
+    serial_config_saved_idx = idx;
+    Preferences prefs;
+    if (prefs.begin("smgw", false)) {
+        prefs.putInt("serialCfg", idx);
+        prefs.end();
+    }
+}
+
+static void SerialConfig_load()
+{
+    Preferences prefs;
+    if (!prefs.begin("smgw", true)) return;
+    int idx = prefs.getInt("serialCfg", -1);
+    prefs.end();
+    if (idx < 0 || idx >= SERIAL_SCAN_TABLE_SIZE) return;
+    serial_config_saved_idx = idx;
+    const SerialScanEntry& e = SERIAL_SCAN_TABLE[idx];
+    active_baud_rate   = e.baudRate;
+    active_uart_config = e.uartConfig;
+    mySerial.end();
+    mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+}
+
+static bool SerialConfig_setByIndex(int idx)
+{
+    if (idx < 0 || idx >= SERIAL_SCAN_TABLE_SIZE) return false;
+    const SerialScanEntry& e = SERIAL_SCAN_TABLE[idx];
+    active_baud_rate   = e.baudRate;
+    active_uart_config = e.uartConfig;
+    mySerial.end();
+    mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+    SerialConfig_save(idx);
+    Log_AddEntry(3012);
+    return true;
+}
+
+// Called from telegramTask — uses vTaskDelay so the webserver keeps responding.
+static void SerialScan_run()
+{
+    static uint8_t scan_buf[512];
+
+    // Remember current config so we can restore it if the scan finds nothing.
+    const uint32_t saved_baud   = active_baud_rate;
+    const uint32_t saved_config = active_uart_config;
+    const int      saved_idx    = serial_config_saved_idx;
+
+    scan_state      = ScanState::RUNNING;
+    scan_found      = -1;
+    scan_found_mask = 0;
+
+    for (int i = 0; i < SERIAL_SCAN_TABLE_SIZE; i++) {
+        scan_current = i;
+        const SerialScanEntry& e = SERIAL_SCAN_TABLE[i];
+
+        mySerial.end();
+        vTaskDelay(pdMS_TO_TICKS(60));
+        mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+
+        vTaskDelay(pdMS_TO_TICKS(120));
+        while (mySerial.available()) mySerial.read();
+        // Disable the parity-error interrupt so the IDF UART ISR cannot clear UART_INT_RAW
+        // bit 2 while we are collecting. Without this, the ISR clears the raw flag in its
+        // own handler before we ever get to read it, making parity errors invisible to us.
+        // The hardware still sets INT_RAW bit 2 on every parity error; we just read it
+        // ourselves afterwards. Bit 2 is the parity-error bit on all ESP32 variants.
+        CLEAR_PERI_REG_MASK(UART_INT_ENA_REG(1), 1UL << 2);
+        WRITE_PERI_REG(UART_INT_CLR_REG(1), 1UL << 2);  // clear stale flag
+
+        size_t idx        = 0;
+        unsigned long start    = millis();
+        unsigned long lastByte = 0;
+
+        while (millis() - start < (unsigned long)SERIAL_SCAN_TIMEOUT_MS) {
+            while (mySerial.available()) {
+                uint8_t b = mySerial.read();
+                lastByte = millis();
+                if (idx < sizeof(scan_buf)) scan_buf[idx++] = b;
+            }
+            if (idx >= (size_t)SERIAL_SCAN_MIN_BYTES && lastByte > 0 && millis() - lastByte > 200)
+                break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
+        bool hadParityError = (READ_PERI_REG(UART_INT_RAW_REG(1)) & (1UL << 2)) != 0;
+        SET_PERI_REG_MASK(UART_INT_ENA_REG(1), 1UL << 2);  // restore interrupt
+
+        if (SerialScan_looks_valid(scan_buf, idx) && !hadParityError) {
+            scan_found_mask |= (1UL << i);
+            if (scan_found == -1) scan_found = i;  // keep first match as primary
+        }
+    }
+
+    // If the user clicked "Activate" during the scan, serial_config_saved_idx will
+    // have changed — respect that choice and just restart serial with the active config.
+    // Otherwise restore what was active before the scan started.
+    if (serial_config_saved_idx != saved_idx) {
+        mySerial.end();
+        mySerial.begin(active_baud_rate, active_uart_config, RX_PIN, TX_PIN);
+    } else {
+        active_baud_rate        = saved_baud;
+        active_uart_config      = saved_config;
+        serial_config_saved_idx = saved_idx;
+        mySerial.end();
+        mySerial.begin(saved_baud, saved_config, RX_PIN, TX_PIN);
+    }
+    Log_AddEntry(scan_found >= 0 ? 3010 : 3011);
+
+    scan_state   = ScanState::DONE;
+    scan_current = -1;
+    Telegram_ResetReceiveBuffer();
+}
+
 void telegramTask(void * pvParameters) {
   for(;;) {
-    handle_Telegram_receive();
+    if (serial_scan_requested) {
+      serial_scan_requested = false;
+      SerialScan_run();
+    } else if (scan_state != ScanState::RUNNING) {
+      handle_Telegram_receive();
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
     watermark_telegram = uxTaskGetStackHighWaterMark(NULL);
   }
@@ -2195,6 +2571,7 @@ void setup()
   while (!Serial && millis() - _t < 3000) delay(10);
 #endif
   mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  SerialConfig_load();  // override with NVS-persisted config if available
   DLOGLN();
   DLOGLN("Starting up...Hello!");
 
@@ -2392,7 +2769,16 @@ void OTA_setup()
       String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
       Serial.println("Start updating " + type);
     })
-    .onEnd([]()   { Serial.println("\nEnd"); })
+    .onEnd([]() {
+      Serial.println("\nEnd");
+      if (MeterValue_Num() > 0 && WiFi.isConnected()) {
+        Serial.println("OTA: sending pending meter values before restart...");
+        if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(15000))) {
+          Webclient_send_meter_values_to_backend();
+          xSemaphoreGive(Sema_Backend);
+        }
+      }
+    })
     .onProgress([](unsigned int progress, unsigned int total) { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
     .onError([](ota_error_t error) {
       Serial.printf("Error[%u]: ", error);
@@ -2814,6 +3200,10 @@ void handle_Telegram_receive()
       parsed = Telegram_parse_IEC(telegram_receive_buffer, telegram_receive_bufferIndex);
       if (parsed) last_detected_protocol = TelegramProtocol::IEC;
     }
+    if (!parsed)
+    {
+      Log_AddEntry(3006);
+    }
     if (parsed)
     {
       last_telegram_received = millis(); // reset watchdog
@@ -2864,6 +3254,7 @@ void Webclient_send_log_to_backend()
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
+  logHeader += "&serial=" + SerialScan_activeLabel();
   if (!meter_model.isEmpty()) {
     String encoded = meter_model;
     encoded.replace(" ", "%20");
@@ -3605,13 +3996,17 @@ void Webserver_HandleSysInfo()
 
 <div class="card">
 <div class="card-title">Telegram Parse Config</div>
-<div class="kv last"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
+<div class="kv"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
   s += Telegram_protocol_to_string(last_detected_protocol);
+  s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">Serial config (active)</span>)rawliteral";
+  s += SerialScan_activeLabel();
   s += R"rawliteral(</div>
 <div class="btns" style="margin-top:.6rem;">
 <a class="btn btn-s" href="showTelegram">Show Telegram</a>
 <a class="btn btn-s" href="showTelegramRaw">Raw</a>
 <a class="btn btn-s" href="showTelegramAnalysis">Analysis</a>
+<a class="btn btn-s" href="/serialScan">Baud/Parity Scan</a>
 </div>
 </div>
 
@@ -3918,6 +4313,11 @@ footer a:hover{color:#1a3799;}
     s += "</div>";
   } else {
     s += "<div class='m-age' style='margin:.6rem 0;'>Warte auf Telegramm&#8239;&#8230;</div>";
+    if (lastByteTime > 0)
+      s += "<div class='m-age-warn' style='margin-top:.4rem;font-size:.75rem;'>"
+           "&#9888; Bytes empfangen, aber kein g&uuml;ltiges Telegramm &mdash; "
+           "<a href='/serialScan' style='color:#ffb300;'>Baud/Parity pr&uuml;fen</a>"
+           "</div>";
   }
 
   // Nettoleistung zwischen 1.8.0 und 2.8.0
@@ -3948,7 +4348,11 @@ footer a:hover{color:#1a3799;}
   }
 
   if (hasReading) {
-    if (ageS >= kNoTelegramThresholdS)
+    bool recentBytes = lastByteTime > 0 && (millis() - lastByteTime) < 30000;
+    if (ageS >= kNoTelegramThresholdS && recentBytes)
+      s += "<div class='m-age m-age-warn' id='m-age'>&#9888; Empfange Bytes, kann Telegramm nicht lesen &mdash; "
+           "<a href='/serialScan' style='color:#ffb300;'>Baud/Parity pr&uuml;fen</a></div>";
+    else if (ageS >= kNoTelegramThresholdS)
       s += "<div class='m-age m-age-warn' id='m-age'>&#9888; Kein Telegramm seit " + String(ageS) + "&thinsp;s</div>";
     else
       s += "<div class='m-age' id='m-age'>Letzter Wert vor " + String(ageS) + "&thinsp;s</div>";
@@ -4049,7 +4453,8 @@ function _live(d){
   var ageS=d.timestamp>0?Math.round(Date.now()/1000-d.timestamp):0;
   var el=document.getElementById('m-age');
   if(el){
-    if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
+    if(ageS>=30&&d.last_byte_age_s<30){el.className='m-age m-age-warn';el.innerHTML='&#9888; Empfange Bytes, kann Telegramm nicht lesen &mdash; <a href=\'\/serialScan\' style=\'color:#ffb300;\'>Baud\/Parity prüfen<\/a>';}
+    else if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
     else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+' s';}
   }
 }
@@ -4299,6 +4704,7 @@ void Webserver_ShowLastMeterValue()
   jsonDoc["power_import"]    = LastMeterValue.power_import;
   jsonDoc["power_export"]    = LastMeterValue.power_export;
   jsonDoc["net_power"]       = LastMeterValue.net_power;
+  jsonDoc["last_byte_age_s"] = lastByteTime > 0 ? (unsigned long)(millis() - lastByteTime) / 1000 : 9999;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);
