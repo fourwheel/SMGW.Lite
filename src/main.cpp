@@ -205,6 +205,8 @@ bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
+static TaskHandle_t h_meter_task = NULL;
+static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = (unsigned long)-61000L;
 
 // Temperature vars
@@ -1556,7 +1558,8 @@ void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
     xSemaphoreGive(Sema_Backend);
   }
   watermark_meter_buffer = uxTaskGetStackHighWaterMark(NULL);
-  vTaskDelete(NULL); // delete task when finished
+  h_meter_task = NULL;
+  vTaskDelete(NULL);
 }
 
 void Webclient_Send_Log_to_backend_Task(void *pvParameters)
@@ -1568,7 +1571,8 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
     xSemaphoreGive(Sema_Backend);
   }
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
-  vTaskDelete(NULL); // delete task when finished
+  h_log_task = NULL;
+  vTaskDelete(NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -2402,12 +2406,14 @@ void OTA_setup()
 
 void Webclient_Send_Meter_Values_to_backend_wrapper()
 {
-  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, NULL);
+  if (h_meter_task != NULL) { DLOGLN("Meter task still running, skipping spawn"); return; }
+  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, &h_meter_task);
 }
 
 void Webclient_Send_Log_to_backend_wrapper()
 {
-  xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, NULL);
+  if (h_log_task != NULL) { DLOGLN("Log task still running, skipping spawn"); return; }
+  xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, &h_log_task);
 }
 
 /**
@@ -2849,7 +2855,7 @@ void Webclient_send_log_to_backend()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
