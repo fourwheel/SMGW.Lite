@@ -154,7 +154,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     ($id === 'TA1' && $meter < 4500) )
         {
             $meter *= 10000;
-            $obis280 *= 10000;
+            if ($obis280 !== null) $obis280 *= 10000;
         }
 
     // Values near UINT32_MAX are error sentinels from the firmware:
