@@ -148,6 +148,15 @@ for ($i = 0; $i < $dataCount; $i++) {
     $meter_solar = $parsed['solar'] ?? null;
     $obis280     = $parsed['m280']  ?? null;
 
+    // TA0 sends raw kWh integers (scaler ignored by firmware SML parser).
+    // Multiply by 10000 to convert kWh → 0.1 Wh, matching the DB unit.
+    if (($id === 'TA0' && $meter < 25000)  ||
+    ($id === 'TA1' && $meter < 4500) )
+        {
+            $meter *= 10000;
+            if ($obis280 !== null) $obis280 *= 10000;
+        }
+
     // Values near UINT32_MAX are error sentinels from the firmware:
     // the myStrom function returns -1…-5 on failure, which wrap to uint32_t
     // as 0xFFFFFFFF…0xFFFFFFFB (4294967295…4294967291).
@@ -157,7 +166,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     // Skip uninitialised / empty slots.
     // The ESP32 zeroes the entire buffer on init and after a successful send,
     // so meter_value_180 == 0 reliably identifies an unused slot.
-    if ($meter === 0) continue;
+    if ($timestamp === 0 && $meter === 0) continue;
 
     $entries[] = [
         "timestamp"   => $timestamp,
@@ -220,13 +229,13 @@ update_client_endpoint($id, $wireframe_str);
 // ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client
 // ---------------------------------------------------------------------------
-$prev = ["timestamp" => 0, "meter" => 0];
+$prev = ["timestamp" => 0, "meter" => 0, "meter_solar" => null, "obis280" => null];
 
 // Use a prepared statement to prevent SQL injection on the $id field.
 // The original code built the query with string concatenation, which allowed
 // an attacker with a valid token to manipulate the query via the ID parameter.
 $stmt = mysqli_prepare($_link,
-    "SELECT `meter_value`, `timestamp_client`
+    "SELECT `meter_value`, `meter_value_PV`, `obis280`, `timestamp_client`
      FROM `sml_v1`
      WHERE `id` = ?
      ORDER BY `timestamp_client` DESC
@@ -236,8 +245,10 @@ mysqli_stmt_bind_param($stmt, "s", $id);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 if ($row = mysqli_fetch_array($result)) {
-    $prev["meter"]     = $row['meter_value'];
-    $prev["timestamp"] = $row['timestamp_client'];
+    $prev["meter"]       = $row['meter_value'];
+    $prev["meter_solar"] = $row['meter_value_PV'] !== null ? (float)$row['meter_value_PV'] : null;
+    $prev["obis280"]     = $row['obis280'] !== null ? (int)$row['obis280'] : null;
+    $prev["timestamp"]   = $row['timestamp_client'];
 }
 mysqli_stmt_close($stmt);
 
@@ -258,6 +269,34 @@ $current_time = time(); // single server timestamp for all inserts in this batch
 $inserted  = 0;
 $diag_rows = []; // collects all entries with validation result for diagnostic log
 
+// Detect whether this meter sends sub-kWh precision (PIN unlocked).
+// Without PIN, meter_value is always a multiple of 10,000 (whole kWh in 0.1 Wh units).
+// We look at the 3 most recent distinct meter_value readings: if any is non-divisible
+// by 10,000, the meter has PIN precision and 0W readings must not be filtered out.
+$is_pin_meter = false;
+if ($id !== 'tks') {
+    $stmt_pin = mysqli_prepare($_link,
+        "SELECT COUNT(*) FROM (
+             SELECT DISTINCT meter_value
+             FROM (SELECT meter_value FROM `sml_v1` WHERE `id` = ? ORDER BY `i` DESC LIMIT 100) r
+             LIMIT 3
+         ) d
+         WHERE d.meter_value % 10000 != 0"
+    );
+    mysqli_stmt_bind_param($stmt_pin, "s", $id);
+    mysqli_stmt_execute($stmt_pin);
+    mysqli_stmt_bind_result($stmt_pin, $decimal_count);
+    mysqli_stmt_fetch($stmt_pin);
+    mysqli_stmt_close($stmt_pin);
+    $is_pin_meter = ($decimal_count > 0);
+
+    $stmt_upd = mysqli_prepare($_link, "UPDATE `clients` SET `pin_meter` = ? WHERE `device_id` = ?");
+    $pin_val = $is_pin_meter ? 1 : 0;
+    mysqli_stmt_bind_param($stmt_upd, "is", $pin_val, $id);
+    mysqli_stmt_execute($stmt_upd);
+    mysqli_stmt_close($stmt_upd);
+}
+
 foreach ($entries as $item) {
 
     if ($enable_entry_log) echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
@@ -275,6 +314,14 @@ foreach ($entries as $item) {
     // Skip duplicate timestamps — the client may retry a failed send
     elseif ($item["timestamp"] == $prev["timestamp"]) {
         $rejection = "duplicate_timestamp";
+    }
+    // Skip entries where both meter counters are unchanged — no new energy was measured.
+    // Only applies to meters without PIN (whole-kWh precision): on those, identical values
+    // carry no information. PIN meters can legitimately report 0 W (e.g. during vacation)
+    // with unchanged readings, so we keep those entries.
+    // "tks" (fridge thermometer) is excluded entirely — it always reports the same meter value.
+    elseif ($id !== 'tks' && !$is_pin_meter && $item["meter"] == $prev["meter"] && ($item["meter_solar"] ?? null) === $prev["meter_solar"] && ($item["obis280"] ?? null) === $prev["obis280"]) {
+        $rejection = "identical_meter_values";
     }
 
     if ($rejection === null) {
@@ -297,15 +344,16 @@ foreach ($entries as $item) {
 
     // Record row for diagnostic log regardless of outcome
     $diag_rows[] = [
-        'ts'        => $item["timestamp"],
-        'ts_fmt'    => date("Y-m-d H:i:s", $item["timestamp"]),
-        'meter'     => $item["meter"],
-        'solar'     => $item["meter_solar"] ?? "",
-        'temp'      => isset($item["temperature"]) ? round($item["temperature"] / 100.0, 2) : "",
-        'power_w'   => round($power),
-        'prev_ts'   => $prev["timestamp"],
-        'prev_m'    => $prev["meter"],
-        'status'    => $rejection ?? "OK",
+        'ts'      => $item["timestamp"],
+        'ts_fmt'  => date("Y-m-d H:i:s", $item["timestamp"]),
+        'meter'   => $item["meter"],
+        'solar'   => $item["meter_solar"] ?? "",
+        'obis280' => $item["obis280"] ?? "",
+        'temp'    => isset($item["temperature"]) ? round($item["temperature"] / 100.0, 2) : "",
+        'power_w' => round($power),
+        'prev_ts' => $prev["timestamp"],
+        'prev_m'  => $prev["meter"],
+        'status'  => $rejection ?? "OK",
     ];
 
     if ($rejection !== null) {
@@ -315,8 +363,10 @@ foreach ($entries as $item) {
 
     // Advance the "previous" pointer so the next entry is validated against
     // this one, not the one loaded from the database
-    $prev["timestamp"] = $item["timestamp"];
-    $prev["meter"]     = $item["meter"];
+    $prev["timestamp"]   = $item["timestamp"];
+    $prev["meter"]       = $item["meter"];
+    $prev["meter_solar"] = $item["meter_solar"] ?? null;
+    $prev["obis280"]     = $item["obis280"] ?? null;
 
     // Clamp meter value to zero just in case (should never be negative here)
     $meter_val = max(0, $item["meter"]);
@@ -360,24 +410,26 @@ if ($batch_rejected > 0) {
     mysqli_stmt_execute($stmt);
     mysqli_stmt_close($stmt);
 
+    // ALTER TABLE sml_diag ADD COLUMN obis280 DOUBLE DEFAULT NULL AFTER solar;
     $stmt = mysqli_prepare($_link,
         "INSERT INTO sml_diag
             (device_id, received_at, batch_received, batch_inserted, batch_rejected,
-             entry_index, timestamp_client, meter, solar, temp_c, power_w,
+             entry_index, timestamp_client, meter, solar, obis280, temp_c, power_w,
              prev_ts, prev_meter, status, is_ok)
-         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
     foreach ($diag_rows as $i => $r) {
-        $solar  = ($r['solar'] !== "") ? (float)$r['solar'] : null;
-        $temp_c = ($r['temp']  !== "") ? (float)$r['temp']  : null;
-        $is_ok  = ($r['status'] === "OK") ? 1 : 0;
-        $idx    = $i + 1;
+        $solar   = ($r['solar']   !== "") ? (float)$r['solar']   : null;
+        $obis280 = ($r['obis280'] !== "") ? (float)$r['obis280'] : null;
+        $temp_c  = ($r['temp']    !== "") ? (float)$r['temp']    : null;
+        $is_ok   = ($r['status'] === "OK") ? 1 : 0;
+        $idx     = $i + 1;
 
-        // Types: s device_id, i×6 batch/entry ints, d×2 solar+temp (nullable),
+        // Types: s device_id, i×6 batch/entry ints, d×3 solar+obis280+temp (nullable),
         //        i×3 power/prev ints, s status, i is_ok
-        mysqli_stmt_bind_param($stmt, "siiiiiiddiiisi",
+        mysqli_stmt_bind_param($stmt, "siiiiiidddiiisi",
             $id, $batch_received, $inserted, $batch_rejected,
-            $idx, $r['ts'], $r['meter'], $solar, $temp_c,
+            $idx, $r['ts'], $r['meter'], $solar, $obis280, $temp_c,
             $r['power_w'], $r['prev_ts'], $r['prev_m'], $r['status'], $is_ok
         );
         mysqli_stmt_execute($stmt);

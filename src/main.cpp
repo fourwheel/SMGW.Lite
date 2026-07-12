@@ -2811,6 +2811,7 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
     if (memcmp(&buffer[i], code, 6) == 0) {
       for (int j = i + 6; j < i + 40 && j < sx; j++) {
         if (buffer[j] == 0x52) {
+          int8_t  scaler    = (int8_t)buffer[j + 1]; // SML scaler byte: value * 10^scaler
           uint8_t typeByte  = buffer[j + 2];
           uint8_t typeGroup = typeByte & 0xF0;
           // Accept 0x5x (Signed) and 0x6x (Unsigned)
@@ -2826,6 +2827,9 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
               if (raw64 & signBit)
                 raw64 |= ~((signBit << 1) - 1); // fill upper bits with 1s
             }
+            // Apply scaler so the result is in the meter's base unit (e.g. 0.1 Wh)
+            if      (scaler > 0) for (int8_t s = 0; s < scaler;  s++) raw64 *= 10;
+            else if (scaler < 0) for (int8_t s = 0; s > scaler; s--) raw64 /= 10;
             *result = (uint32_t)raw64;
             return true;
           }
