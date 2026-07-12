@@ -3746,6 +3746,15 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl">Chip Temperature</span>)rawliteral";
   s += String(temperatureRead(), 1) + " &deg;C";
   s += R"rawliteral(</div>
+<div class="kv"><span class="kl">WiFi RSSI</span>)rawliteral";
+  {
+    int rssi = WiFi.RSSI();
+    s += String(rssi) + " dBm";
+    if      (rssi >= -60) s += " (good)";
+    else if (rssi >= -75) s += " (ok)";
+    else                  s += " (weak)";
+  }
+  s += R"rawliteral(</div>
 <div class="kv last"><span class="kl">Log Buffer (max)</span>)rawliteral";
   s += String(LOG_BUFFER_SIZE);
   s += R"rawliteral(</div>
