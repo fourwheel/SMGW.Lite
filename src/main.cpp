@@ -2827,9 +2827,13 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
               if (raw64 & signBit)
                 raw64 |= ~((signBit << 1) - 1); // fill upper bits with 1s
             }
-            // Apply scaler so the result is in the meter's base unit (e.g. 0.1 Wh)
-            if      (scaler > 0) for (int8_t s = 0; s < scaler;  s++) raw64 *= 10;
-            else if (scaler < 0) for (int8_t s = 0; s > scaler; s--) raw64 /= 10;
+            // Normalize to 0.1 Wh (DB storage unit = 10^-1 Wh).
+            // SML scaler s means raw integer is in units of 10^s Wh.
+            // To reach 0.1 Wh multiply by 10^(s+1), i.e. use adjusted = s+1.
+            // Example: scaler -1 (raw already in 0.1 Wh) → adjusted 0 → no change.
+            int8_t adjusted = scaler + 1;
+            if      (adjusted > 0) for (int8_t s = 0; s < adjusted;  s++) raw64 *= 10;
+            else if (adjusted < 0) for (int8_t s = 0; s > adjusted; s--) raw64 /= 10;
             *result = (uint32_t)raw64;
             return true;
           }
