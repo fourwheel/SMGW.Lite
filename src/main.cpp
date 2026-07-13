@@ -2802,39 +2802,31 @@ void Webclient_Send_Log_to_backend_wrapper()
   xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, &h_log_task);
 }
 
-/**
- * Internal Helper: Extracting specific OBIS values
- * This function is written by Gemini3
- */
-bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* result) {
+// Finds an OBIS code in an SML buffer and returns the raw integer value
+// and its SML scaler byte. The raw value is sign-extended for signed types (0x5x).
+// Returns false if the OBIS code is not found or the value type is unsupported.
+bool obisExtractRaw(uint8_t* buffer, int px, int sx, uint8_t* code,
+                    uint64_t* raw_out, int8_t* scaler_out) {
   for (int i = px; i < sx - 12; i++) {
     if (memcmp(&buffer[i], code, 6) == 0) {
       for (int j = i + 6; j < i + 40 && j < sx; j++) {
         if (buffer[j] == 0x52) {
-          int8_t  scaler    = (int8_t)buffer[j + 1]; // SML scaler byte: value * 10^scaler
+          int8_t  scaler    = (int8_t)buffer[j + 1];
           uint8_t typeByte  = buffer[j + 2];
           uint8_t typeGroup = typeByte & 0xF0;
-          // Accept 0x5x (Signed) and 0x6x (Unsigned)
           if (typeGroup == 0x50 || typeGroup == 0x60) {
             int vLen   = (typeByte & 0x0F) - 1;
             int vStart = j + 3;
             if (vStart + vLen > sx || vLen <= 0 || vLen > 8) continue;
             uint64_t raw64 = 0;
             for (int k = 0; k < vLen; k++) raw64 = (raw64 << 8) | buffer[vStart + k];
-            // Sign-extend signed integers (0x5x type) so callers can cast to int32_t
             if (typeGroup == 0x50) {
               uint64_t signBit = 1ULL << (vLen * 8 - 1);
               if (raw64 & signBit)
-                raw64 |= ~((signBit << 1) - 1); // fill upper bits with 1s
+                raw64 |= ~((signBit << 1) - 1);
             }
-            // Normalize to 0.1 Wh (DB storage unit = 10^-1 Wh).
-            // SML scaler s means raw integer is in units of 10^s Wh.
-            // To reach 0.1 Wh multiply by 10^(s+1), i.e. use adjusted = s+1.
-            // Example: scaler -1 (raw already in 0.1 Wh) → adjusted 0 → no change.
-            int8_t adjusted = scaler + 1;
-            if      (adjusted > 0) for (int8_t s = 0; s < adjusted;  s++) raw64 *= 10;
-            else if (adjusted < 0) for (int8_t s = 0; s > adjusted; s--) raw64 /= 10;
-            *result = (uint32_t)raw64;
+            *raw_out    = raw64;
+            *scaler_out = scaler;
             return true;
           }
         }
@@ -2842,6 +2834,23 @@ bool obisExtractor(uint8_t* buffer, int px, int sx, uint8_t* code, uint32_t* res
     }
   }
   return false;
+}
+
+// Converts a raw SML value to 0.1 Wh (the DB energy storage unit).
+// SML scaler s: raw is in 10^s Wh → multiply by 10^(s+1) to reach 10^-1 Wh.
+static uint32_t smlToDeciWh(uint64_t raw, int8_t scaler) {
+  int8_t adj = scaler + 1;
+  if (adj > 0) for (int8_t i = 0; i < adj;  i++) raw *= 10;
+  if (adj < 0) for (int8_t i = 0; i > adj; i--) raw /= 10;
+  return (uint32_t)raw;
+}
+
+// Converts a raw SML value to integer watts.
+// SML scaler s: raw is in 10^s W → apply 10^s to reach W.
+static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
+  if (scaler > 0) for (int8_t i = 0; i < scaler;  i++) raw *= 10;
+  if (scaler < 0) for (int8_t i = 0; i > scaler; i--) raw /= 10;
+  return (int32_t)raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -2936,11 +2945,14 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   uint8_t obis270[] = {0x01, 0x00, 0x02, 0x07, 0x00, 0xff};
   uint8_t obis167[] = {0x01, 0x00, 0x10, 0x07, 0x00, 0xff};
   uint32_t temp180 = 0, temp280 = 0, temp170 = 0, temp270 = 0, temp167 = 0;
-  bool found180 = obisExtractor(buffer, px, sx, obis180, &temp180);
-  bool found280 = obisExtractor(buffer, px, sx, obis280, &temp280);
-  obisExtractor(buffer, px, sx, obis170, &temp170);
-  obisExtractor(buffer, px, sx, obis270, &temp270);
-  obisExtractor(buffer, px, sx, obis167, &temp167);
+  uint64_t raw; int8_t sc;
+  bool found180 = obisExtractRaw(buffer, px, sx, obis180, &raw, &sc);
+  if (found180) temp180 = smlToDeciWh(raw, sc);
+  bool found280 = obisExtractRaw(buffer, px, sx, obis280, &raw, &sc);
+  if (found280) temp280 = smlToDeciWh(raw, sc);
+  if (obisExtractRaw(buffer, px, sx, obis170, &raw, &sc)) temp170 = (uint32_t)smlToWatt(raw, sc);
+  if (obisExtractRaw(buffer, px, sx, obis270, &raw, &sc)) temp270 = (uint32_t)smlToWatt(raw, sc);
+  if (obisExtractRaw(buffer, px, sx, obis167, &raw, &sc)) temp167 = (uint32_t)smlToWatt(raw, sc);
 
   // Only update globals if the main consumption register was found.
   // All other fields are optional — some meters don't transmit them.
