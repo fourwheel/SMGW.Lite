@@ -1,5 +1,5 @@
 .pio
 .vscode/
 .claude/
-backend/config.php
+backend/credentials.php
 src/wifi_credentials.h

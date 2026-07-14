@@ -84,6 +84,8 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
+#define FIRMWARE_VERSION "1.2.1"
+
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
 #define CONFIG_PIN 5
@@ -211,6 +213,7 @@ bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
+volatile bool ota_active = false;     // set during OTA to block new backend calls
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = (unsigned long)-61000L;
@@ -1630,9 +1633,10 @@ void Webclient_loadCertToChar()
 
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
+  if (ota_active) { h_meter_task = NULL; vTaskDelete(NULL); return; }
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
-    Webclient_send_meter_values_to_backend();
+    if (!ota_active) Webclient_send_meter_values_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
   watermark_meter_buffer = uxTaskGetStackHighWaterMark(NULL);
@@ -1643,9 +1647,10 @@ void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 {
   b_send_log_to_backend = false;
+  if (ota_active) { h_log_task = NULL; vTaskDelete(NULL); return; }
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
-    Webclient_send_log_to_backend();
+    if (!ota_active) Webclient_send_log_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
@@ -2766,10 +2771,12 @@ void OTA_setup()
 {
   ArduinoOTA
     .onStart([]() {
+      ota_active = true;
       String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
       Serial.println("Start updating " + type);
     })
     .onEnd([]() {
+      ota_active = false;
       Serial.println("\nEnd");
       if (MeterValue_Num() > 0 && WiFi.isConnected()) {
         Serial.println("OTA: sending pending meter values before restart...");
@@ -2781,6 +2788,7 @@ void OTA_setup()
     })
     .onProgress([](unsigned int progress, unsigned int total) { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
     .onError([](ota_error_t error) {
+      ota_active = false;
       Serial.printf("Error[%u]: ", error);
       if      (error == OTA_AUTH_ERROR)    Serial.println("Auth Failed");
       else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin Failed");
@@ -3275,6 +3283,8 @@ void Webclient_send_log_to_backend()
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
   logHeader += "&serial=" + SerialScan_activeLabel();
+  logHeader += "&fw=" + String(FIRMWARE_VERSION);
+  logHeader += "&cfg=" + String(CONFIG_VERSION);
   if (!meter_model.isEmpty()) {
     String encoded = meter_model;
     encoded.replace(" ", "%20");
@@ -4151,6 +4161,12 @@ void Webserver_HandleSysInfo()
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">System Time (UTC)</span>)rawliteral";
   s += String(Time_getFormattedTime()) + " / " + String(Time_getEpochTime());
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Firmware Version</span>)rawliteral";
+  s += String(FIRMWARE_VERSION);
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Config Version</span>)rawliteral";
+  s += String(CONFIG_VERSION);
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Build Time</span>)rawliteral";
   s += String(BUILD_TIMESTAMP);

@@ -9,11 +9,15 @@ CREATE TABLE `clients` (
   `first_reading` datetime DEFAULT NULL,
   `last_reading` datetime DEFAULT NULL,
   `comment` text DEFAULT NULL,
-  `pin_meter` tinyint(1) DEFAULT NULL COMMENT 'NULL = not applicable (tks); 0 = no PIN (whole kWh only); 1 = PIN unlocked (sub-kWh precision)'
+  `pin_meter` tinyint(1) DEFAULT NULL COMMENT 'NULL = not applicable (tks); 0 = no PIN (whole kWh only); 1 = PIN unlocked (sub-kWh precision)',
+  `fw_version` varchar(20) DEFAULT NULL COMMENT 'Firmware version string, e.g. 1.2.0',
+  `cfg_version` varchar(10) DEFAULT NULL COMMENT 'IotWebConf config schema version, e.g. 2906'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Migration for existing installations:
 -- ALTER TABLE `clients` ADD COLUMN `pin_meter` TINYINT(1) DEFAULT NULL COMMENT 'NULL = not applicable (tks); 0 = no PIN (whole kWh only); 1 = PIN unlocked (sub-kWh precision)';
+-- ALTER TABLE `clients` ADD COLUMN `fw_version` VARCHAR(20) DEFAULT NULL COMMENT 'Firmware version string, e.g. 1.2.0';
+-- ALTER TABLE `clients` ADD COLUMN `cfg_version` VARCHAR(10) DEFAULT NULL COMMENT 'IotWebConf config schema version, e.g. 2906';
 
 -- --------------------------------------------------------
 
