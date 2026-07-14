@@ -5,6 +5,9 @@
 include("../config.php");
 
 $id = authenticate();
+$fw_version  = isset($_GET['fw'])  ? substr($_GET['fw'],  0, 20) : null;
+$cfg_version = isset($_GET['cfg']) ? substr($_GET['cfg'], 0, 10) : null;
+update_client_endpoint($id, null, $fw_version, $cfg_version);
 
 // ---------------------------------------------------------------------------
 // Status code descriptions
