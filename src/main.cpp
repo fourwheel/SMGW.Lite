@@ -84,7 +84,7 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.2.2"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -2765,6 +2765,7 @@ void Param_setup()
   iotWebConf.setHtmlFormatProvider(&customHtmlFormatProvider);
   iotWebConf.init();
   iotWebConf.setApTimeoutMs(30000);
+  iotWebConf.setWifiConnectionTimeoutMs(90000);
 }
 
 void OTA_setup()
@@ -3597,18 +3598,9 @@ void handle_check_wifi_connection()
           DLOGLN("AP mode: triggering reconnect via IotWebConf");
           iotWebConf.forceApMode(false);
         }
-        else
-        {
-          // OffLine or Connecting state: IotWebConf is not actively retrying.
-          // WiFi.reconnect() only works when status == WL_DISCONNECTED, which is
-          // not guaranteed after WL_CONNECTION_LOST. Use WiFi.begin() with the
-          // credentials IotWebConf has stored — same as what manual re-entry does.
-          DLOGLN("Offline: re-calling WiFi.begin() with stored credentials");
-          WiFi.begin(
-            iotWebConf.getWifiSsidParameter()->valueBuffer,
-            iotWebConf.getWifiPasswordParameter()->valueBuffer
-          );
-        }
+        // In Connecting state: let IotWebConf manage its own reconnect cycle.
+        // Calling WiFi.begin() here would reset an in-progress association
+        // attempt, making reconnection harder (especially with hidden SSIDs).
       }
     }
   }

@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-16
+
+### Fixed
+- Extend IotWebConf WiFi connection timeout from 30s to 90s to give hidden SSIDs enough time to associate
+- Remove redundant `WiFi.begin()` call in reconnect handler that was interrupting IotWebConf's own association cycle, causing the webserver to remain unresponsive during prolonged reconnects
+
 ## [1.2.1] - 2026-07-14
 
 ### Fixed
