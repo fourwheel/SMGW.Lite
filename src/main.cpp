@@ -84,7 +84,7 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.2.3"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -216,7 +216,7 @@ SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 volatile bool ota_active = false;     // set during OTA to block new backend calls
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
-unsigned long last_call_backend = (unsigned long)-61000L;
+unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
 
 // Temperature vars
 #define ONE_WIRE_BUS 4
@@ -304,6 +304,7 @@ void Webserver_ShowMeterValues();
 void Webserver_ShowTelegram();
 void Webserver_ShowTelegram_Raw();
 void Webserver_TestBackendConnection();
+void Webserver_TestBackendConnectionRun();
 void Webserver_UrlConfig();
 
 DNSServer dnsServer;
@@ -1499,81 +1500,98 @@ void Webserver_TestBackendConnection()
   struct tm* ti = gmtime(&now);
   strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S UTC", ti);
 
-  // Build page header with cert debug info
-  String pageHead;
-  pageHead.reserve(2000);
-  pageHead += R"rawliteral(<!DOCTYPE html>
+  String page;
+  page.reserve(2500);
+  page += R"rawliteral(<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>SmartMeterLite &ndash; Backend Test</title>)rawliteral";
-  pageHead += HTML_STYLE_MODERN;
-  pageHead += R"rawliteral(</head>
+  page += HTML_STYLE_MODERN;
+  page += R"rawliteral(</head>
 <body>
 <div class="logo">&#9889; SmartMeterLite</div>
 <a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
 <div class="card">
   <div class="card-title">Backend Connection Test</div>)rawliteral";
-  pageHead += "<div class='kv'><span class='kl'>Cert length</span>" + String(certLen) + "</div>";
-  pageHead += "<div class='kv'><span class='kl'>Cert start</span><code>" + certStart + "</code></div>";
-  pageHead += "<div class='kv'><span class='kl'>Cert end</span><code>" + certEnd + "</code></div>";
-  pageHead += "<div class='kv'><span class='kl'>Device time</span><code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")</div>";
+  page += "<div class='kv'><span class='kl'>Cert length</span>" + String(certLen) + "</div>";
+  page += "<div class='kv'><span class='kl'>Cert start</span><code>" + certStart + "</code></div>";
+  page += "<div class='kv'><span class='kl'>Cert end</span><code>" + certEnd + "</code></div>";
+  page += "<div class='kv'><span class='kl'>Device time</span><code>" + String(timeBuf) + "</code> (epoch " + String((unsigned long)now) + ")</div>";
+  page += R"rawliteral(
+  <div id="result">
+    <div class="kv"><span class="kl">Host</span><span class="warn">&#9679; Teste&hellip;</span></div>
+  </div>
+</div>
+<script>
+fetch('/testBackendConnectionRun')
+  .then(function(r){return r.json();})
+  .then(function(d){
+    var h='';
+    if(!d.host_ok){
+      h+="<div class='kv last'><span class='kl'>Host</span><span class='fail'>&#10060; Nicht erreichbar</span></div>";
+    } else {
+      h+="<div class='kv'><span class='kl'>Host</span><span class='ok'>&#9989; Erreichbar</span></div>";
+      h+="<div class='kv'><span class='kl'>Zertifikat</span>"+(d.cert_ok?"<span class='ok'>&#9989; G&uuml;ltig</span>":"<span class='fail'>&#10060; Ung&uuml;ltig</span>")+"</div>";
+      h+="<div class='kv last'><span class='kl'>ID &amp; Token</span>"+(d.auth_ok?"<span class='ok'>&#9989; G&uuml;ltig</span>":"<span class='fail'>&#10060; Ung&uuml;ltig oder Timeout</span>")+"</div>";
+    }
+    document.getElementById('result').innerHTML=h;
+  })
+  .catch(function(){
+    document.getElementById('result').innerHTML="<div class='kv last'><span class='kl'>Fehler</span><span class='fail'>Keine Antwort vom Ger&auml;t</span></div>";
+  });
+</script>
+</body></html>)rawliteral";
 
-  const String pageFoot = "</div></body></html>";
+  server.send(200, "text/html", page);
+}
+
+void Webserver_TestBackendConnectionRun()
+{
+  bool host_ok = false;
+  bool cert_ok = false;
+  bool auth_ok = false;
 
   WiFiClientSecure client;
   client.setCACert(FullCert);
 
-  String rows = "";
-
-  if (client.connect(backend_host.c_str(), 443))
+  if (client.connect(backend_host.c_str(), 443, 5000))
   {
-    rows += "<div class='kv'><span class='kl'>Host</span><span class='ok'>&#9989; Reachable</span></div>";
-    rows += "<div class='kv'><span class='kl'>Certificate</span><span class='ok'>&#9989; Valid</span></div>";
+    host_ok = true;
+    cert_ok = true;
   }
   else
   {
+    client.stop();
     client.setInsecure();
-    if (client.connect(backend_host.c_str(), 443))
-    {
-      rows += "<div class='kv'><span class='kl'>Host</span><span class='ok'>&#9989; Reachable</span></div>";
-      rows += "<div class='kv'><span class='kl'>Certificate</span><span class='fail'>&#10060; Not working</span></div>";
-    }
-    else
-    {
-      rows += "<div class='kv last'><span class='kl'>Host</span><span class='fail'>&#10060; Not reachable</span></div>";
-      server.send(200, "text/html", pageHead + rows + pageFoot);
-      return;
-    }
+    if (client.connect(backend_host.c_str(), 443, 5000))
+      host_ok = true;
   }
 
-  String url = String(backend_path) + "?backend_test=true&ID=" + String(backend_ID);
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + String(backend_host) + "\r\n" +
-               "X-Auth-Token: " + String(backend_token) + "\r\n" +
-               "Connection: close\r\n\r\n");
-
-  unsigned long timeout = millis();
-  while (client.available() == 0)
+  if (host_ok)
   {
-    if (millis() - timeout > 5000)
-    {
-      rows += "<div class='kv last'><span class='kl'>Response</span><span class='fail'>Timeout</span></div>";
-      server.send(200, "text/html", pageHead + rows + pageFoot);
-      return;
-    }
+    String url = String(backend_path) + "?backend_test=true&ID=" + String(backend_ID);
+    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                 "Host: " + String(backend_host) + "\r\n" +
+                 "X-Auth-Token: " + String(backend_token) + "\r\n" +
+                 "Connection: close\r\n\r\n");
+    unsigned long t = millis();
+    while (client.available() == 0 && millis() - t < 5000) {}
+    String response = "";
+    while (client.available()) response += client.readString();
+    auth_ok = response.indexOf("200") != -1;
+    client.stop();
   }
 
-  String response = "";
-  while (client.available()) response += client.readString();
-
-  if (response.indexOf("200") != -1)
-    rows += "<div class='kv last'><span class='kl'>ID &amp; Token</span><span class='ok'>&#9989; Valid</span></div>";
-  else
-    rows += "<div class='kv last'><span class='kl'>ID &amp; Token</span><span class='fail'>&#10060; Invalid</span></div>";
-
-  server.send(200, "text/html", pageHead + rows + pageFoot);
+  String json = "{\"host_ok\":";
+  json += host_ok ? "true" : "false";
+  json += ",\"cert_ok\":";
+  json += cert_ok ? "true" : "false";
+  json += ",\"auth_ok\":";
+  json += auth_ok ? "true" : "false";
+  json += "}";
+  server.send(200, "application/json", json);
 }
 
 void Webserver_HandleCertUpload()
@@ -2146,7 +2164,8 @@ void Webserver_UrlConfig()
   server.on("/showLastMeterValue",  Webserver_ShowLastMeterValue);
 
   server.on("/setCert",             Webserver_SetCert);
-  server.on("/testBackendConnection", Webserver_TestBackendConnection);
+  server.on("/testBackendConnection",    Webserver_TestBackendConnection);
+  server.on("/testBackendConnectionRun", Webserver_TestBackendConnectionRun);
   server.on("/showMeterValues",     Webserver_ShowMeterValues);
   server.on("/showLogBuffer",       Webserver_ShowLogBuffer);
   server.on("/MeterValue_Num2",     Webserver_MeterValue_Num2);
@@ -2765,6 +2784,7 @@ void Param_setup()
   iotWebConf.setHtmlFormatProvider(&customHtmlFormatProvider);
   iotWebConf.init();
   iotWebConf.setApTimeoutMs(30000);
+  iotWebConf.setWifiConnectionTimeoutMs(90000);
 }
 
 void OTA_setup()
@@ -3269,7 +3289,7 @@ void Webclient_send_log_to_backend()
   DLOGLN("Send Log to Backend");
   Log_AddEntry(1019);
   WiFiClientSecure client;
-  client.setHandshakeTimeout(10); // 10 s SSL handshake timeout (takes seconds)
+  client.setHandshakeTimeout(10); // 10 s SSL handshake timeout
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
@@ -3344,7 +3364,7 @@ void Webclient_send_meter_values_to_backend()
   if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); call_backend_successfull = true; return; }
 
   WiFiClientSecure client;
-  client.setTimeout(10000); // 10 s read timeout for readStringUntil()
+  client.setTimeout(10000); // 10 s read timeout
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
@@ -3597,18 +3617,9 @@ void handle_check_wifi_connection()
           DLOGLN("AP mode: triggering reconnect via IotWebConf");
           iotWebConf.forceApMode(false);
         }
-        else
-        {
-          // OffLine or Connecting state: IotWebConf is not actively retrying.
-          // WiFi.reconnect() only works when status == WL_DISCONNECTED, which is
-          // not guaranteed after WL_CONNECTION_LOST. Use WiFi.begin() with the
-          // credentials IotWebConf has stored — same as what manual re-entry does.
-          DLOGLN("Offline: re-calling WiFi.begin() with stored credentials");
-          WiFi.begin(
-            iotWebConf.getWifiSsidParameter()->valueBuffer,
-            iotWebConf.getWifiPasswordParameter()->valueBuffer
-          );
-        }
+        // In Connecting state: let IotWebConf manage its own reconnect cycle.
+        // Calling WiFi.begin() here would reset an in-progress association
+        // attempt, making reconnection harder (especially with hidden SSIDs).
       }
     }
   }
@@ -3667,7 +3678,8 @@ void handle_call_backend()
       Webclient_Send_Log_to_backend_wrapper();
     }
 
-    if ((!call_backend_successfull && millis() - last_call_backend > 30000) ||
+    if ((last_call_backend == 0 && Time_getEpochTime() > 0) || // first boot: fire as soon as NTP is ready
+        (!call_backend_successfull && millis() - last_call_backend > 180000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
           millis() - last_call_backend > 60000))
@@ -4397,7 +4409,7 @@ footer a:hover{color:#1a3799;}
 
   // WiFi setup card — only shown in AP mode
   if (isApMode) {
-    s += R"rawliteral(<div class='wifi-card'>
+    s += R"rawliteral(<div class='wifi-card' id='wifi-card'>
 <h3>&#128246; Kein WLAN verbunden &ndash; Netzwerk einrichten</h3>
 <small>Das Ger&auml;t ist im Access-Point-Modus. Gib dein WLAN-Passwort ein, um eine Verbindung herzustellen.</small>
 <form class='wifi-form' action='/wifiSetup' method='POST'>
@@ -4409,7 +4421,7 @@ footer a:hover{color:#1a3799;}
   }
 
   // PIN / INF status
-  s += "<div class='sc'>";
+  s += "<div class='sc' id='sc-pin'>";
   if (!hasReading) {
     s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Messwert</strong>"
          "<small>Noch kein Telegramm empfangen.</small></div></div>"
@@ -4434,7 +4446,7 @@ footer a:hover{color:#1a3799;}
   s += "</div>";
 
   // Backend status
-  s += "<div class='sc'>";
+  s += "<div class='sc' id='sc-backend'>";
   if (!wifi_connected)
     s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Kein Backend-Kontakt</strong>"
          "<small>Kein WLAN &ndash; Backend nicht erreichbar.</small></div></div>";
@@ -4446,7 +4458,8 @@ footer a:hover{color:#1a3799;}
          "<small>Letzter Call vor " + String(backAgoMin) + " min.</small></div></div>";
   else
     s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Backend-Fehler</strong>"
-         "<small>Letzter Backend-Call fehlgeschlagen.</small></div></div>";
+         "<small>Letzter Backend-Call fehlgeschlagen.</small></div></div>"
+         "<div class='br'><a class='btn' href='/testBackendConnection'>Verbindung testen</a></div>";
   s += "</div>";
 
   s += R"rawliteral(<a class='grafana-btn' href='https://portal.smartmeterlite.de' target='_blank' rel='noopener'>&#128200; portal.smartmeterlite.de &rarr;</a>
@@ -4493,6 +4506,24 @@ function _live(d){
     else if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
     else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+' s';}
   }
+  // PIN / meter status
+  var hasR=d.meter_value_180>0,hasPP=hasR&&(d.meter_value_180%10000)!==0;
+  var pe=document.getElementById('sc-pin');
+  if(pe){var btns="<div class='br'><a class='btn' href='/PinAssistant'>&#128274; PIN Assistant</a><a class='btn' href='/PinAssistantDeluxe'>&#128274; PIN Assistant Deluxe</a></div>";var ph;
+    if(!hasR)ph="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Messwert</strong><small>Noch kein Telegramm empfangen.</small></div></div>"+btns;
+    else if(ageS>=30)ph="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Kein Telegramm empfangen</strong><small>Lesekopf getrennt oder Verbindungsproblem?</small></div></div>";
+    else if(hasPP)ph="<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>PIN eingegeben &#8211; INF aktiv</strong><small>Messwerte mit Nachkommastellen.</small></div></div>";
+    else ph="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>PIN nicht eingegeben oder INF aus</strong><small>Bitte PIN eingeben und INF auf ON setzen.</small></div></div>"+btns;
+    pe.innerHTML=ph;}
+  // Backend / WiFi status
+  var be=document.getElementById('sc-backend');
+  if(be){var bh;
+    if(!d.wifi_connected)bh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Kein Backend-Kontakt</strong><small>Kein WLAN &#8211; Backend nicht erreichbar.</small></div></div>";
+    else if(!d.backend_called)bh="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>Backend noch nicht kontaktiert</strong><small>Noch kein Backend-Call durchgef&#252;hrt.</small></div></div>";
+    else if(d.backend_ok)bh="<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit Backend verbunden</strong><small>Letzter Call vor "+d.backend_ago_min+" min.</small></div></div>";
+    else bh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Backend-Fehler</strong><small>Letzter Backend-Call fehlgeschlagen.</small></div></div><div class='br'><a class='btn' href='/testBackendConnection'>Verbindung testen</a></div>";
+    be.innerHTML=bh;}
+  if(d.wifi_connected&&document.getElementById('wifi-card'))location.reload();
 }
 setInterval(function(){fetch('/showLastMeterValue').then(function(r){return r.json();}).then(_live).catch(function(){});},2000);
 </script>)rawliteral";
@@ -4740,7 +4771,11 @@ void Webserver_ShowLastMeterValue()
   jsonDoc["power_import"]    = LastMeterValue.power_import;
   jsonDoc["power_export"]    = LastMeterValue.power_export;
   jsonDoc["net_power"]       = LastMeterValue.net_power;
-  jsonDoc["last_byte_age_s"] = lastByteTime > 0 ? (unsigned long)(millis() - lastByteTime) / 1000 : 9999;
+  jsonDoc["last_byte_age_s"]  = lastByteTime > 0 ? (unsigned long)(millis() - lastByteTime) / 1000 : 9999;
+  jsonDoc["wifi_connected"]   = wifi_connected;
+  jsonDoc["backend_called"]   = last_call_backend > 0;
+  jsonDoc["backend_ok"]       = call_backend_successfull;
+  jsonDoc["backend_ago_min"]  = (last_call_backend > 0) ? (millis() - last_call_backend) / 60000UL : 0UL;
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);

@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-07-18
+
+### Changed
+- Dashboard status cards (PIN/INF, Backend/WiFi) are now live-updated every 2 s via the existing `/showLastMeterValue` poll — no page reload needed when connection state changes
+- `/showLastMeterValue` JSON response extended with `wifi_connected`, `backend_called`, `backend_ok`, `backend_ago_min`
+- AP-mode WiFi setup card auto-disappears (page reload triggered) when WiFi reconnects while the dashboard is open
+- `testBackendConnection` page now loads immediately and fetches results asynchronously via `/testBackendConnectionRun` — no blank loading screen while waiting for the network test
+
+### Fixed
+- Dashboard no longer shows "Backend nicht erreichbar" on boot before any call was attempted; shows "Backend noch nicht kontaktiert" until `last_call_backend > 0`
+- First backend call now fires immediately after NTP sync on boot (no longer waits for the next minute boundary)
+- Backend failure retry interval increased from 30 s to 3 minutes — a misconfigured or unreachable endpoint previously caused a blocking connect attempt every 30 s, making the web UI sluggish
+- "Backend-Fehler" status card now shows a "Verbindung testen" button (`.btn` style, consistent with PIN Assistant buttons) linking to `/testBackendConnection`
+
+## [1.2.2] - 2026-07-16
+
+### Fixed
+- Extend IotWebConf WiFi connection timeout from 30s to 90s to give hidden SSIDs enough time to associate
+- Remove redundant `WiFi.begin()` call in reconnect handler that was interrupting IotWebConf's own association cycle, causing the webserver to remain unresponsive during prolonged reconnects
+
 ## [1.2.1] - 2026-07-14
 
 ### Fixed

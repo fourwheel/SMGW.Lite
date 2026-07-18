@@ -151,6 +151,7 @@ for ($i = 0; $i < $dataCount; $i++) {
     // TA0 sends raw kWh integers (scaler ignored by firmware SML parser).
     // Multiply by 10000 to convert kWh → 0.1 Wh, matching the DB unit.
     if (($id === 'TA0' && $meter < 25000)  ||
+    ($id === 'TE0' && $meter < 5000)  ||
     ($id === 'TA1' && $meter < 4500) )
         {
             $meter *= 10000;
