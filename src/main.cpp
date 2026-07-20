@@ -43,6 +43,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "Arduino.h"
 #include "soc/uart_reg.h"  // UART_INT_RAW_REG / UART_INT_CLR_REG for parity-error detection
 #include <Preferences.h>  // NVS persistence for serial config
+#include "time_utils.h"
+#include "html_style.h"
+#include "log_buffer.h"
 
 // ---------------------------------------------------------------------------
 // Serial debug macros
@@ -226,9 +229,6 @@ unsigned long last_temperature  = 0;
 bool read_temperature           = false;
 int current_temperature         = 0;
 
-// Log vars
-const int LOG_BUFFER_SIZE = 200;
-
 // Task watermark vars
 int watermark_meter_buffer = 0;
 int watermark_log_buffer   = 0;
@@ -251,12 +251,6 @@ void handle_telegram_watchdog();
 void handle_MeterValue_store();
 void handle_temperature();
 void Led_update_Blink();
-String Log_BufferToString(int showNumber = LOG_BUFFER_SIZE);
-String Log_EntryToString(int i);
-String Log_StatusCodeToString(int statusCode);
-#if defined(ESP32)
-String Log_get_reset_reason();
-#endif
 bool MeterValue_store(bool override);
 void MeterValues_clear_Buffer();
 void resetMeterValue(MeterValue &val);
@@ -268,11 +262,6 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length);
 void OTA_setup();
 void Param_configSaved();
 void Param_setup();
-String Time_formatTimestamp(unsigned long timestamp);
-String Time_formatUptime();
-String Time_getFormattedTime();
-unsigned long Time_getEpochTime();
-int Time_getMinutes();
 static void SerialScan_run();
 String      SerialScan_activeLabel();
 static int  SerialScan_activeIndex();
@@ -436,198 +425,6 @@ IotWebConfCheckboxParameter config_temperature_object = IotWebConfCheckboxParame
 IotWebConfCheckboxParameter config_solar_object       = IotWebConfCheckboxParameter("Store myStrom in buffer",  "config_solar",       config_solar_char,       STRING_LEN, false);
 IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParameter("Store Infeed (2.8.0) in buffer",  "config_280",         config_280_char,         STRING_LEN, false);
 
-const char HTML_STYLE[] PROGMEM = R"rawliteral(
-<style>
-  html, body {
-    background: #fdfdfd;
-    margin: 0;
-    padding: 15px;
-    box-sizing: border-box;
-  }
-
-  body {
-    font-family: sans-serif;
-    /* 3-column layout for desktop */
-    column-count: 3;
-    column-gap: 25px;
-    column-rule: 1px solid #eee;
-  }
-
-  /* Single column fallback for mobile */
-  @media (max-width: 900px) {
-    body { column-count: 1; }
-  }
-
-  /* Keep related blocks inside one column */
-  h2, h3, table, ul, p, div {
-    break-inside: avoid;
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
-  }
-
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    background: white;
-    margin-bottom: 1.2em;
-    font-size: 0.85em;
-  }
-
-  th, td {
-    border: 1px solid #ccc;
-    padding: 5px 8px;
-    text-align: left;
-    word-break: break-word;
-  }
-
-  th { background: #eee; }
-  ul { padding-left: 1.5em; margin-bottom: 1.2em; }
-  li { margin-bottom: 0.3em; }
-  a { color: #0066cc; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .section {
-    display: inline-block;
-    width: 100%;
-    break-inside: avoid;
-    margin-bottom: 20px;
-  }
-</style>
-)rawliteral";
-
-const char HTML_STYLE_MODERN[] PROGMEM = R"rawliteral(
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:.8rem;color:#1a1a1a;}
-.logo{font-size:1.4rem;font-weight:800;color:#1a3799;letter-spacing:-.02em;}
-.back{color:#1a3799;font-size:.85rem;text-decoration:none;width:100%;max-width:600px;}
-.back:hover{text-decoration:underline;}
-.card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:1.1rem 1.3rem;width:100%;max-width:600px;}
-.card-title{font-size:.95rem;font-weight:700;color:#1a3799;margin-bottom:.7rem;padding-bottom:.35rem;border-bottom:1px solid #e8edf5;}
-.kv{display:flex;gap:.5rem;padding:.28rem 0;font-size:.84rem;border-bottom:1px solid #f0f2f7;}
-.kv.last{border-bottom:none;}
-.kl{color:#666;min-width:210px;flex-shrink:0;white-space:nowrap;}
-a{color:#1a3799;text-decoration:none;}
-a:hover{text-decoration:underline;}
-table{border-collapse:collapse;width:100%;font-size:.81rem;margin-top:.2rem;}
-th,td{border:1px solid #dde3f0;padding:4px 7px;text-align:left;word-break:break-word;}
-th{background:#f0f2f7;color:#1a3799;font-weight:600;}
-tr:nth-child(even) td{background:#fafbfd;}
-.ok{color:#2e7d32;font-weight:600;}
-.fail{color:#c62828;font-weight:600;}
-.warn{color:#856404;font-weight:600;}
-.btns{display:flex;gap:.5rem;flex-wrap:wrap;}
-.btn{padding:.65rem .95rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.84rem;font-weight:700;text-decoration:none;border:none;cursor:pointer;display:inline-block;min-height:44px;display:inline-flex;align-items:center;}
-.btn:hover{background:#142b7a;text-decoration:none;}
-.btn-s{background:#f0f2f7;color:#1a3799;border:1px solid #c0ccec;}
-.btn-s:hover{background:#dde3f0;}
-.btn-d{background:#c62828;color:#fff;border:none;}
-.btn-d:hover{background:#a01c1c;}
-.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-textarea{width:100%;font-family:monospace;font-size:.78rem;border:1px solid #d0d8f0;border-radius:8px;padding:.6rem;resize:vertical;}
-.hint{font-size:.79rem;color:#888;margin-top:.3rem;}
-code{font-family:monospace;font-size:.85em;background:#f0f2f7;padding:.1em .3em;border-radius:3px;}
-small{font-size:.79rem;}
-.kl.e::after{content:" \270F";font-size:.68rem;color:#1a3799;opacity:.6;vertical-align:middle;}
-.cfg-link{display:flex;align-items:center;gap:.9rem;background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.85rem 1.3rem;width:100%;max-width:600px;text-decoration:none;color:#1a1a1a;transition:border-color .15s;}
-.cfg-link:hover{background:#f5f7ff;text-decoration:none;border-color:#1a3799;}
-.cfg-icon{font-size:1.5rem;color:#1a3799;flex-shrink:0;line-height:1;}
-.cfg-text strong{display:block;font-size:.9rem;font-weight:700;color:#1a3799;}
-.cfg-text small{font-size:.77rem;color:#777;}
-@media(max-width:440px){.kv{flex-wrap:wrap;}.kl{min-width:unset;width:100%;color:#888;font-size:.78rem;padding-bottom:0;white-space:normal;}}
-</style>
-)rawliteral";
-
-const char HTML_STYLE_SERIAL_SCAN[] PROGMEM = R"rawliteral(
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem 3rem;gap:.8rem;color:#1a1a1a}
-.logo{font-size:1.4rem;font-weight:800;color:#1a3799;letter-spacing:-.02em}
-.back{color:#1a3799;font-size:.85rem;text-decoration:none;width:100%;max-width:500px}
-.card{background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:1.1rem 1.3rem;width:100%;max-width:500px}
-.card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:.7rem}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-td{padding:.3rem .4rem;border-bottom:1px solid #f0f2f7;vertical-align:middle}
-td:first-child{font-family:monospace;font-size:.88rem;width:40%}
-td:nth-child(2){width:35%}
-td:nth-child(3){width:25%;text-align:right}
-.testing{color:#e8a800;font-weight:600}
-.found{color:#1a9b3a;font-weight:700}
-.fail{color:#bbb}
-.pending{color:#ddd}
-.btn{padding:.65rem .95rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.84rem;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;min-height:44px;margin-top:.8rem}
-.set-btn{padding:.22rem .55rem;border-radius:6px;background:#1a3799;color:#fff;font-size:.75rem;font-weight:600;border:none;cursor:pointer;min-height:28px}
-.set-btn.act{background:#2e7d32;}
-.set-btn:disabled{background:#ccc;cursor:not-allowed}
-tr.active-cfg td:first-child{color:#1a3799;font-weight:700}
-tr.active-cfg td:first-child::before{content:"▶ "}
-#result{margin-top:.75rem;font-size:.9rem;font-weight:600;display:none}
-.ok{color:#1a9b3a}.err{color:#c0392b}
-</style>
-)rawliteral";
-
-unsigned long Time_getEpochTime()
-{
-  return static_cast<unsigned long>(time(nullptr));
-}
-
-int Time_getMinutes()
-{
-  time_t now = time(nullptr);
-  struct tm timeinfo;
-  localtime_r(&now, &timeinfo);
-  return timeinfo.tm_min; // Extract minutes (0-59)
-}
-
-struct LogEntry
-{
-  unsigned long timestamp; // unix timestamp
-  unsigned long uptime;
-  int statusCode;
-};
-LogEntry logBuffer[LOG_BUFFER_SIZE];
-int logIndex = -1;
-
-// ---------------------------------------------------------------------------
-// Log suppression — consecutive duplicate filtering
-// Status codes listed here are suppressed when they repeat back-to-back.
-// The first occurrence is always written; subsequent identical codes are
-// dropped until a different code is logged.
-// ---------------------------------------------------------------------------
-const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 3006};
-int last_logged_statusCode = -1; // last code actually written to the buffer
-
-void LogBuffer_reset()
-{
-  for (int i = 0; i < LOG_BUFFER_SIZE; ++i)
-  {
-    logBuffer[i].timestamp  = 0;
-    logBuffer[i].uptime     = 0;
-    logBuffer[i].statusCode = -1;
-  }
-  logIndex = -1;
-  last_logged_statusCode = -1;
-}
-
-void Log_AddEntry(int statusCode)
-{
-  // Suppress consecutive duplicates for known noisy status codes.
-  // Check if this code is in the suppression list.
-  bool suppressable = false;
-  for (size_t i = 0; i < sizeof(LOG_SUPPRESS_IDS) / sizeof(LOG_SUPPRESS_IDS[0]); i++)
-  {
-    if (statusCode == LOG_SUPPRESS_IDS[i]) { suppressable = true; break; }
-  }
-  if (suppressable && statusCode == last_logged_statusCode) return;
-  last_logged_statusCode = statusCode;
-
-  // Advance ring-buffer write pointer, overwriting oldest entry on wrap.
-  logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
-
-  logBuffer[logIndex].timestamp  = Time_getEpochTime();
-  logBuffer[logIndex].uptime     = millis(); // ms since boot — monotonic tiebreaker for same-second entries
-  logBuffer[logIndex].statusCode = statusCode;
-}
 
 // ---------------------------------------------------------------------------
 // MeterValue_EntrySize  (Written by Claude)
@@ -860,155 +657,6 @@ void MeterValue_init_Buffer()
 
 bool b_send_log_to_backend = false;
 bool b_send_log_urgent     = false; // triggers immediate log.php call, independent of meter value cycle
-
-String Log_StatusCodeToString(int statusCode)
-{
-  switch (statusCode)
-  {
-  case 1001: return "setup()";
-  case 1002: return "Memory Allocation failed";
-  case 1003: return "Config saved";
-  case 1004: return "Buffer layout changed, re-initialising";
-  case 1005: return "call_backend()";
-  case 1006: return "Taf 6 meter reading trigger";
-  case 1008: return "WiFi returned";
-  case 1009: return "WiFi lost";
-  case 1010: return "Taf 7 meter reading trigger";
-  case 1011: return "Taf 14 meter reading trigger";
-  case 1012: return "call backend trigger";
-  case 1013: return "MeterValues_clear_Buffer()";
-  case 1014: return "Taf 7-900s meter reading trigger";
-  case 1015: return "not enough heap to store value";
-  case 1016: return "Buffer full, cannot store non-override value";
-  case 1017: return "Meter Value stored";
-  case 1018: return "dynamic Taf trigger";
-  case 1019: return "Sending Log";
-  case 1020: return "Sending Log successful";
-  case 1021: return "call_backend successful";
-  case 1022: return "taf14 trigger not possible, buffer full";
-  case 1023: return "No backend host configured, skipping";
-  case 1024: return "Boot snapshot triggered";
-  // case 1025: return "TAF7: removed recent non-override entry for grid precision";
-  case 1200: return "meter value <= 0";
-  case 1201: return "current Meter value = previous meter value";
-  case 1203: return "Suffix Must not be 0";
-  case 1204: return "prefix suffix not correct";
-  case 1205: return "Error Buffer Size Exceeded";
-  case 1206: return "Buffer Full, cannot store non-override value";
-  case 1207: return "meter_value_180 < PrevMeterValue — truncated telegram discarded";
-  case 3000: return "Complete Telegram received";
-  case 3001: return "Telegram Buffer overflow";
-  case 3002: return "Telegram timeout";
-  case 3003: return "SML Protocoll";
-  case 3004: return "IEC Protocoll";
-  case 3005: return "No telegram received for 5 min";
-  case 3006: return "Serial Msg received but parse failed (check baud/parity)";
-  case 3010: return "Serial scan: valid config(s) found — activate manually";
-  case 3011: return "Serial scan: no valid configuration found";
-  case 3012: return "Serial config: manually set via web UI";
-  
-  case 4000: return "Connection to server failed (Cert!?)";
-        case 4001: return "Error transmitting Buffer Chunk";
-        case 4002: return "Meter values send failed (no HTTP 200)";
-        case 4003: return "Log send failed (no HTTP 200)";
-  case 5000: return "myStrom_get_Meter_value Connection failed";
-  case 5001: return "Failed to connect to myStrom";
-  case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
-  case 7000: return "Stopping Wifi, Backendcall unsuccessful";
-  case 7001: return "Restarting Wifi";
-  case 8000: return "Spiffs not mounted";
-  case 8001: return "Error reading cert file";
-  case 8002: return "Cert saved";
-  case 8003: return "Error reading cert file";
-  case 8004: return "No Cert received";
-  }
-  if (statusCode < 1000)
-  {
-    return "# meter slots to transfer";
-  }
-  return "Unknown status code";
-}
-
-String Time_getFormattedTime()
-{
-  time_t now = time(nullptr);
-  char timeStr[64];
-  struct tm timeinfo;
-  localtime_r(&now, &timeinfo);
-  strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-  return String(timeStr);
-}
-
-String Time_formatTimestamp(unsigned long timestamp)
-{
-  time_t rawTime = static_cast<time_t>(timestamp);
-  struct tm timeinfo;
-  localtime_r(&rawTime, &timeinfo);
-  char buffer[20];
-  strftime(buffer, sizeof(buffer), "%D %H:%M:%S", &timeinfo);
-  return String(buffer);
-}
-
-String Log_EntryToString(int i)
-{
-  if (logBuffer[i].statusCode == -1)
-    return ""; // don't show empty entries
-  String logString = "<tr><td>";
-  logString += String(i) + "</td><td>";
-  logString += String(logBuffer[i].timestamp) + "</td><td>";
-  logString += Time_formatTimestamp(logBuffer[i].timestamp) + "</td><td>";
-  logString += String(logBuffer[i].uptime) + "</td><td>";
-  logString += String(logBuffer[i].statusCode) + "</td><td>";
-  logString += Log_StatusCodeToString(logBuffer[i].statusCode);
-  logString += "</td></tr>";
-  return logString;
-}
-
-String Log_BufferToString(int showNumber)
-{
-  bool fullPage = showNumber > 10;
-  int showed_number = 0;
-  String logString;
-  if (fullPage)
-  {
-    logString  = R"rawliteral(<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SmartMeterLite &ndash; Log Buffer</title>)rawliteral";
-    logString += String(HTML_STYLE_MODERN);
-    logString += R"rawliteral(</head>
-<body>
-<div class="logo">&#9889; SmartMeterLite</div>
-<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
-<div class="card" style="max-width:800px;">
-<div class="card-title">Log Buffer</div>
-<div class="tbl">)rawliteral";
-  }
-  logString += "<table><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
-
-  // First loop: most recent entries, from logIndex down to 0
-  for (int i = logIndex; i >= 0; i--)
-  {
-    logString += Log_EntryToString(i);
-    showed_number++;
-    if (showed_number >= showNumber)
-      return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
-  }
-
-  // Second loop: older entries that wrapped around, from buffer end to logIndex
-  if (logIndex < LOG_BUFFER_SIZE - 1)
-  {
-    for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--)
-    {
-      logString += Log_EntryToString(i);
-      showed_number++;
-      if (showed_number >= showNumber) break;
-    }
-  }
-  return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
-}
 
 void resetMeterValue(MeterValue &val)
 {
@@ -3298,7 +2946,7 @@ void Webclient_send_log_to_backend()
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
   if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); call_backend_successfull = false; return; }
-  memcpy(logDataBuffer, logBuffer, logBufferSize);
+  memcpy(logDataBuffer, Log_getRawBuffer(), logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
@@ -3884,44 +3532,6 @@ void loop()
   handle_call_backend();
 }
 
-#if defined(ESP32)
-String Log_get_reset_reason()
-{
-  switch (esp_reset_reason())
-  {
-  case ESP_RST_UNKNOWN:   return "Unknown";
-  case ESP_RST_POWERON:   return "Power on";
-  case ESP_RST_EXT:       return "External reset";
-  case ESP_RST_SW:        return "Software reset";
-  case ESP_RST_PANIC:     return "Exception/panic";
-  case ESP_RST_INT_WDT:   return "Interrupt watchdog";
-  case ESP_RST_TASK_WDT:  return "Task watchdog";
-  case ESP_RST_WDT:       return "Other watchdogs";
-  case ESP_RST_DEEPSLEEP: return "Deep sleep";
-  case ESP_RST_BROWNOUT:  return "Brownout";
-  case ESP_RST_SDIO:      return "SDIO";
-  default:                return "Unknown";
-  }
-}
-#endif
-
-String Time_formatUptime()
-{
-  int64_t uptimeMicros  = esp_timer_get_time();       // time in microseconds
-  int64_t uptimeMillis  = uptimeMicros / 1000;        // convert to milliseconds
-  int64_t uptimeSeconds = uptimeMillis / 1000;        // convert to seconds
-
-  // Calculate days, hours, minutes, seconds
-  int days    = uptimeSeconds / 86400; uptimeSeconds %= 86400;
-  int hours   = uptimeSeconds / 3600;  uptimeSeconds %= 3600;
-  int minutes = uptimeSeconds / 60;
-  int seconds = uptimeSeconds % 60;
-
-  char buffer[20];
-  sprintf(buffer, "%02dd %02dh%02dm%02ds", days, hours, minutes, seconds);
-  return String(buffer);
-}
-
 void Webserver_HandleSysInfo()
 {
   String s;
@@ -4209,7 +3819,7 @@ void Webserver_HandleSysInfo()
 
 <div class="card">
 <div class="card-title">Log Buffer <small style="font-weight:400;color:#888;">(last 10 / index )rawliteral";
-  s += String(logIndex);
+  s += String(Log_getIndex());
   s += R"rawliteral()</small></div>
 <div class="tbl">)rawliteral";
   s += Log_BufferToString(10);
