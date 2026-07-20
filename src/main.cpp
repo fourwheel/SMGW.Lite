@@ -70,7 +70,7 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
-#define FIRMWARE_VERSION "1.2.4"
+#define FIRMWARE_VERSION "1.2.5"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -286,6 +286,7 @@ void Webserver_LocationHrefsysinfo(int delay)
 
 
 String meter_model = "";
+String sml_last_signature_hex = ""; // last SML list_signature found in telegram (hex)
 
 void Webclient_splitHostAndPath(const String &url, String &host, String &path)
 {
@@ -739,6 +740,56 @@ static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
   return (int32_t)raw;
 }
 
+// Scans the SML payload [px..sx] for an octet-string TLV whose data length is
+// in the range [32, 128] bytes — the expected size of ECDSA P-256/P-384
+// signatures. SML uses a 2-byte TL field for these lengths:
+//   byte1: type=0x00 (octet-string), More=1 → 0x08 | (total >> 4)
+//   byte2: More=0                           → (total & 0x0F)
+//   total = TL_bytes(2) + data_bytes
+// Returns the LAST qualifying match: in telegrams that carry both a public-key
+// blob and a signature, the signature always comes after the public key, so
+// "last" reliably selects the signature over any earlier key material.
+bool extractSMLSignature(uint8_t* buffer, int px, int sx, String& hexOut) {
+  int lastStart = -1;
+  int lastLen   = 0;
+
+  for (int i = px + 8; i < sx - 33; i++) {
+    uint8_t tl1 = buffer[i];
+    // OctetString (bits 6-4 = 000, bit 7 = 0) with More=1 (bit 3)
+    if ((tl1 & 0x78) != 0x08) continue;
+    uint8_t tl2 = buffer[i + 1];
+    // Second TL byte: type=0, More=0
+    if ((tl2 & 0x78) != 0x00) continue;
+    int total_len = ((tl1 & 0x07) << 4) | (tl2 & 0x0F);
+    int data_len  = total_len - 2;
+    if (data_len < 32 || data_len > 128) continue;
+    if (i + 2 + data_len > sx) continue;
+    // Reject candidates containing OBIS code prefix (07 01 00) — real signatures are
+    // random bytes and will never contain recognisable SML data structures.
+    bool hasSMLData = false;
+    for (int j = 0; j < data_len - 2; j++) {
+      if (buffer[i+2+j] == 0x07 && buffer[i+3+j] == 0x01 && buffer[i+4+j] == 0x00) {
+        hasSMLData = true; break;
+      }
+    }
+    if (hasSMLData) continue;
+    lastStart = i + 2;
+    lastLen   = data_len;
+  }
+
+  if (lastStart == -1) return false;
+
+  hexOut = "";
+  for (int k = 0; k < lastLen; k++) {
+    char hex[3];
+    sprintf(hex, "%02X", buffer[lastStart + k]);
+    if (k > 0 && k % 16 == 0) hexOut += "<br>";
+    else if (k > 0)            hexOut += " ";
+    hexOut += hex;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Protocol detection and unified parser  (Written by Claude)
 //
@@ -789,6 +840,12 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
     if (buffer[i] == 0x1b && buffer[i+1] == 0x1b && buffer[i+2] == 0x1b && buffer[i+3] == 0x1b && buffer[i+4] == 0x1a) { sx = i; break; }
   }
   if (sx == -1) return false;
+
+  {
+    String sig;
+    if (extractSMLSignature(buffer, px, sx, sig))
+      sml_last_signature_hex = sig;
+  }
 
   // 3a. Extract meter serial (OBIS 0-0:96.1.0) for meter_model if not yet known
   if (meter_model.isEmpty()) {
@@ -1861,9 +1918,32 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl">Protocol (auto-detected)</span>)rawliteral";
   s += Telegram_protocol_to_string(last_detected_protocol);
   s += R"rawliteral(</div>
-<div class="kv last"><span class="kl">Serial config (active)</span>)rawliteral";
+<div class="kv"><span class="kl">Serial config (active)</span>)rawliteral";
   s += SerialScan_activeLabel();
   s += R"rawliteral(</div>
+<div class="kv last"><span class="kl">SML Signature</span><span style="font-family:monospace;font-size:.78rem;word-break:break-all;">)rawliteral";
+  if (sml_last_signature_hex.isEmpty()) {
+    s += "<span style='color:#888;font-style:italic;font-family:inherit;'>Not found &mdash; ";
+    s += (last_detected_protocol == TelegramProtocol::SML)
+           ? "meter may not sign telegrams"
+           : "SML protocol not active";
+    s += "</span>";
+  } else {
+    int hexChars = 0;
+    for (int i = 0; i < (int)sml_last_signature_hex.length(); i++) {
+      char c = sml_last_signature_hex[i];
+      if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) hexChars++;
+    }
+    int sigBytes = hexChars / 2;
+    s += sml_last_signature_hex;
+    s += "<br><small style='font-family:inherit;color:#666;'>";
+    s += String(sigBytes) + " bytes";
+    if      (sigBytes == 64) s += " (ECDSA P-256)";
+    else if (sigBytes == 96) s += " (ECDSA P-384)";
+    else if (sigBytes == 48) s += " (ECDSA P-256 compact)";
+    s += " &mdash; verify with public key printed on meter</small>";
+  }
+  s += R"rawliteral(</span></div>
 <div class="btns" style="margin-top:.6rem;">
 <a class="btn btn-s" href="showTelegram">Show Telegram</a>
 <a class="btn btn-s" href="showTelegramRaw">Raw</a>

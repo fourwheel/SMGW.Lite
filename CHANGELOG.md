@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-07-21
+
+### Added
+- SML signature extraction: `extractSMLSignature()` scans the SML payload for a 2-byte TL octet-string of 32–128 bytes (ECDSA P-256/P-384 range) appearing near the end of the SML_GetList.Res message and stores it in `sml_last_signature_hex`
+- Sysinfo page now shows the extracted SML signature (hex bytes with byte count and curve hint) in the "Telegram Parse Config" card; shows a note if the meter does not include a signature
+
 ## [1.2.4] - 2026-07-21
 
 ### Changed
