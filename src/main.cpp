@@ -50,13 +50,13 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
-char thingName[20] = "SMGWLite"; // mutable â€” staticDelay suffix appended in setup()
+char thingName[20] = "SMGWLite"; // mutable — staticDelay suffix appended in setup()
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
 const char wifiInitialApPassword[] = "password";
 
 // ---------------------------------------------------------------------------
-// Zero-touch deployment â€” pre-configured WiFi credentials.
+// Zero-touch deployment — pre-configured WiFi credentials.
 // Credentials are defined in wifi_credentials.h (gitignored).
 // Copy src/wifi_credentials.h.example to src/wifi_credentials.h and fill in your values.
 // ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ unsigned long timestamp_telegram;                 // timestamp of telegram
 
 int staticDelay = 0;
 
-// Cached integer versions of config string params â€” updated in Param_configSaved() and setup().
+// Cached integer versions of config string params — updated in Param_configSaved() and setup().
 // Avoids calling atoi() on every loop() tick.
 int   cached_taf7_param             = 15;
 int   cached_taf14_param            = 60;
@@ -264,7 +264,7 @@ IotWebConfNumberParameter   Meter_Value_Buffer_Size_object   = IotWebConfNumberP
 // Shown in the "Additional Meters & Sensors" config group so they appear
 // alongside the sensor settings they relate to.
 // Changing any of these saves & triggers MeterValue_init_Buffer(), which
-// clears the buffer â€” the UI warns the user if values are pending.
+// clears the buffer — the UI warns the user if values are pending.
 // ---------------------------------------------------------------------------
 IotWebConfCheckboxParameter config_temperature_object = IotWebConfCheckboxParameter("Store Temperature in buffer", "config_temperature", config_temperature_char, STRING_LEN, false);
 IotWebConfCheckboxParameter config_solar_object       = IotWebConfCheckboxParameter("Store myStrom in buffer",  "config_solar",       config_solar_char,       STRING_LEN, false);
@@ -456,7 +456,7 @@ void Webserver_HandleCertUpload()
 
     if (cert.length() == 0)
     {
-      // Empty submission â€” remove SPIFFS file so the bundled fallback cert is used.
+      // Empty submission — remove SPIFFS file so the bundled fallback cert is used.
       SPIFFS.remove("/cert.pem");
       Log_AddEntry(8002);
       Webserver_LocationHrefsysinfo();
@@ -496,7 +496,7 @@ void Webclient_loadCertToChar()
     file.close();
     return;
   }
-  // No cert in SPIFFS â€” fall back to bundled ISRG Root X1
+  // No cert in SPIFFS — fall back to bundled ISRG Root X1
   strncpy(FullCert, ISRG_ROOT_X1, sizeof(FullCert) - 1);
   FullCert[sizeof(FullCert) - 1] = '\0';
   Log_AddEntry(8001);
@@ -572,7 +572,7 @@ void setup()
 
   // Zero-touch: seed WiFi credentials so the device connects on first boot
   // without requiring the AP config portal. Stored values (if any) win.
-  Param_setup(); // calls iotWebConf.init() â€” loads stored config from NVS
+  Param_setup(); // calls iotWebConf.init() — loads stored config from NVS
 
   // Zero-touch: if no SSID is stored yet (first boot / after flash erase),
   // write the default credentials directly and persist them to NVS so the
@@ -580,7 +580,7 @@ void setup()
   {
     bool needsSave = false;
 
-    // WiFi â€” IotWebConf's mustStayInApMode() requires BOTH the WiFi SSID AND
+    // WiFi — IotWebConf's mustStayInApMode() requires BOTH the WiFi SSID AND
     // the AP password to be non-empty before it honours skipApStartup().
     if (strlen(iotWebConf.getWifiSsidParameter()->valueBuffer) == 0)
     {
@@ -594,7 +594,7 @@ void setup()
       DLOGLN("Zero-touch: WiFi credentials written.");
     }
 
-    // Backend â€” set defaults if not yet configured
+    // Backend — set defaults if not yet configured
     if (strlen(backend_endpoint) == 0)
     {
       strncpy(backend_endpoint, DEFAULT_BACKEND_ENDPOINT, STRING_LEN);
@@ -721,7 +721,7 @@ bool obisExtractRaw(uint8_t* buffer, int px, int sx, uint8_t* code,
 }
 
 // Converts a raw SML value to 0.1 Wh (the DB energy storage unit).
-// SML scaler s: raw is in 10^s Wh â†’ multiply by 10^(s+1) to reach 10^-1 Wh.
+// SML scaler s: raw is in 10^s Wh → multiply by 10^(s+1) to reach 10^-1 Wh.
 static uint32_t smlToDeciWh(uint64_t raw, int8_t scaler) {
   int8_t adj = scaler + 1;
   if (adj > 0) for (int8_t i = 0; i < adj;  i++) raw *= 10;
@@ -730,7 +730,7 @@ static uint32_t smlToDeciWh(uint64_t raw, int8_t scaler) {
 }
 
 // Converts a raw SML value to integer watts.
-// SML scaler s: raw is in 10^s W â†’ apply 10^s to reach W.
+// SML scaler s: raw is in 10^s W → apply 10^s to reach W.
 static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
   if (scaler > 0) for (int8_t i = 0; i < scaler;  i++) raw *= 10;
   if (scaler < 0) for (int8_t i = 0; i > scaler; i--) raw /= 10;
@@ -747,7 +747,7 @@ static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
 //
 // Protocol detection heuristics:
 //   SML: starts with 0x1b 0x1b 0x1b 0x1b (binary escape sequence)
-//   IEC: starts with '/' (ASCII 0x2F) â€” IEC 62056-21 mode C identifier
+//   IEC: starts with '/' (ASCII 0x2F) — IEC 62056-21 mode C identifier
 //
 // The detected protocol is stored in last_detected_protocol for display
 // in the webserver "Telegram Parse Config" section.
@@ -769,7 +769,7 @@ String Telegram_protocol_to_string(TelegramProtocol p)
 }
 
 /**
- * SML parser â€” extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
+ * SML parser — extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
  * This function is written by Gemini3, signature unified by Claude.
  */
 bool Telegram_parse_SML(uint8_t* buffer, size_t length)
@@ -839,14 +839,14 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   if (obisExtractRaw(buffer, px, sx, obis167, &raw, &sc)) temp167 = (uint32_t)smlToWatt(raw, sc);
 
   // Only update globals if the main consumption register was found.
-  // All other fields are optional â€” some meters don't transmit them.
+  // All other fields are optional — some meters don't transmit them.
   //
   // Build the update in a local struct first, then assign to LastMeterValue in
   // one shot. This avoids a SMP race condition: telegramTask runs on Core 0
   // while the webserver / MeterValue_store run on Core 1. The old approach
   // called resetMeterValue() (which zeroed meter_value_180) and then assigned
   // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
-  // was visible to the other core â€” causing the REST API to occasionally return 0.
+  // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
     if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180) {
       Log_AddEntry(1207);
@@ -876,7 +876,7 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 }
 
 /**
- * IEC 62056-21 parser â€” extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
+ * IEC 62056-21 parser — extracts OBIS 1.8.0 and optionally 2.8.0 into LastMeterValue.
  * This function is written by ChatGPT, extended and signature unified by Claude.
  */
 bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
@@ -902,7 +902,7 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
     }
   }
 
-  // Extract OBIS 1.8.0 (consumption) â€” required
+  // Extract OBIS 1.8.0 (consumption) — required
   const char *obis180 = strstr(telegram_str, "1-0:1.8.0");
   if (!obis180) return false;
 
@@ -1203,7 +1203,7 @@ void Webclient_send_log_to_backend()
 //   The URL parameter "fields=ts,m180[,temp][,solar][,m280]" tells the backend
 //   exactly which fields are present in each binary entry and in what order.
 //   This replaces the old separate PV_included / 280_included flags and is
-//   self-describing â€” adding a new field in the future only requires appending
+//   self-describing — adding a new field in the future only requires appending
 //   a new token here and in the PHP parser.
 //
 // The buffer is already in the correct wire format, so it is sent directly
@@ -1234,7 +1234,7 @@ void Webclient_send_meter_values_to_backend()
   //   [NON_override_i+1 .. Size-1]     TAF14 entries (descending from back)
   //
   // When the buffer is full/overflowed the two pointers have crossed and
-  // there is no gap â€” send the entire buffer as one contiguous block.
+  // there is no gap — send the entire buffer as one contiguous block.
   const size_t entrySize = MeterValue_EntrySize();
   size_t taf7_bytes, taf14_offset, taf14_bytes;
 
@@ -1257,7 +1257,7 @@ void Webclient_send_meter_values_to_backend()
   header += "&chipTemp=" + String(temperatureRead(), 1);
   header += "&uptime=" + String(millis() / 60000);
   header += "&time=" + String(Time_getFormattedTime());
-  // Self-describing field manifest â€” the backend uses this to parse the binary payload.
+  // Self-describing field manifest — the backend uses this to parse the binary payload.
   // Format: fields=ts,m180[,temp][,solar][,m280]
   header += "&" + MeterValue_BuildFieldsParam();
   header += "&heap=" + String(ESP.getFreeHeap());
@@ -1283,7 +1283,7 @@ void Webclient_send_meter_values_to_backend()
     {
       size_t toSend = min(CHUNK, len - offset);
       size_t sent   = client.write(data + offset, toSend);
-      if (sent == 0) { DLOGLN("write() returned 0 â€” aborting"); Log_AddEntry(4001); return false; }
+      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); return false; }
       offset += sent;
     }
     return true;
@@ -1309,7 +1309,7 @@ void Webclient_send_meter_values_to_backend()
         MeterValues_clear_Buffer();
         last_call_backend = millis();
         Log_AddEntry(1021);
-        break; // don't wait for the rest of the response â€” we have what we need
+        break; // don't wait for the rest of the response — we have what we need
       }
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1332,7 +1332,7 @@ void Webclient_send_meter_values_to_backend()
 // slot directly (MeterValues[i] = LastMeterValue), we call MeterValue_write()
 // which packs only the enabled fields into the byte buffer.
 // Bugfix: the original non-override wrap-around check tested meter_value_override_i
-// instead of meter_value_NON_override_i â€” corrected here.
+// instead of meter_value_NON_override_i — corrected here.
 // ---------------------------------------------------------------------------
 bool MeterValue_store(bool override)
 {
@@ -1355,7 +1355,7 @@ bool MeterValue_store(bool override)
     && snap.solar           == PrevMeterValue.solar)
   {
     // Timestamp unchanged = no new telegram received (e.g. meter reader slipped off).
-    // Never re-store a frozen reading regardless of elapsed time â€” this prevents
+    // Never re-store a frozen reading regardless of elapsed time — this prevents
     // an infinite loop where TAF7 keeps re-queuing the same stale entry after the
     // backend accepts it with HTTP 200 and clears the buffer.
     if (snap.timestamp == PrevMeterValue.timestamp)
@@ -1363,7 +1363,7 @@ bool MeterValue_store(bool override)
       Log_AddEntry(1201);
       return false;
     }
-    // New telegram received but counter value unchanged â€” apply time-based cooldown.
+    // New telegram received but counter value unchanged — apply time-based cooldown.
     // TAF14 (non-override) waits 15 min, TAF7 (override) only 1 min.
     if ((override == false && millis() - last_meter_value_successful < 900000) ||
         (override == true  && millis() - last_meter_value_successful < 60000))
@@ -1379,14 +1379,14 @@ bool MeterValue_store(bool override)
   int write_i = override ? meter_value_override_i : meter_value_NON_override_i;
   DLOGLN("where to write: " + String(write_i));
 
-  // Check if the target slot is still empty â€” empty means free space remains
+  // Check if the target slot is still empty — empty means free space remains
   meter_value_buffer_full = !MeterValue_slot_empty(write_i);
 
   if (override == true || meter_value_buffer_full == false)
   {
     // Write the current reading into the packed buffer at the selected slot.
     // Fields that are disabled (temperature, solar, obis280) are silently
-    // skipped inside MeterValue_write() â€” they consume no bytes.
+    // skipped inside MeterValue_write() — they consume no bytes.
     MeterValue_write(write_i,
       snap.timestamp,
       snap.meter_value_180,
@@ -1398,7 +1398,7 @@ bool MeterValue_store(bool override)
     if (override)
     {
       // TAF7: advance write pointer upward; wrap around on overflow.
-      // Intentionally overwrites TAF14 data when the buffer is full â€”
+      // Intentionally overwrites TAF14 data when the buffer is full —
       // TAF7 (timed snapshots) has higher priority than TAF14 (interval readings).
       meter_value_override_i++;
       if (meter_value_override_i >= Meter_Value_Buffer_Size)
@@ -1442,7 +1442,7 @@ void handle_check_wifi_connection()
 
     if (current_wifi_status == WL_CONNECTED && wifi_connected)
     {
-      // Still connected â€” nothing to do
+      // Still connected — nothing to do
     }
     else if (current_wifi_status == WL_CONNECTED && !wifi_connected)
     {
@@ -1463,7 +1463,7 @@ void handle_check_wifi_connection()
     }
     else
     {
-      // Still offline â€” periodically trigger reconnect attempt
+      // Still offline — periodically trigger reconnect attempt
       if (millis() - last_reconnect_attempt > 60000)
       {
         last_reconnect_attempt = millis();
@@ -1495,7 +1495,7 @@ void handle_temperature()
     {
       last_temperature = millis();
       float raw_temp = Temp_sensors.getTempCByIndex(0) * 100;
-      if (raw_temp > -10000) // filter out -127Â°C sensor error (-12700 in raw units)
+      if (raw_temp > -10000) // filter out -127°C sensor error (-12700 in raw units)
         current_temperature = (int)raw_temp;
       read_temperature = true;
     }
@@ -1526,7 +1526,7 @@ void handle_call_backend()
 {
   if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
-    // Urgent log call â€” triggered by alerts like "no telegram for 5 min".
+    // Urgent log call — triggered by alerts like "no telegram for 5 min".
     // Runs independently of the meter value backend cycle.
     if (b_send_log_urgent)
     {
@@ -1551,7 +1551,7 @@ unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
 
 // ---------------------------------------------------------------------------
-// handle_dynTaf â€” commented out, feature temporarily disabled
+// handle_dynTaf — commented out, feature temporarily disabled
 // Triggers a non-override buffer store whenever instantaneous net power
 // changes significantly since the last stored reading.
 //
@@ -1560,7 +1560,7 @@ unsigned long last_meter_value_trigger = 0;
 //          Returns without triggering if the meter does not transmit any
 //          instantaneous power value.
 //
-// Reference: PrevMeterValue â€” the reading that was last successfully stored.
+// Reference: PrevMeterValue — the reading that was last successfully stored.
 //            Updated automatically by MeterValue_store() on every successful
 //            store (TAF7, TAF14, or DynTaf), so the baseline always reflects
 //            what is already in the backend.
@@ -1599,7 +1599,7 @@ void handle_dynTaf()
   else if (LastMeterValue.net_power != 0)
     currentPower = LastMeterValue.net_power;
   else
-    return; // meter does not transmit instantaneous power â€” DynTaf not available
+    return; // meter does not transmit instantaneous power — DynTaf not available
 
   // Derive reference power from the last successfully stored reading.
   int32_t lastPower;
@@ -1646,7 +1646,7 @@ void handle_MeterValue_store()
   {
 #if 0
     // Remove the most recent non-override entry if it was stored shortly before
-    // this TAF7 trigger â€” keeps the grid mark uncluttered.
+    // this TAF7 trigger — keeps the grid mark uncluttered.
     static const unsigned long TAF7_REPLACE_WINDOW_MS = 5000UL;
     if (!last_store_was_override &&
         last_meter_value_successful > 0 &&
@@ -1749,7 +1749,7 @@ void Webserver_HandleSysInfo()
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SmartMeterLite â€“ Details</title>)rawliteral";
+<title>SmartMeterLite – Details</title>)rawliteral";
   s += HTML_STYLE_MODERN;
   s += R"rawliteral(</head>
 <body>
@@ -1919,7 +1919,7 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl e">TAF 14 Interval</span>)rawliteral";
   s += String(atoi(taf14_param)) + " s";
   s += R"rawliteral(</div>)rawliteral";
-  // Dyn TAF rows â€” commented out (feature disabled)
+  // Dyn TAF rows — commented out (feature disabled)
   // s += R"rawliteral(<div class="kv"><span class="kl">Dyn TAF</span>)rawliteral";
   // s += "activated (hardcoded)";
   // s += R"rawliteral(</div><div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
@@ -2041,7 +2041,7 @@ void Webserver_HandleSysInfo()
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_HandleRoot â€“ dashboard (/)
+// Webserver_HandleRoot – dashboard (/)
 // ---------------------------------------------------------------------------
 void Webserver_HandleRoot()
 {
@@ -2126,8 +2126,8 @@ footer a:hover{color:#1a3799;}
 )rawliteral";
 
   // Leistung bestimmen
-  // Beide Richtungen (1.7.0 + 2.7.0) bekannt â†’ an kWh-Zeilen hÃ¤ngen.
-  // Sonst (nur eine Richtung oder nur 16.7.0) â†’ standalone net-Zeile.
+  // Beide Richtungen (1.7.0 + 2.7.0) bekannt → an kWh-Zeilen hängen.
+  // Sonst (nur eine Richtung oder nur 16.7.0) → standalone net-Zeile.
   bool hasPower   = false;
   bool netOnly    = false;
   int32_t importW = 0, exportW = 0, netW = 0;
@@ -2162,7 +2162,7 @@ footer a:hover{color:#1a3799;}
   s += "<div class='meter-card'>"
        "<div class='m-lbl'>Z&#228;hlerstand</div>";
 
-  // 1.8.0 â€” Bezug (â†“) + Import-Leistung rechts
+  // 1.8.0 — Bezug (↓) + Import-Leistung rechts
   if (hasReading) {
     char valBuf[32];
     uint32_t v = LastMeterValue.meter_value_180;
@@ -2195,7 +2195,7 @@ footer a:hover{color:#1a3799;}
          "<span class='m-net-lbl' id='net-lbl'>" + String(lbl) + "</span></div>";
   }
 
-  // 2.8.0 â€” Einspeisung (â†‘) + Export-Leistung rechts, nur wenn > 0
+  // 2.8.0 — Einspeisung (↑) + Export-Leistung rechts, nur wenn > 0
   if (hasReading && LastMeterValue.meter_value_280 > 0) {
     char val2Buf[32];
     uint32_t v2 = LastMeterValue.meter_value_280;
@@ -2221,7 +2221,7 @@ footer a:hover{color:#1a3799;}
   }
   s += "</div>";
 
-  // WiFi setup card â€” only shown in AP mode
+  // WiFi setup card — only shown in AP mode
   if (isApMode) {
     s += R"rawliteral(<div class='wifi-card' id='wifi-card'>
 <h3>&#128246; Kein WLAN verbunden &ndash; Netzwerk einrichten</h3>
@@ -2283,14 +2283,14 @@ footer a:hover{color:#1a3799;}
 <a href='https://www.linkedin.com/in/laurin-vierrath/' target='_blank' rel='noopener'>&#128039; From Laurin with Love</a>
 </footer>
 </body></html>)rawliteral";
-  // Inject live-update script â€” needsReload/had280 are set from current server state
+  // Inject live-update script — needsReload/had280 are set from current server state
   s += "<script>var needsReload=";
   s += hasReading ? "false" : "true";
   s += ";var had280=";
   s += (hasReading && LastMeterValue.meter_value_280 > 0) ? "true" : "false";
   s += R"rawliteral(;
 function _set(id,txt){var e=document.getElementById(id);if(e)e.textContent=txt;}
-function _pwr(w){var a=Math.abs(w);return a>=1000?(a/1000).toFixed(2)+'â€‰kW':a+'â€‰W';}
+function _pwr(w){var a=Math.abs(w);return a>=1000?(a/1000).toFixed(2)+' kW':a+' W';}
 function _meter(v){return Math.floor(v/10000)+','+String(v%10000).padStart(4,'0');}
 function _live(d){
   if(needsReload&&d.meter_value_180>0){location.reload();return;}
@@ -2301,24 +2301,24 @@ function _live(d){
   if(imp>0&&exp>0){
     _set('pwr-import',_pwr(imp));_set('pwr-export',_pwr(exp));
     var calc=imp-exp;
-    _set('net-arr',calc>=0?'â†“':'â†‘');
+    _set('net-arr',calc>=0?'↓':'↑');
     _set('net-val',_pwr(Math.abs(calc)));
     _set('net-lbl',calc>=0?'Netzbezug':'Netzeinspeisung');
   }else if(net!==0){
-    _set('net-arr',net>=0?'â†“':'â†‘');
+    _set('net-arr',net>=0?'↓':'↑');
     _set('net-val',_pwr(net));
     _set('net-lbl',net>=0?'Netzbezug':'Netzeinspeisung');
   }else if(imp>0){
-    _set('net-arr','â†“');_set('net-val',_pwr(imp));_set('net-lbl','Netzbezug');
+    _set('net-arr','↓');_set('net-val',_pwr(imp));_set('net-lbl','Netzbezug');
   }else if(exp>0){
-    _set('net-arr','â†‘');_set('net-val',_pwr(exp));_set('net-lbl','Netzeinspeisung');
+    _set('net-arr','↑');_set('net-val',_pwr(exp));_set('net-lbl','Netzeinspeisung');
   }
   var ageS=d.timestamp>0?Math.round(Date.now()/1000-d.timestamp):0;
   var el=document.getElementById('m-age');
   if(el){
-    if(ageS>=30&&d.last_byte_age_s<30){el.className='m-age m-age-warn';el.innerHTML='&#9888; Empfange Bytes, kann Telegramm nicht lesen &mdash; <a href=\'\/serialScan\' style=\'color:#ffb300;\'>Baud\/Parity prÃ¼fen<\/a>';}
-    else if(ageS>=30){el.className='m-age m-age-warn';el.textContent='âš  Kein Telegramm seit '+ageS+'â€‰s';}
-    else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+'â€‰s';}
+    if(ageS>=30&&d.last_byte_age_s<30){el.className='m-age m-age-warn';el.innerHTML='&#9888; Empfange Bytes, kann Telegramm nicht lesen &mdash; <a href=\'\/serialScan\' style=\'color:#ffb300;\'>Baud\/Parity prüfen<\/a>';}
+    else if(ageS>=30){el.className='m-age m-age-warn';el.textContent='⚠ Kein Telegramm seit '+ageS+' s';}
+    else{el.className='m-age';el.textContent='Letzter Wert vor '+ageS+' s';}
   }
   // PIN / meter status
   var hasR=d.meter_value_180>0,hasPP=hasR&&(d.meter_value_180%10000)!==0;
