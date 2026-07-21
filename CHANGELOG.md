@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-21
+
+### Added
+- Remote firmware update (OTA pull): device checks hourly for a new firmware version specific to its backend ID
+- Server exposes `fwupdate/{ID}/manifest.json` (version, filename, sha256, size) and `fwupdate/{ID}/firmware_X.Y.Z.bin`
+- SHA-256 integrity verification of the downloaded binary before flashing (streamed, no full-binary buffer needed)
+- Bootloader-level rollback via `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`: if the new firmware cannot reach the backend after reboot the bootloader automatically reverts to the previous OTA slot
+- New log codes 6000–6011 for OTA pull lifecycle events
+- New module `src/fw_update.cpp` / `src/fw_update.h`
+- `sdkconfig.defaults` to enable bootloader rollback support
+
 ## [1.2.4] - 2026-07-21
 
 ### Changed
