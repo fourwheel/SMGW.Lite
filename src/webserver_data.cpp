@@ -1,4 +1,4 @@
-#include "webserver_telegram.h"
+#include "webserver_data.h"
 #include "app_globals.h"
 #include "meter_value.h"
 #include "log_buffer.h"
@@ -51,7 +51,7 @@ static String getObisRow(uint8_t* buffer, int prefix, int suffix, uint8_t* code,
 }
 
 // ---------------------------------------------------------------------------
-// Telegram analysis helpers — file-local, called only from analyzeTelegram()
+// Telegram analysis helpers â€” file-local, called only from analyzeTelegram()
 // ---------------------------------------------------------------------------
 
 // "Parsed Values" card common to both IEC and SML.

@@ -1,10 +1,10 @@
-#include "webserver_config.h"
+#include "webserver_main.h"
 #include "app_globals.h"
 #include "serial_scan.h"
 #include "log_buffer.h"
 #include "html_style.h"
 #include "debug_log.h"
-#include "webserver_telegram.h"
+#include "webserver_data.h"
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <WiFi.h>
@@ -17,7 +17,7 @@ void Webserver_HandleSysInfo();
 void Webserver_SetCert();
 void Webserver_TestBackendConnection();
 void Webserver_TestBackendConnectionRun();
-// Optical handlers — defined in webserver_optical.cpp
+// Optical handlers â€” defined in webserver_optical.cpp
 void Webserver_Flashlight();
 void Webserver_PinAssistantDeluxe();
 void Webserver_FlashPulse();
@@ -26,7 +26,7 @@ void Webserver_HandleCertUpload();
 void Webclient_loadCertToChar();
 
 // ---------------------------------------------------------------------------
-// IotWebConf HTML format provider — customises the /config page appearance
+// IotWebConf HTML format provider â€” customises the /config page appearance
 // ---------------------------------------------------------------------------
 class SmartMeterHtmlFormatProvider : public iotwebconf::HtmlFormatProvider
 {
@@ -77,14 +77,14 @@ protected:
   String getEnd() override { return "</div></body></html>"; }
   String getHeadExtension() override {
     return "<link rel='icon' type='image/svg+xml' href='/favicon.ico'>"
-           "<script>document.title='SmartMeterLite – Konfiguration';</script>";
+           "<script>document.title='SmartMeterLite â€“ Konfiguration';</script>";
   }
 };
 
 static SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 
 // ---------------------------------------------------------------------------
-// Param_setup — register all IotWebConf groups and parameters
+// Param_setup â€” register all IotWebConf groups and parameters
 // ---------------------------------------------------------------------------
 void Param_setup()
 {
@@ -132,7 +132,7 @@ void Param_setup()
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_UrlConfig — register all HTTP routes
+// Webserver_UrlConfig â€” register all HTTP routes
 // ---------------------------------------------------------------------------
 void Webserver_UrlConfig()
 {
@@ -222,7 +222,7 @@ function poll(){
       if(!el)continue;
       var hit=(mask>>i)&1;
       if(hit){
-        el.className='found';el.textContent='✓ Frame OK';
+        el.className='found';el.textContent='âœ“ Frame OK';
       }else if(scanning&&d.currentIndex===i){
         el.className='testing';el.textContent='... testing';
       }else if((scanning&&i<d.currentIndex)||d.state==='done'){
@@ -333,7 +333,7 @@ poll();
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_HandleWifiSetup — POST /wifiSetup: save credentials, start connect
+// Webserver_HandleWifiSetup â€” POST /wifiSetup: save credentials, start connect
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiSetup()
 {
@@ -440,7 +440,7 @@ setTimeout(poll, 2000);
 }
 
 // ---------------------------------------------------------------------------
-// Webserver_HandleWifiStatus — GET /wifiStatus: JSON with connected + IP
+// Webserver_HandleWifiStatus â€” GET /wifiStatus: JSON with connected + IP
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiStatus()
 {

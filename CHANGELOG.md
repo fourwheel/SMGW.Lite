@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `debug_log.h` — DLOG/DLOGLN/DLOGF macros
   - `serial_scan.h/.cpp` — baud/parity scanner state machine with accessor API
   - `webserver_optical.h/.cpp` — flash pulse handlers and PIN Assistant pages
-  - `webserver_config.h/.cpp` — IotWebConf setup, route registration, WiFi setup handlers
+  - `webserver_main.h/.cpp` — IotWebConf setup, route registration, WiFi setup, system pages (root, sysinfo, OTA, certs, backend test)
   - `meter_value.h/.cpp` — ring-buffer read/write/init, slot counting, working copies (`LastMeterValue`, `PrevMeterValue`), feature flags
-  - `webserver_telegram.h/.cpp` — telegram display and SML/IEC analysis handlers
+  - `webserver_data.h/.cpp` — telegram display, SML/IEC analysis, meter value table, log buffer display
 - `app_globals.h` provides `extern` declarations for all cross-module globals
 - Removed all ESP8266 dead code (`#if defined(ESP8266)` blocks, `SoftwareSerial`, `ESP8266WiFi.h` / `ESP8266mDNS.h` / `ESP8266HTTPClient.h`) — only ESP32 is supported
 - `main.cpp` reduced from ~4828 lines to ~2390 lines (−50%)
