@@ -173,14 +173,16 @@ HardwareSerial mySerial(1);
 
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
-bool startup_print_done              = false;
-bool boot_snapshot_done              = false;
+bool startup_print_done              = false; // one-time diagnostic after first telegram
+bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
+// bool last_store_was_override         = false; // used by handle_MeterValue_store (#if 0)
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
-unsigned long last_telegram_received      = 0;
-unsigned long last_urgent_log_call        = 0;
+unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
+unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
+// unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];

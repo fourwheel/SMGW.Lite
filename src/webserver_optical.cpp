@@ -2,9 +2,14 @@
 #include "app_globals.h"
 #include "serial_scan.h"
 
-#define OPTICAL_FLASH_LED_ON  LOW
-#define OPTICAL_FLASH_MS      300
-#define OPTICAL_FLASH_LONG_MS 1500
+// ---------------------------------------------------------------------------
+// Virtual flashlight – single IR pulse triggered from the web UI.
+// LED polarity: LOW = LED on (standard active-low driver circuit).
+// If your circuit is active-high, change OPTICAL_FLASH_LED_ON to HIGH.
+// ---------------------------------------------------------------------------
+#define OPTICAL_FLASH_LED_ON  LOW   // level that lights up the IR LED
+#define OPTICAL_FLASH_MS      300   // short pulse duration [ms]
+#define OPTICAL_FLASH_LONG_MS 1500  // long pulse duration for confirm [ms]
 
 // ---------------------------------------------------------------------------
 // Webserver_FlashPulse – fire one short IR pulse and return immediately.

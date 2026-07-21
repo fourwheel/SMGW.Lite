@@ -89,6 +89,7 @@ static SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 void Param_setup()
 {
   groupTelegram.addItem(&activate_IEC_Parser_object);
+  // groupTelegram.addItem(&dynTaf_enabled_object); // dynTaf disabled
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -96,6 +97,8 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
+  // tafdyn params intentionally NOT registered — adding them would shift the NVS
+  // layout and force re-configuration of deployed devices. Values are hardcoded.
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
   groupSys.addItem(&led_blink_object);
@@ -106,6 +109,8 @@ void Param_setup()
   groupAdditionalMeter.addItem(&mystrom_PV_object);
   groupAdditionalMeter.addItem(&mystrom_PV_IP_object);
   groupAdditionalMeter.addItem(&temperature_object);
+  // Buffer field checkboxes — grouped with the sensors they relate to.
+  // Changing these triggers MeterValue_init_Buffer() via Param_configSaved().
   groupAdditionalMeter.addItem(&config_temperature_object);
   groupAdditionalMeter.addItem(&config_solar_object);
   groupAdditionalMeter.addItem(&config_280_object);

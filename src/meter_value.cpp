@@ -173,9 +173,14 @@ void resetMeterValue(MeterValue &val)
   val.temperature = saved_temp;
 }
 
+// ---------------------------------------------------------------------------
+// MeterValues_clear_Buffer  (Written by Claude)
+// Zeros the entire packed buffer and resets both write pointers.
+// Called after all values have been successfully sent to the backend.
+// ---------------------------------------------------------------------------
 void MeterValues_clear_Buffer()
 {
-  if (!MeterValueBuffer) return;
+  if (!MeterValueBuffer) return; // nothing to clear if buffer was never allocated
   memset(MeterValueBuffer, 0, (size_t)Meter_Value_Buffer_Size * MeterValue_EntrySize());
   meter_value_override_i      = 0;
   meter_value_NON_override_i  = Meter_Value_Buffer_Size - 1;
@@ -184,7 +189,10 @@ void MeterValues_clear_Buffer()
 }
 
 // ---------------------------------------------------------------------------
-// Counters
+// MeterValue_Num
+// Returns the number of values currently stored in the ring-buffer, based on
+// the two write-pointer positions. Returns Meter_Value_Buffer_Size when the
+// buffer has overflowed (all slots in use).
 // ---------------------------------------------------------------------------
 int MeterValue_Num()
 {
@@ -193,6 +201,11 @@ int MeterValue_Num()
   return (meter_value_override_i + ((Meter_Value_Buffer_Size - 1) - meter_value_NON_override_i));
 }
 
+// ---------------------------------------------------------------------------
+// MeterValue_Num2
+// Alternative count: iterates the entire buffer and counts non-empty slots.
+// Slower but independent of the write-pointer logic — useful for debugging.
+// ---------------------------------------------------------------------------
 int MeterValue_Num2()
 {
   int count = 0;

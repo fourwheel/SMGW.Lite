@@ -1,8 +1,9 @@
 #pragma once
 #include <Arduino.h>
 
-#define SERIAL_SCAN_TIMEOUT_MS  10000
-#define SERIAL_SCAN_MIN_BYTES   8
+// Serial config scanner
+#define SERIAL_SCAN_TIMEOUT_MS  10000  // max listen time per candidate config (ms)
+#define SERIAL_SCAN_MIN_BYTES   8      // minimum bytes required to attempt detection
 
 struct SerialScanEntry {
     uint32_t    baudRate;

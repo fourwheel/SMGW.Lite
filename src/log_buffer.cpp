@@ -9,8 +9,14 @@
 static LogEntry logBuffer[LOG_BUFFER_SIZE];
 static int logIndex = -1;
 
+// ---------------------------------------------------------------------------
+// Log suppression — consecutive duplicate filtering
+// Status codes listed here are suppressed when they repeat back-to-back.
+// The first occurrence is always written; subsequent identical codes are
+// dropped until a different code is logged.
+// ---------------------------------------------------------------------------
 static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 3006};
-static int last_logged_statusCode = -1;
+static int last_logged_statusCode = -1; // last code actually written to the buffer
 
 void LogBuffer_reset()
 {
@@ -25,6 +31,8 @@ void LogBuffer_reset()
 
 void Log_AddEntry(int statusCode)
 {
+  // Suppress consecutive duplicates for known noisy status codes.
+  // Check if this code is in the suppression list.
   bool suppressable = false;
   for (size_t i = 0; i < sizeof(LOG_SUPPRESS_IDS) / sizeof(LOG_SUPPRESS_IDS[0]); i++) {
     if (statusCode == LOG_SUPPRESS_IDS[i]) { suppressable = true; break; }
@@ -32,9 +40,11 @@ void Log_AddEntry(int statusCode)
   if (suppressable && statusCode == last_logged_statusCode) return;
   last_logged_statusCode = statusCode;
 
+  // Advance ring-buffer write pointer, overwriting oldest entry on wrap.
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
+
   logBuffer[logIndex].timestamp  = Time_getEpochTime();
-  logBuffer[logIndex].uptime     = millis();
+  logBuffer[logIndex].uptime     = millis(); // ms since boot — monotonic tiebreaker for same-second entries
   logBuffer[logIndex].statusCode = statusCode;
 }
 
@@ -68,6 +78,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1022: return "taf14 trigger not possible, buffer full";
   case 1023: return "No backend host configured, skipping";
   case 1024: return "Boot snapshot triggered";
+  // case 1025: return "TAF7: removed recent non-override entry for grid precision";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
