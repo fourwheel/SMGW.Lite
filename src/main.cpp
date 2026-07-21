@@ -1349,12 +1349,17 @@ bool MeterValue_store(bool override)
   // struct from the other core.
   MeterValue snap = LastMeterValue;
 
-  if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
+  // In thermometer-only mode (no telegram, temperature sensor active) meter_value_180
+  // stays 0 — allow the store so temperature readings reach the ring-buffer.
+  if (snap.meter_value_180 <= 0 && !temperature_object.isChecked())
+    { Log_AddEntry(1200); return false; }
 
-  // Skip storing if the value has not changed since the last successful store.
+  // Skip storing if no value has changed since the last successful store.
+  // Temperature is included so a changed sensor reading bypasses the cooldown.
   if (snap.meter_value_180 == PrevMeterValue.meter_value_180
     && snap.meter_value_280 == PrevMeterValue.meter_value_280
-    && snap.solar           == PrevMeterValue.solar)
+    && snap.solar           == PrevMeterValue.solar
+    && snap.temperature     == PrevMeterValue.temperature)
   {
     // Timestamp unchanged = no new telegram received (e.g. meter reader slipped off).
     // Never re-store a frozen reading regardless of elapsed time — this prevents
@@ -1483,6 +1488,9 @@ void handle_check_wifi_connection()
   }
 }
 
+// Minimum plausible epoch for a reliable NTP sync (2020-01-01 00:00:00 UTC).
+static const unsigned long EPOCH_MIN_PLAUSIBLE = 1577836800UL;
+
 void handle_temperature()
 {
   if (temperature_object.isChecked())
@@ -1498,7 +1506,15 @@ void handle_temperature()
       last_temperature = millis();
       float raw_temp = Temp_sensors.getTempCByIndex(0) * 100;
       if (raw_temp > -10000) // filter out -127°C sensor error (-12700 in raw units)
+      {
         current_temperature = (int)raw_temp;
+        // In thermometer-only mode no telegram ever sets LastMeterValue, so we
+        // keep temperature and timestamp current here so the ring-buffer stores work.
+        LastMeterValue.temperature = current_temperature;
+        unsigned long epoch = Time_getEpochTime();
+        if (epoch > EPOCH_MIN_PLAUSIBLE)
+          LastMeterValue.timestamp = epoch;
+      }
       read_temperature = true;
     }
   }
@@ -1680,9 +1696,6 @@ void handle_MeterValue_store()
     MeterValue_trigger_non_override = false;
   }
 }
-
-// Minimum plausible epoch for a reliable NTP sync (2020-01-01 00:00:00 UTC).
-static const unsigned long EPOCH_MIN_PLAUSIBLE = 1577836800UL;
 
 void handle_MeterValue_trigger()
 {
@@ -2362,11 +2375,12 @@ void Param_configSaved()
   // Only re-initialise the ring-buffer (which clears all pending values!)
   // when a setting that affects the binary layout actually changed.
   // Saving unrelated settings must not silently discard buffered meter data.
+  bool new_temp_enabled = config_temperature_object.isChecked() || temperature_object.isChecked();
   bool layout_changed =
-    (config_temperature_object.isChecked() != last_init_temp)  ||
-    (config_solar_object.isChecked()       != last_init_solar) ||
-    (config_280_object.isChecked()         != last_init_280)   ||
-    (atoi(Meter_Value_Buffer_Size_Char)    != last_init_buffer_kb);
+    (new_temp_enabled                   != last_init_temp)     ||
+    (config_solar_object.isChecked()    != last_init_solar)    ||
+    (config_280_object.isChecked()      != last_init_280)      ||
+    (atoi(Meter_Value_Buffer_Size_Char) != last_init_buffer_kb);
 
   if (layout_changed)
   {

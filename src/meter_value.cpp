@@ -114,7 +114,9 @@ int MeterValue_calc_max_slots_for_display()
 // ---------------------------------------------------------------------------
 void MeterValue_init_Buffer()
 {
-  config_temperature_enabled = config_temperature_object.isChecked();
+  // If the temperature sensor is active, always store temperature in the buffer.
+  // This covers thermometer-only mode where no telegram provides energy data.
+  config_temperature_enabled = config_temperature_object.isChecked() || temperature_object.isChecked();
   config_solar_enabled       = config_solar_object.isChecked();
   config_obis280_enabled     = config_280_object.isChecked();
 
