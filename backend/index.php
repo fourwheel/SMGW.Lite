@@ -334,8 +334,10 @@ foreach ($entries as $item) {
 
         if ($prev["meter"] > $item["meter"]) {
             $rejection = "meter_rollback(prev=" . $prev["meter"] . ")";
+            $power = 0;
         } elseif ($power < 0 || $power > 40000) {
             $rejection = "power_out_of_range(" . round($power) . "W)";
+            $power = 0;
         }
     } else {
         $power = 0;
