@@ -46,7 +46,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "webserver_main.h"
 #include "webserver_data.h"
 #include "meter_value.h"
-#include "fw_update.h"
+#include "ota_pull.h"
 
 #include "build_info.h"
 const String BUILD_TIMESTAMP = String(BUILD_TIMESTAMP_STR);
@@ -70,10 +70,7 @@ const char wifiInitialApPassword[] = "password";
 #define ID_LEN 4
 #define NUMBER_LEN 5
 
-// -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "2906"
-
-#define FIRMWARE_VERSION "1.3.0"
+#include "version.h"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -1455,7 +1452,7 @@ void handle_check_wifi_connection()
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
       static bool fw_init_done = false;
-      if (!fw_init_done) { fw_init_done = true; FwUpdate_init(); }
+      if (!fw_init_done) { fw_init_done = true; OtaPull_init(); }
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
@@ -1756,9 +1753,9 @@ void loop()
   handle_MeterValue_store();
   handle_telegram_watchdog();
   handle_call_backend();
-  if (millis() - last_fw_check >= 3600000UL) {
+  if (millis() - last_fw_check >= 120000UL) {
     last_fw_check = millis();
-    FwUpdate_check();
+    OtaPull_check();
   }
 }
 
@@ -2021,6 +2018,9 @@ void Webserver_HandleSysInfo()
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Build Branch</span>)rawliteral";
   s += BUILD_BRANCH;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Build Branch</span>)rawliteral";
+  s += String(BUILD_BRANCH);
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Free Heap</span>)rawliteral";
   s += String(ESP.getFreeHeap());

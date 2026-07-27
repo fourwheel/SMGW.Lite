@@ -113,7 +113,9 @@ String Log_StatusCodeToString(int statusCode)
   case 8003: return "Error reading cert file";
   case 8004: return "No Cert received";
   case 6000: return "OTA pull: check started";
-  case 6001: return "OTA pull: manifest fetch failed";
+  case 6001: return "OTA pull: manifest — connection failed";
+  case 6012: return "OTA pull: manifest — server returned non-200 (file missing?)";
+  case 6013: return "OTA pull: manifest — invalid JSON or missing fields";
   case 6002: return "OTA pull: firmware is up to date";
   case 6003: return "OTA pull: update available, starting download";
   case 6004: return "OTA pull: Update.begin() failed (check partition table)";

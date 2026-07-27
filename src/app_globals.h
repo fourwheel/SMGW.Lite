@@ -112,5 +112,5 @@ void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_Send_Log_to_backend_wrapper();
 void Webserver_LocationHrefsysinfo(int delay = 0);
 void Log_AddEntry(int code);
-void FwUpdate_init();
-void FwUpdate_check();
+void OtaPull_init();
+void OtaPull_check();
