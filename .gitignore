@@ -3,3 +3,4 @@
 .claude/
 backend/credentials.php
 src/wifi_credentials.h
+src/build_info.h

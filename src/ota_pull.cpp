@@ -1,4 +1,5 @@
-#include "fw_update.h"
+#include "ota_pull.h"
+#include "version.h"
 #include "app_globals.h"
 #include "log_buffer.h"
 #include "debug_log.h"
@@ -8,9 +9,11 @@
 #include <esp_ota_ops.h>
 #include <mbedtls/md.h>
 
-#define LOG_OTA_CHECK_START    6000
-#define LOG_OTA_MANIFEST_FAIL  6001
-#define LOG_OTA_UP_TO_DATE     6002
+#define LOG_OTA_CHECK_START        6000
+#define LOG_OTA_MANIFEST_CONN_FAIL 6001
+#define LOG_OTA_MANIFEST_HTTP_FAIL 6012
+#define LOG_OTA_MANIFEST_JSON_FAIL 6013
+#define LOG_OTA_UP_TO_DATE         6002
 #define LOG_OTA_UPDATE_START   6003
 #define LOG_OTA_BEGIN_FAIL     6004
 #define LOG_OTA_WRITE_FAIL     6005
@@ -75,41 +78,52 @@ static bool fw_fetch_manifest(String& version_out, String& filename_out,
     if (!client) return false;
 
     bool ok = false;
-    if (client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
-        if (fw_send_get(*client, path)) {
-            fw_skip_headers(*client);
+    if (!client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
+        Log_AddEntry(LOG_OTA_MANIFEST_CONN_FAIL);
+        client->stop();
+        delete client;
+        return false;
+    }
 
-            char body[FW_MAX_MANIFEST_BYTES + 1];
-            int  bodyLen = 0;
-            unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
-            while (bodyLen < FW_MAX_MANIFEST_BYTES && millis() < deadline) {
-                if (client->available()) {
-                    body[bodyLen++] = (char)client->read();
-                } else if (!client->connected()) {
-                    break;
-                }
-            }
-            body[bodyLen] = '\0';
+    if (!fw_send_get(*client, path)) {
+        Log_AddEntry(LOG_OTA_MANIFEST_HTTP_FAIL);
+        client->stop();
+        delete client;
+        return false;
+    }
 
-            JsonDocument doc;
-            if (deserializeJson(doc, body) == DeserializationError::Ok) {
-                const char* v  = doc["version"]  | "";
-                const char* f  = doc["filename"] | "";
-                const char* s  = doc["sha256"]   | "";
-                size_out       = doc["size"]      | (size_t)UPDATE_SIZE_UNKNOWN;
+    fw_skip_headers(*client);
 
-                if (strlen(v) > 0 && strlen(f) > 0 && strlen(s) == 64) {
-                    version_out  = String(v);
-                    filename_out = String(f);
-                    sha256_out   = String(s);
-                    sha256_out.toLowerCase();
-                    ok = true;
-                }
-            }
+    char body[FW_MAX_MANIFEST_BYTES + 1];
+    int  bodyLen = 0;
+    unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
+    while (bodyLen < FW_MAX_MANIFEST_BYTES && millis() < deadline) {
+        if (client->available()) {
+            body[bodyLen++] = (char)client->read();
+        } else if (!client->connected()) {
+            break;
         }
     }
+    body[bodyLen] = '\0';
     client->stop();
     delete client;
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body) == DeserializationError::Ok) {
+        const char* v  = doc["version"]  | "";
+        const char* f  = doc["filename"] | "";
+        const char* s  = doc["sha256"]   | "";
+        size_out       = doc["size"]      | (size_t)UPDATE_SIZE_UNKNOWN;
+
+        if (strlen(v) > 0 && strlen(f) > 0 && strlen(s) == 64) {
+            version_out  = String(v);
+            filename_out = String(f);
+            sha256_out   = String(s);
+            sha256_out.toLowerCase();
+            ok = true;
+        }
+    }
+    if (!ok) Log_AddEntry(LOG_OTA_MANIFEST_JSON_FAIL);
     return ok;
 }
 
@@ -203,7 +217,7 @@ cleanup:
     return ok;
 }
 
-void FwUpdate_init()
+void OtaPull_init()
 {
     const esp_partition_t* running = esp_ota_get_running_partition();
     if (!running) return;
@@ -220,7 +234,18 @@ void FwUpdate_init()
 
     if (client && client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
         String path = backend_path + "?ID=" + String(backend_ID) + "&backend_test=true";
-        reached = fw_send_get(*client, path);
+        client->print(String("GET ") + path + " HTTP/1.1\r\n"
+                      "Host: " + backend_host + "\r\n"
+                      "X-Auth-Token: " + String(backend_token) + "\r\n"
+                      "Connection: close\r\n\r\n");
+        unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
+        while (client->connected() && millis() < deadline) {
+            if (client->available()) {
+                String line = client->readStringUntil('\n');
+                if (line.startsWith("HTTP/1.1 200")) { reached = true; break; }
+                if (line.startsWith("HTTP/1.1"))     { break; }
+            }
+        }
     }
     if (client) { client->stop(); delete client; }
 
@@ -237,7 +262,7 @@ void FwUpdate_init()
     }
 }
 
-void FwUpdate_check()
+void OtaPull_check()
 {
     if (!wifi_connected || ota_active || strlen(backend_ID) == 0
         || backend_host.isEmpty()) return;
@@ -249,7 +274,6 @@ void FwUpdate_check()
     size_t size;
 
     if (!fw_fetch_manifest(version, filename, sha256, size)) {
-        Log_AddEntry(LOG_OTA_MANIFEST_FAIL);
         ota_active = false;
         return;
     }
