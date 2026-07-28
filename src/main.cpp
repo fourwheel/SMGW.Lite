@@ -47,7 +47,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "webserver_data.h"
 #include "meter_value.h"
 
-const String BUILD_TIMESTAMP = String(__DATE__) + " " + String(__TIME__);
+#include "build_info.h"
+const String BUILD_TIMESTAMP = String(BUILD_TIMESTAMP_STR);
+const String BUILD_BRANCH = String(BUILD_BRANCH_STR);
 
 // -- Initial name of the Thing. Used e.g. as SSID of the own Access Point.
 char thingName[20] = "SMGWLite"; // mutable — staticDelay suffix appended in setup()
@@ -1997,7 +1999,10 @@ void Webserver_HandleSysInfo()
   s += String(CONFIG_VERSION);
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Build Time</span>)rawliteral";
-  s += String(BUILD_TIMESTAMP);
+  s += BUILD_TIMESTAMP;
+  s += R"rawliteral(</div>
+<div class="kv"><span class="kl">Build Branch</span>)rawliteral";
+  s += BUILD_BRANCH;
   s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Free Heap</span>)rawliteral";
   s += String(ESP.getFreeHeap());
