@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-07-29
+
+### Changed
+- Switch partition scheme to `min_spiffs.csv` on all boards (OTA slot: 1.25 MB → 1.9 MB, SPIFFS: ~1.5 MB → 64 KB); requires one-time serial flash to update partition table
+
 ## [1.2.4] - 2026-07-21
 
 ### Changed
