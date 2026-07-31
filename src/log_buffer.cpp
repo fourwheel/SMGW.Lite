@@ -58,7 +58,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1001: return "setup()";
   case 1002: return "Memory Allocation failed";
   case 1003: return "Config saved";
-  case 1004: return "Feature config applied — buffer reinitialised";
+  case 1004: return "Feature config applied - buffer reinitialised";
   case 1005: return "call_backend()";
   case 1006: return "Taf 6 meter reading trigger";
   case 1008: return "WiFi returned";
