@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `smlToWatt`: cast raw value to `int64_t` before scaling so negative sign-extended values (Netzeinspeisung) are divided correctly — previously unsigned arithmetic produced a garbage result, causing feed-in power to display as ~1284 kW instead of ~1284 W
+- Log 1208 (new): meter rollback detected but value forwarded to backend — replaces the previous hard block (log 1207) so a corrupt high value in `PrevMeterValue` can no longer permanently lock out all subsequent valid telegrams; backend validates monotonicity via its existing `meter_rollback` rejection
 
 ## [1.2.5] - 2026-07-29
 

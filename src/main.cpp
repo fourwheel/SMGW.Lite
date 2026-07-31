@@ -853,14 +853,10 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
   // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
-    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180) {
-      Log_AddEntry(1207);
-      return false;
-    }
-    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280) {
-      Log_AddEntry(1207);
-      return false;
-    }
+    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180)
+      Log_AddEntry(1208);
+    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280)
+      Log_AddEntry(1208);
     MeterValue newVal = {};
     // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
     if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
@@ -944,18 +940,14 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   };
 
   uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
-  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
-    Log_AddEntry(1207);
-    return false;
-  }
+  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180)
+    Log_AddEntry(1208);
 
   float v280_raw = 0.0f;
   bool has280 = parseIecObis("1-0:2.8.0", &v280_raw);
   uint32_t new280 = has280 ? (uint32_t)(v280_raw * 10000.0f) : 0;
-  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280) {
-    Log_AddEntry(1207);
-    return false;
-  }
+  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280)
+    Log_AddEntry(1208);
 
   float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
   parseIecObis("1-0:1.7.0",  &v170);

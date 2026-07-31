@@ -86,6 +86,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1205: return "Error Buffer Size Exceeded";
   case 1206: return "Buffer Full, cannot store non-override value";
   case 1207: return "meter_value_180 < PrevMeterValue — truncated telegram discarded";
+  case 1208: return "meter rollback detected — value forwarded to backend";
   case 3000: return "Complete Telegram received";
   case 3001: return "Telegram Buffer overflow";
   case 3002: return "Telegram timeout";
