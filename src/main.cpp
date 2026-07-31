@@ -551,6 +551,7 @@ void setup()
   Sema_Backend = xSemaphoreCreateMutex();
   LogBuffer_reset();
   last_telegram_received = millis(); // start watchdog timer from boot
+  lastByteTime           = millis(); // same grace period for the no-serial-data watchdog
   Log_AddEntry(1001);
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
@@ -1508,14 +1509,31 @@ void handle_temperature()
 // ---------------------------------------------------------------------------
 void handle_telegram_watchdog()
 {
-  if (millis() - last_telegram_received < 300000UL) return; // within 5-min grace period
+  if (DebugFromOtherClient_object.isChecked()) return; // no serial telegram expected in remote mode
 
-  // Fire on first alert (last_urgent_log_call == 0) or every 30 min thereafter.
-  if (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL)
+  bool urgentReady = (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL);
+
+  if (millis() - lastByteTime >= 300000UL)
   {
-    Log_AddEntry(3005);
-    b_send_log_urgent    = true;
-    last_urgent_log_call = millis();
+    // No bytes at all on the serial interface — optical reader likely disconnected.
+    if (urgentReady)
+    {
+      Log_AddEntry(3007);
+      b_send_log_urgent    = true;
+      last_urgent_log_call = millis();
+    }
+    return; // 3005 (parse failure) would be redundant — suppress it
+  }
+
+  if (millis() - last_telegram_received >= 300000UL)
+  {
+    // Bytes arriving but no valid telegram parsed for 5 min (baud/parity mismatch?).
+    if (urgentReady)
+    {
+      Log_AddEntry(3005);
+      b_send_log_urgent    = true;
+      last_urgent_log_call = millis();
+    }
   }
 }
 

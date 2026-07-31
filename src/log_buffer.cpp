@@ -92,7 +92,8 @@ String Log_StatusCodeToString(int statusCode)
   case 3002: return "Telegram timeout";
   case 3003: return "SML Protocoll";
   case 3004: return "IEC Protocoll";
-  case 3005: return "No telegram received for 5 min";
+  case 3005: return "No valid telegram parsed for 5 min";
+  case 3007: return "No serial data received for 5 min";
   case 3006: return "Serial Msg received but parse failed (check baud/parity)";
   case 3010: return "Serial scan: valid config(s) found — activate manually";
   case 3011: return "Serial scan: no valid configuration found";
