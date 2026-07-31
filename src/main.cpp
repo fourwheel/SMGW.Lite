@@ -735,7 +735,8 @@ static uint32_t smlToDeciWh(uint64_t raw, int8_t scaler) {
 
 // Converts a raw SML value to integer watts.
 // SML scaler s: raw is in 10^s W → apply 10^s to reach W.
-static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
+static int32_t smlToWatt(uint64_t raw_u, int8_t scaler) {
+  int64_t raw = (int64_t)raw_u;
   if (scaler > 0) for (int8_t i = 0; i < scaler;  i++) raw *= 10;
   if (scaler < 0) for (int8_t i = 0; i > scaler; i--) raw /= 10;
   return (int32_t)raw;

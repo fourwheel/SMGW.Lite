@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `smlToWatt`: cast raw value to `int64_t` before scaling so negative sign-extended values (Netzeinspeisung) are divided correctly — previously unsigned arithmetic produced a garbage result, causing feed-in power to display as ~1284 kW instead of ~1284 W
+
 ## [1.2.5] - 2026-07-29
 
 ### Changed
