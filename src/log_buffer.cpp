@@ -58,7 +58,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1001: return "setup()";
   case 1002: return "Memory Allocation failed";
   case 1003: return "Config saved";
-  case 1004: return "Buffer layout changed, re-initialising";
+  case 1004: return "Feature config applied - buffer reinitialised";
   case 1005: return "call_backend()";
   case 1006: return "Taf 6 meter reading trigger";
   case 1008: return "WiFi returned";
@@ -106,7 +106,7 @@ String Log_StatusCodeToString(int statusCode)
   case 7000: return "Stopping Wifi, Backendcall unsuccessful";
   case 7001: return "Restarting Wifi";
   case 8000: return "Spiffs not mounted";
-  case 8001: return "Error reading cert file";
+  case 8001: return "No custom cert, using bundled ISRG Root X1";
   case 8002: return "Cert saved";
   case 8003: return "Error reading cert file";
   case 8004: return "No Cert received";
