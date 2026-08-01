@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0] - 2026-08-01
 
 ### Added
-- Remote firmware update (OTA pull): `index.php` returns JSON (`received`, `inserted`, `rejected`, `ota_check`) and sets `ota_check: true` when a manifest file exists for the device ID; the device fetches and flashes the update only then (15 min fallback timer as safety net)
+- Remote firmware update (OTA pull): `index.php` returns JSON (`received`, `inserted`, `rejected`, `ota_check`) and sets `ota_check: true` when a manifest file exists for the device ID; the device fetches and flashes the update only then (24 h fallback timer as safety net)
 - `index.php` response changed from plain text to JSON; `Content-Type: application/json` and `Content-Length` headers added (prevents nginx chunked transfer encoding, which corrupted JSON parsing in the firmware)
 - Server-side: `fwupdate/{ID}/manifest.json` (version, filename, sha256, size) and `fwupdate/{ID}/firmware.bin`
 - SHA-256 integrity verification of the downloaded binary before flashing, streamed — no full binary buffered in RAM

@@ -262,7 +262,6 @@ void OtaPull_init()
     } else {
         Log_AddEntry(6011);
         DLOGLN("OTA: validation failed — rolling back");
-        Preferences prefs;
         prefs.begin("ota", false);
         prefs.putBool("rollback", true);
         prefs.end();

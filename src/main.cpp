@@ -107,7 +107,7 @@ bool          g_wifiSetupPending  = false;
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 volatile bool ota_active          = false; // set during OTA to block new backend calls
-bool          g_ota_check_requested = false;
+volatile bool g_ota_check_requested = false;
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
