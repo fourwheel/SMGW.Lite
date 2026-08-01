@@ -72,7 +72,7 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
-#define FIRMWARE_VERSION "1.2.5"
+#define FIRMWARE_VERSION "1.2.6"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -551,7 +551,6 @@ void setup()
   Sema_Backend = xSemaphoreCreateMutex();
   LogBuffer_reset();
   last_telegram_received = millis(); // start watchdog timer from boot
-  lastByteTime           = millis(); // same grace period for the no-serial-data watchdog
   Log_AddEntry(1001);
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
