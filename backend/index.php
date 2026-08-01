@@ -443,10 +443,13 @@ if ($batch_rejected > 0) {
 // the client to call the firmware update endpoint and compare versions there.
 // ---------------------------------------------------------------------------
 $manifest_path = __DIR__ . '/fwupdate/' . $id . '/manifest.json';
-echo json_encode([
+$response = json_encode([
     'received'  => $batch_received,
     'inserted'  => $inserted,
     'rejected'  => $batch_rejected,
     'ota_check' => file_exists($manifest_path),
 ]);
+header('Content-Type: application/json');
+header('Content-Length: ' . strlen($response));
+echo $response;
 ?>
