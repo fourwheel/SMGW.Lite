@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-01
+
+### Added
+- Remote firmware update (OTA pull): `index.php` returns JSON (`received`, `inserted`, `rejected`, `ota_check`) and sets `ota_check: true` when a manifest file exists for the device ID; the device fetches and flashes the update only then (24 h fallback timer as safety net)
+- `index.php` response changed from plain text to JSON; `Content-Type: application/json` header added
+- Server-side: `fwupdate/{ID}/manifest.json` (version, filename, sha256, size) and `fwupdate/{ID}/firmware.bin`
+- SHA-256 integrity verification of the downloaded binary before flashing, streamed — no full binary buffered in RAM
+- Post-OTA validation: after a successful flash the device sets an NVS flag before restarting; on the next boot it contacts the backend to confirm the new firmware works — if the backend is unreachable it rolls back to the previous OTA slot via `esp_ota_set_boot_partition()` and restarts
+- 15-minute OTA cooldown after a rollback to prevent flash-rollback loops (log 6020)
+- Log buffer uploaded to backend before OTA restart so no entries are lost on reboot
+- New module `src/ota_pull.cpp` / `src/ota_pull.h`
+- New log codes 6000–6020 for OTA pull lifecycle events
+
 ## [1.2.6] - 2026-08-01
 
 ### Fixed
@@ -20,17 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exclude auto-generated `src/build_info.h` from version control
 - Log 8001: renamed to "No custom cert, using bundled ISRG Root X1" (was: "Error reading cert file")
 - Log 1004: renamed to "Feature config applied — buffer reinitialised" (was: "Buffer layout changed, re-initialising")
-
-## [1.3.0] - 2026-07-21
-
-### Added
-- Remote firmware update (OTA pull): device checks hourly for a new firmware version specific to its backend ID
-- Server exposes `fwupdate/{ID}/manifest.json` (version, filename, sha256, size) and `fwupdate/{ID}/firmware_X.Y.Z.bin`
-- SHA-256 integrity verification of the downloaded binary before flashing (streamed, no full-binary buffer needed)
-- Bootloader-level rollback via `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`: if the new firmware cannot reach the backend after reboot the bootloader automatically reverts to the previous OTA slot
-- New log codes 6000–6011 for OTA pull lifecycle events
-- New module `src/fw_update.cpp` / `src/fw_update.h`
-- `sdkconfig.defaults` to enable bootloader rollback support
 
 ## [1.2.4] - 2026-07-21
 

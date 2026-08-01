@@ -1,0 +1,102 @@
+SELECT
+  received_at AS "Batch",
+  device_id AS "Device",
+  status_code AS "Code",
+  CASE
+  WHEN status_code >= 0 AND status_code < 1000 THEN CONCAT('# values transmitted: ', status_code)
+
+  WHEN status_code = 1001 THEN 'setup()'
+  WHEN status_code = 1002 THEN 'Memory allocation failed'
+  WHEN status_code = 1003 THEN 'Config saved'
+  WHEN status_code = 1004 THEN 'Feature config applied - buffer reinitialised'
+  WHEN status_code = 1005 THEN 'call_backend()'
+  WHEN status_code = 1006 THEN 'TAF 6 meter reading trigger'
+  WHEN status_code = 1008 THEN 'WiFi returned'
+  WHEN status_code = 1009 THEN 'WiFi lost'
+  WHEN status_code = 1010 THEN 'TAF 7 meter reading trigger'
+  WHEN status_code = 1011 THEN 'TAF 14 meter reading trigger'
+  WHEN status_code = 1012 THEN 'call backend trigger'
+  WHEN status_code = 1013 THEN 'MeterValues_clear_Buffer()'
+  WHEN status_code = 1014 THEN 'TAF 7-900s meter reading trigger'
+  WHEN status_code = 1015 THEN 'Not enough heap to store value'
+  WHEN status_code = 1016 THEN 'Buffer full, cannot store non-override value'
+  WHEN status_code = 1017 THEN 'Meter value stored'
+  WHEN status_code = 1018 THEN 'Dynamic TAF trigger'
+  WHEN status_code = 1019 THEN 'Sending Log'
+  WHEN status_code = 1020 THEN 'Sending Log successful'
+  WHEN status_code = 1021 THEN 'call_backend successful'
+  WHEN status_code = 1022 THEN 'TAF 14 trigger not possible, buffer full'
+  WHEN status_code = 1023 THEN 'No backend host configured, skipping'
+  WHEN status_code = 1024 THEN 'Boot snapshot triggered'
+
+  WHEN status_code = 1200 THEN 'Meter value <= 0'
+  WHEN status_code = 1201 THEN 'Current meter value = previous meter value'
+  WHEN status_code = 1203 THEN 'Suffix must not be 0'
+  WHEN status_code = 1204 THEN 'Prefix/suffix not correct'
+  WHEN status_code = 1205 THEN 'Error: buffer size exceeded'
+  WHEN status_code = 1206 THEN 'Buffer full, cannot store non-override value'
+  WHEN status_code = 1207 THEN 'meter_value_180 < PrevMeterValue - truncated telegram discarded'
+  WHEN status_code = 1208 THEN 'Meter rollback detected - value forwarded to backend'
+
+  WHEN status_code = 3000 THEN 'Complete telegram received'
+  WHEN status_code = 3001 THEN 'Telegram buffer overflow'
+  WHEN status_code = 3002 THEN 'Telegram timeout'
+  WHEN status_code = 3003 THEN 'Protocol detected: SML'
+  WHEN status_code = 3004 THEN 'Protocol detected: IEC 62056-21'
+  WHEN status_code = 3005 THEN 'No valid telegram parsed for 5 min'
+  WHEN status_code = 3006 THEN 'Serial msg received but parse failed (check baud/parity)'
+  WHEN status_code = 3007 THEN 'No serial data received for 5 min'
+  WHEN status_code = 3010 THEN 'Serial scan: valid config(s) found - activate manually'
+  WHEN status_code = 3011 THEN 'Serial scan: no valid configuration found'
+  WHEN status_code = 3012 THEN 'Serial config: manually set via web UI'
+
+  WHEN status_code = 4000 THEN 'Connection to server failed (certificate?)'
+  WHEN status_code = 4001 THEN 'Error transmitting buffer chunk'
+  WHEN status_code = 4002 THEN 'Meter values send failed (no HTTP 200)'
+  WHEN status_code = 4003 THEN 'Log send failed (no HTTP 200)'
+
+  WHEN status_code = 6000 THEN 'OTA: check started'
+  WHEN status_code = 6001 THEN 'OTA: manifest connection failed'
+  WHEN status_code = 6002 THEN 'OTA: firmware up to date'
+  WHEN status_code = 6003 THEN 'OTA: update starting'
+  WHEN status_code = 6004 THEN 'OTA: Update.begin() failed'
+  WHEN status_code = 6005 THEN 'OTA: write error'
+  WHEN status_code = 6006 THEN 'OTA: SHA-256 mismatch'
+  WHEN status_code = 6007 THEN 'OTA: Update.end() failed'
+  WHEN status_code = 6008 THEN 'OTA: flash successful'
+  WHEN status_code = 6009 THEN 'OTA: validating post-update firmware'
+  WHEN status_code = 6010 THEN 'OTA: firmware validated'
+  WHEN status_code = 6011 THEN 'OTA: validation failed — rolling back'
+  WHEN status_code = 6012 THEN 'OTA: manifest HTTP error'
+  WHEN status_code = 6013 THEN 'OTA: manifest JSON parse failed'
+  WHEN status_code = 6014 THEN 'OTA: check triggered by backend hint'
+  WHEN status_code = 6015 THEN 'OTA: check triggered by 24 h fallback'
+  WHEN status_code = 6016 THEN 'OTA: skipped — WiFi not connected'
+  WHEN status_code = 6017 THEN 'OTA: skipped — ota_active flag set'
+  WHEN status_code = 6018 THEN 'OTA: skipped — backend ID empty'
+  WHEN status_code = 6019 THEN 'OTA: skipped — backend host empty'
+  WHEN status_code = 6020 THEN 'OTA: cooldown after rollback — skipping for 15 min'
+
+  WHEN status_code = 5000 THEN 'myStrom: connection failed'
+  WHEN status_code = 5001 THEN 'myStrom: connect() failed'
+  WHEN status_code = 5002 THEN 'myStrom: deserializeJson() failed'
+
+  WHEN status_code = 7000 THEN 'Stopping WiFi, backend call unsuccessful'
+  WHEN status_code = 7001 THEN 'Restarting WiFi'
+
+  WHEN status_code = 8000 THEN 'SPIFFS not mounted'
+  WHEN status_code = 8001 THEN 'No custom cert, using bundled ISRG Root X1'
+  WHEN status_code = 8002 THEN 'Cert saved'
+  WHEN status_code = 8003 THEN 'Error writing cert file'
+  WHEN status_code = 8004 THEN 'No cert received'
+
+  ELSE CONCAT('Unknown (', status_code, ')')
+END AS "Description",
+  FROM_UNIXTIME(timestamp_client) AS "Device Time",
+  ROUND(uptime_ms / 1000.0, 1) AS "Uptime (s)"
+FROM device_logs
+WHERE $__timeFilter(received_at)
+  AND device_id IN (${id:sqlstring})
+  AND ('' = '${code}' OR status_code = '${code}')
+ORDER BY received_at DESC, uptime_ms DESC
+LIMIT 5000

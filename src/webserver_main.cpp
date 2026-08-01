@@ -259,6 +259,7 @@ poll();
     if (!SerialConfig_setByIndex(idx)) { server.send(400, "application/json", "{\"ok\":false}"); return; }
     server.send(200, "application/json", "{\"ok\":true,\"label\":\"" + SerialScan_activeLabel() + "\"}");
   });
+  server.on("/checkRemoteFwUpdate", [] { g_ota_check_requested = true; Webserver_LocationHrefsysinfo(2); });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });

@@ -1,9 +1,11 @@
 #pragma once
 
-// Called once on first WiFi connect. Checks if this boot is a post-pull-OTA
-// validation boot and confirms or triggers bootloader rollback.
+
+// Called once on first WiFi connect. Checks NVS for a pending-validation flag
+// set by the previous OTA flash; contacts the backend to confirm the firmware
+// works, or rolls back to the previous OTA slot via esp_ota_set_boot_partition.
 void OtaPull_init();
 
-// Called from loop() on an hourly timer. Checks the server for a newer
-// firmware version and flashes it autonomously if the version string differs.
+// Checks the server for a newer firmware version and flashes it autonomously
+// if the version string differs. Triggered by backend hint or 24 h fallback.
 void OtaPull_check();

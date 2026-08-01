@@ -106,11 +106,11 @@ bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
-volatile bool ota_active = false;     // set during OTA to block new backend calls
+volatile bool ota_active          = false; // set during OTA to block new backend calls
+bool          g_ota_check_requested = false;
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
-unsigned long last_fw_check     = 0;
 
 // Temperature vars
 #define ONE_WIRE_BUS 4
@@ -136,6 +136,7 @@ unsigned long last_remote_meter_value = 0;
 
 // -- Forward declarations.
 void handle_call_backend();
+void handle_remote_ota();
 void handle_check_wifi_connection();
 void handle_MeterValue_trigger();
 void handle_telegram_watchdog();
@@ -1290,26 +1291,55 @@ void Webclient_send_meter_values_to_backend()
   if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); call_backend_successfull = false; return; }
   if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); call_backend_successfull = false; return; }
 
-  bool ok = false;
+  bool ok           = false;
+  bool headers_done = false;
+  String body;
+  body.reserve(128);
   unsigned long mv_deadline = millis() + 15000;
+
   while ((client.connected() || client.available()) && millis() < mv_deadline)
   {
     if (client.available())
     {
       String line = client.readStringUntil('\n');
       DLOGLN(line);
-      if (line.startsWith("HTTP/1.1 200"))
+
+      if (!headers_done)
       {
-        DLOGLN("MeterValues successfully sent");
-        ok = true;
-        MeterValues_clear_Buffer();
-        last_call_backend = millis();
-        Log_AddEntry(1021);
-        break; // don't wait for the rest of the response — we have what we need
+        if (line.startsWith("HTTP/1.1 200"))
+        {
+          DLOGLN("MeterValues successfully sent");
+          ok = true;
+          MeterValues_clear_Buffer();
+          last_call_backend = millis();
+          Log_AddEntry(1021);
+        }
+        else if (!ok && line.startsWith("HTTP/1.1"))
+        {
+          break; // non-200 status — abort
+        }
+        // blank line (\r stripped by readStringUntil) marks end of headers
+        if (line == "\r" || line.length() <= 1)
+        {
+          if (!ok) break;
+          headers_done = true;
+        }
+      }
+      else
+      {
+        body += line;
       }
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+
+  if (ok && body.length() > 0)
+  {
+    JsonDocument doc;
+    if (deserializeJson(doc, body) == DeserializationError::Ok)
+      g_ota_check_requested = doc["ota_check"] | false;
+  }
+
   call_backend_successfull = ok;
   if (!ok) Log_AddEntry(4002);
   client.stop();
@@ -1562,6 +1592,22 @@ void handle_call_backend()
   }
 }
 
+void handle_remote_ota()
+{
+  static const unsigned long FALLBACK_MS = 24UL * 3600UL * 1000UL;
+  static unsigned long last_check = 0;
+
+  bool hint     = g_ota_check_requested;
+  bool fallback = millis() - last_check >= FALLBACK_MS;
+
+  if (!hint && !fallback) return;
+
+  g_ota_check_requested = false;
+  last_check            = millis();
+  Log_AddEntry(hint ? 6014 : 6015);
+  OtaPull_check();
+}
+
 unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
 
@@ -1753,10 +1799,7 @@ void loop()
   handle_MeterValue_store();
   handle_telegram_watchdog();
   handle_call_backend();
-  if (millis() - last_fw_check >= 120000UL) {
-    last_fw_check = millis();
-    OtaPull_check();
-  }
+  handle_remote_ota();
 }
 
 void Webserver_HandleSysInfo()
@@ -2019,9 +2062,6 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl">Build Branch</span>)rawliteral";
   s += BUILD_BRANCH;
   s += R"rawliteral(</div>
-<div class="kv"><span class="kl">Build Branch</span>)rawliteral";
-  s += String(BUILD_BRANCH);
-  s += R"rawliteral(</div>
 <div class="kv"><span class="kl">Free Heap</span>)rawliteral";
   s += String(ESP.getFreeHeap());
   s += R"rawliteral(</div>
@@ -2041,7 +2081,8 @@ void Webserver_HandleSysInfo()
   s += String(LOG_BUFFER_SIZE);
   s += R"rawliteral(</div>
 <div class="btns" style="margin-top:.6rem;">
-<a class="btn btn-s" href="update">FW Update</a>
+<a class="btn btn-s" href="update">Upload FW</a>
+<a class="btn btn-s" href="checkRemoteFwUpdate">Check Remote FW Update</a>
 <a class="btn btn-d" href="restart">Restart</a>
 </div>
 </div>

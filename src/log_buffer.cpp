@@ -114,8 +114,6 @@ String Log_StatusCodeToString(int statusCode)
   case 8004: return "No Cert received";
   case 6000: return "OTA pull: check started";
   case 6001: return "OTA pull: manifest — connection failed";
-  case 6012: return "OTA pull: manifest — server returned non-200 (file missing?)";
-  case 6013: return "OTA pull: manifest — invalid JSON or missing fields";
   case 6002: return "OTA pull: firmware is up to date";
   case 6003: return "OTA pull: update available, starting download";
   case 6004: return "OTA pull: Update.begin() failed (check partition table)";
@@ -126,6 +124,15 @@ String Log_StatusCodeToString(int statusCode)
   case 6009: return "OTA pull: post-OTA validation — contacting backend";
   case 6010: return "OTA pull: validation successful — firmware confirmed";
   case 6011: return "OTA pull: validation failed — rolling back";
+  case 6012: return "OTA pull: manifest — server returned non-200 (file missing?)";
+  case 6013: return "OTA pull: manifest — invalid JSON or missing fields";
+  case 6014: return "OTA pull: check triggered by backend hint";
+  case 6015: return "OTA pull: check triggered by 24 h fallback";
+  case 6016: return "OTA pull: skipped — WiFi not connected";
+  case 6017: return "OTA pull: skipped — ota_active flag set";
+  case 6018: return "OTA pull: skipped — backend ID empty";
+  case 6019: return "OTA pull: skipped — backend host empty";
+  case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
   }
   if (statusCode < 1000) return "# meter slots to transfer";
   return "Unknown status code";
