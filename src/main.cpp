@@ -72,7 +72,7 @@ const char wifiInitialApPassword[] = "password";
 // -- Configuration specific key. The value should be modified if config structure was changed.
 #define CONFIG_VERSION "2906"
 
-#define FIRMWARE_VERSION "1.2.5"
+#define FIRMWARE_VERSION "1.2.6"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to build an AP. (E.g. in case of lost password)
@@ -735,7 +735,8 @@ static uint32_t smlToDeciWh(uint64_t raw, int8_t scaler) {
 
 // Converts a raw SML value to integer watts.
 // SML scaler s: raw is in 10^s W → apply 10^s to reach W.
-static int32_t smlToWatt(uint64_t raw, int8_t scaler) {
+static int32_t smlToWatt(uint64_t raw_u, int8_t scaler) {
+  int64_t raw = (int64_t)raw_u;
   if (scaler > 0) for (int8_t i = 0; i < scaler;  i++) raw *= 10;
   if (scaler < 0) for (int8_t i = 0; i > scaler; i--) raw /= 10;
   return (int32_t)raw;
@@ -852,14 +853,10 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   // temp180 in a separate step, leaving a brief window where meter_value_180 == 0
   // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
-    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180) {
-      Log_AddEntry(1207);
-      return false;
-    }
-    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280) {
-      Log_AddEntry(1207);
-      return false;
-    }
+    if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180)
+      Log_AddEntry(1208);
+    if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280)
+      Log_AddEntry(1208);
     MeterValue newVal = {};
     // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
     if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
@@ -943,18 +940,14 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   };
 
   uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
-  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180) {
-    Log_AddEntry(1207);
-    return false;
-  }
+  if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180)
+    Log_AddEntry(1208);
 
   float v280_raw = 0.0f;
   bool has280 = parseIecObis("1-0:2.8.0", &v280_raw);
   uint32_t new280 = has280 ? (uint32_t)(v280_raw * 10000.0f) : 0;
-  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280) {
-    Log_AddEntry(1207);
-    return false;
-  }
+  if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280)
+    Log_AddEntry(1208);
 
   float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
   parseIecObis("1-0:1.7.0",  &v170);
@@ -1515,14 +1508,31 @@ void handle_temperature()
 // ---------------------------------------------------------------------------
 void handle_telegram_watchdog()
 {
-  if (millis() - last_telegram_received < 300000UL) return; // within 5-min grace period
+  if (DebugFromOtherClient_object.isChecked()) return; // no serial telegram expected in remote mode
 
-  // Fire on first alert (last_urgent_log_call == 0) or every 30 min thereafter.
-  if (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL)
+  bool urgentReady = (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL);
+
+  if (millis() - lastByteTime >= 300000UL)
   {
-    Log_AddEntry(3005);
-    b_send_log_urgent    = true;
-    last_urgent_log_call = millis();
+    // No bytes at all on the serial interface — optical reader likely disconnected.
+    if (urgentReady)
+    {
+      Log_AddEntry(3007);
+      b_send_log_urgent    = true;
+      last_urgent_log_call = millis();
+    }
+    return; // 3005 (parse failure) would be redundant — suppress it
+  }
+
+  if (millis() - last_telegram_received >= 300000UL)
+  {
+    // Bytes arriving but no valid telegram parsed for 5 min (baud/parity mismatch?).
+    if (urgentReady)
+    {
+      Log_AddEntry(3005);
+      b_send_log_urgent    = true;
+      last_urgent_log_call = millis();
+    }
   }
 }
 
