@@ -313,7 +313,7 @@ poll();
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", page);
   });
-  server.on("/installRemoteFw", []() { g_ota_check_requested = true; Webserver_LocationHrefsysinfo(2); });
+  server.on("/installRemoteFw", []() { g_ota_check_requested = true; Webserver_LocationHrefsysinfo(15); });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
