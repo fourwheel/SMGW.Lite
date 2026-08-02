@@ -4,8 +4,8 @@
 
 ```
 backend/fwupdate/ABC/
-├── manifest.json          # read by the device on every hourly check
-└── firmware_X.Y.Z.bin     # the binary to flash
+├── manifest.json    # read by the device; triggers update when version differs
+└── firmware.bin     # the binary to flash
 ```
 
 ## Deploy a new firmware version
@@ -26,17 +26,20 @@ sha256sum .pio/build/esp32-nodemcu/firmware.bin
 | Field      | Value                                             |
 |------------|---------------------------------------------------|
 | `version`  | new version string — must match `FIRMWARE_VERSION` in `main.cpp` |
-| `filename` | new binary filename, e.g. `firmware_1.3.1.bin`   |
+| `filename` | binary filename on the server, e.g. `firmware.bin`|
 | `sha256`   | 64-char lowercase hex from step 2                 |
 | `size`     | byte count of the binary                          |
 
 **4. Upload both files to the server**
 ```bash
-scp .pio/build/esp32-nodemcu/firmware.bin  server:/backend/fwupdate/ABC/firmware_1.3.1.bin
+scp .pio/build/esp32-nodemcu/firmware.bin  server:/backend/fwupdate/ABC/firmware.bin
 scp manifest.json                           server:/backend/fwupdate/ABC/manifest.json
 ```
 
-All devices with `backend_ID = ABC` will pick up the update within 60 minutes.
+All devices with `backend_ID = ABC` will pick up the update on their next
+backend call (typically within minutes), because the backend returns
+`ota_check: true` whenever `manifest.json` exists. A 24 h fallback timer
+triggers a check even if the backend hint is never received.
 
 ## To hold a device on its current version
 
@@ -46,4 +49,4 @@ against its running firmware and skips the download if they match.
 ## To roll back manually
 
 Set `manifest.json` back to the previous version and upload the old binary.
-The device will flash it on the next hourly check.
+The device will flash it on the next backend call.
