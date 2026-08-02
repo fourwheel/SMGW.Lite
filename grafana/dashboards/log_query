@@ -76,6 +76,7 @@ SELECT
   WHEN status_code = 6018 THEN 'OTA: skipped — backend ID empty'
   WHEN status_code = 6019 THEN 'OTA: skipped — backend host empty'
   WHEN status_code = 6020 THEN 'OTA: cooldown after rollback — skipping for 15 min'
+  WHEN status_code = 6021 THEN 'OTA: check triggered manually'
 
   WHEN status_code = 5000 THEN 'myStrom: connection failed'
   WHEN status_code = 5001 THEN 'myStrom: connect() failed'
