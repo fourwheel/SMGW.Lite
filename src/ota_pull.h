@@ -1,5 +1,5 @@
 #pragma once
-
+#include <Arduino.h>
 
 // Called once on first WiFi connect. Checks NVS for a pending-validation flag
 // set by the previous OTA flash; contacts the backend to confirm the firmware
