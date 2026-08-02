@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 15-minute OTA cooldown after a rollback to prevent flash-rollback loops (log 6020)
 - Log buffer uploaded to backend before OTA restart so no entries are lost on reboot
 - New module `src/ota_pull.cpp` / `src/ota_pull.h`
-- New log codes 6000–6020 for OTA pull lifecycle events
+- New log codes 6000–6021 for OTA pull lifecycle events
+- "Check Remote FW Update" button now fetches the manifest and shows version info before asking for confirmation; no automatic install without user approval (log 6021)
 
 ## [1.2.6] - 2026-08-01
 

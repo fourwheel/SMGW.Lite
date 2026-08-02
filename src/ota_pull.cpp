@@ -219,6 +219,13 @@ cleanup:
 }
 
 
+bool OtaPull_fetchManifestVersion(String& version_out)
+{
+    String filename, sha256;
+    size_t size;
+    return fw_fetch_manifest(version_out, filename, sha256, size);
+}
+
 void OtaPull_init()
 {
     Preferences prefs;

@@ -9,3 +9,7 @@ void OtaPull_init();
 // Checks the server for a newer firmware version and flashes it autonomously
 // if the version string differs. Triggered by backend hint or 24 h fallback.
 void OtaPull_check();
+
+// Fetches only the manifest version string — no download, no flash.
+// Returns false if the manifest is unreachable or invalid.
+bool OtaPull_fetchManifestVersion(String& version_out);

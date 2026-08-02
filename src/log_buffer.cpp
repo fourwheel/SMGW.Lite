@@ -133,6 +133,7 @@ String Log_StatusCodeToString(int statusCode)
   case 6018: return "OTA pull: skipped — backend ID empty";
   case 6019: return "OTA pull: skipped — backend host empty";
   case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
+  case 6021: return "OTA pull: check triggered manually";
   }
   if (statusCode < 1000) return "# meter slots to transfer";
   return "Unknown status code";
