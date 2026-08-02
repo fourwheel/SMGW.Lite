@@ -5,6 +5,8 @@
 #include "html_style.h"
 #include "debug_log.h"
 #include "webserver_data.h"
+#include "ota_pull.h"
+#include "version.h"
 #include <IotWebConf.h>
 #include <IotWebConfUsing.h>
 #include <WiFi.h>
@@ -259,6 +261,59 @@ poll();
     if (!SerialConfig_setByIndex(idx)) { server.send(400, "application/json", "{\"ok\":false}"); return; }
     server.send(200, "application/json", "{\"ok\":true,\"label\":\"" + SerialScan_activeLabel() + "\"}");
   });
+  server.on("/checkRemoteFwUpdate", []() {
+    String version;
+    bool   fetched = false;
+    if (wifi_connected && strlen(backend_ID) > 0 && !backend_host.isEmpty()) {
+      ota_active = true;
+      if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
+        Log_AddEntry(6021);
+        fetched = OtaPull_fetchManifestVersion(version);
+        xSemaphoreGive(Sema_Backend);
+      }
+      ota_active            = false;
+      g_ota_check_requested = false; // don't auto-install while user is deciding
+    }
+    if (fetched && version == FIRMWARE_VERSION) Log_AddEntry(6002);
+
+    String page;
+    page.reserve(900);
+    page += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Remote FW Update</title>)rawliteral";
+    page += HTML_STYLE_MODERN;
+    page += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card">
+<div class="card-title">Remote Firmware Update</div>)rawliteral";
+
+    if (!fetched) {
+      page += R"rawliteral(<p>Kein Firmware-Update f&uuml;r dieses Ger&auml;t verf&uuml;gbar.</p>
+<div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
+    } else if (version == FIRMWARE_VERSION) {
+      page += "<p>Firmware ist aktuell (v" + String(FIRMWARE_VERSION) + ").</p>\n"
+              R"rawliteral(<div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
+    } else {
+      page += "<p>Version <strong>" + version + "</strong> verf&uuml;gbar"
+              " (aktuell: v" + String(FIRMWARE_VERSION) + "). Jetzt installieren?</p>\n"
+              R"rawliteral(<div class="btns">
+<a class="btn" href="/installRemoteFw">Installieren</a>
+<a class="btn btn-s" href="/sysinfo">Abbrechen</a>
+</div>)rawliteral";
+    }
+
+    page += R"rawliteral(
+</div>
+</body></html>)rawliteral";
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", page);
+  });
+  server.on("/installRemoteFw", []() { g_ota_check_requested = true; Webserver_LocationHrefsysinfo(15); });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
   server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });

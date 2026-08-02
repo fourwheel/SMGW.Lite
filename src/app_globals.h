@@ -98,6 +98,11 @@ extern SemaphoreHandle_t Sema_Backend;
 // Trigger flags
 extern bool MeterValue_trigger_override;
 
+// OTA state
+extern char          FullCert[];
+extern volatile bool ota_active;
+extern volatile bool g_ota_check_requested;
+
 // Forward declarations for functions called across modules
 void Led_update_Blink();
 void MeterValue_init_Buffer();
@@ -108,3 +113,5 @@ void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_Send_Log_to_backend_wrapper();
 void Webserver_LocationHrefsysinfo(int delay = 0);
 void Log_AddEntry(int code);
+void OtaPull_init();
+void OtaPull_check();

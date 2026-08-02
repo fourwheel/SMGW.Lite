@@ -10,91 +10,6 @@ $cfg_version = isset($_GET['cfg']) ? substr($_GET['cfg'], 0, 10) : null;
 update_client_endpoint($id, null, $fw_version, $cfg_version);
 
 // ---------------------------------------------------------------------------
-// Status code descriptions
-// Kept in sync with Log_StatusCodeToString() in main.cpp.
-// Codes < 1000: number of meter values transmitted (handled separately below).
-// ---------------------------------------------------------------------------
-function getStatusDescription(int $statusCode): string
-{
-    // Codes below 1000 carry a dynamic value (number of transmitted meter values)
-    if ($statusCode >= 0 && $statusCode < 1000) {
-        return "# values transmitted: $statusCode";
-    }
-
-    switch ($statusCode) {
-        // --- System ---
-        case 1001: return "setup()";
-        case 1002: return "Memory allocation failed";
-        case 1003: return "Config saved";
-        case 1004: return "Buffer layout changed, re-initialising";
-
-        // --- Backend calls ---
-        case 1005: return "call_backend()";
-        case 1012: return "call backend trigger";
-        case 1019: return "Sending Log";
-        case 1020: return "Sending Log successful";
-        case 1021: return "call_backend successful";
-
-        // --- TAF triggers ---
-        case 1006: return "TAF 6 meter reading trigger";
-        case 1010: return "TAF 7 meter reading trigger";
-        case 1011: return "TAF 14 meter reading trigger";
-        case 1014: return "TAF 7-900s meter reading trigger";
-        case 1018: return "Dynamic TAF trigger";
-        case 1022: return "TAF 14 trigger not possible, buffer full";
-        case 1023: return "No backend host configured, skipping";
-
-        // --- Meter value buffer ---
-        case 1013: return "MeterValues_clear_Buffer()";
-        case 1015: return "Not enough heap to store value";
-        case 1016: return "Buffer full, cannot store non-override value";
-        case 1017: return "Meter value stored";
-        case 1206: return "Buffer full, cannot store non-override value";
-
-        // --- Meter value validation ---
-        case 1200: return "Meter value <= 0";
-        case 1201: return "Current meter value = previous meter value";
-        case 1203: return "Suffix must not be 0";
-        case 1204: return "Prefix/suffix not correct";
-        case 1205: return "Error: buffer size exceeded";
-
-        // --- WiFi ---
-        case 1008: return "WiFi returned";
-        case 1009: return "WiFi lost";
-        case 7000: return "Stopping WiFi, backend call unsuccessful";
-        case 7001: return "Restarting WiFi";
-
-        // --- Telegram / serial ---
-        case 3000: return "Complete telegram received";
-        case 3001: return "Telegram buffer overflow";
-        case 3002: return "Telegram timeout";
-        case 3003: return "Protocol detected: SML";
-        case 3004: return "Protocol detected: IEC 62056-21";
-        case 3005: return "No telegram received for 5 min";
-
-        // --- Backend connection ---
-        case 4000: return "Connection to server failed (certificate?)";
-        case 4001: return "Error transmitting Buffer Chunk";
-        case 4002: return "Meter values send failed (no HTTP 200)";
-        case 4003: return "Log send failed (no HTTP 200)";
-
-        // --- MyStrom / PV ---
-        case 5000: return "myStrom: connection failed";
-        case 5001: return "myStrom: failed to connect";
-        case 5002: return "myStrom: deserializeJson() failed";
-
-        // --- SPIFFS / certificates ---
-        case 8000: return "SPIFFS not mounted";
-        case 8001: return "Error reading cert file";
-        case 8002: return "Cert saved";
-        case 8003: return "Error writing cert file";
-        case 8004: return "No cert received";
-
-        default:   return "Unknown status code ($statusCode)";
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Update meter model if supplied
 // ---------------------------------------------------------------------------
 if (!empty($_GET['model'])) {
@@ -142,7 +57,6 @@ for ($i = 0; $i + $logEntrySize <= strlen($inputData); $i += $logEntrySize) {
         'timestamp'   => $timestamp,
         'uptime'      => $uptime,
         'statusCode'  => $statusCode,
-        'description' => getStatusDescription($statusCode),
     ];
 }
 

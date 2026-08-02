@@ -216,10 +216,8 @@ if ($enable_file_log && $id === $log_id && count($entries) > 0) {
     }
 }
 
-// Respond 200 immediately so the ESP32 knows the transfer succeeded and can
-// clear its local buffer, even if the DB inserts below take a moment.
 http_response_code(200);
-echo "Data received. Fields: " . implode(',', array_keys($active_fields)) . ". Entries: " . count($entries) . ".\n";
+header('Content-Type: application/json');
 
 // ---------------------------------------------------------------------------
 // Database: update client metadata
@@ -395,7 +393,6 @@ foreach ($entries as $item) {
 }
 
 mysqli_stmt_close($insert);
-echo $inserted . " values inserted.";
 
 
 // ---------------------------------------------------------------------------
@@ -439,4 +436,20 @@ if ($batch_rejected > 0) {
     }
     mysqli_stmt_close($stmt);
 }
+
+// ---------------------------------------------------------------------------
+// Response body
+// ota_check is true when a manifest file exists for this device ID, signalling
+// the client to call the firmware update endpoint and compare versions there.
+// ---------------------------------------------------------------------------
+$manifest_path = __DIR__ . '/fwupdate/' . $id . '/manifest.json';
+$response = json_encode([
+    'received'  => $batch_received,
+    'inserted'  => $inserted,
+    'rejected'  => $batch_rejected,
+    'ota_check' => file_exists($manifest_path),
+]);
+header('Content-Type: application/json');
+header('Content-Length: ' . strlen($response));
+echo $response;
 ?>

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-01
+
+### Added
+- Remote firmware update (OTA pull): `index.php` returns JSON (`received`, `inserted`, `rejected`, `ota_check`) and sets `ota_check: true` when a manifest file exists for the device ID; the device fetches and flashes the update only then (24 h fallback timer as safety net)
+- `index.php` response changed from plain text to JSON; `Content-Type: application/json` and `Content-Length` headers added (prevents nginx chunked transfer encoding, which corrupted JSON parsing in the firmware)
+- Server-side: `fwupdate/{ID}/manifest.json` (version, filename, sha256, size) and `fwupdate/{ID}/firmware.bin`
+- SHA-256 integrity verification of the downloaded binary before flashing, streamed — no full binary buffered in RAM
+- Post-OTA validation: after a successful flash the device sets an NVS flag before restarting; on the next boot it contacts the backend to confirm the new firmware works — if the backend is unreachable it rolls back to the previous OTA slot via `esp_ota_set_boot_partition()` and restarts
+- 15-minute OTA cooldown after a rollback to prevent flash-rollback loops (log 6020)
+- Log buffer uploaded to backend before OTA restart so no entries are lost on reboot
+- New module `src/ota_pull.cpp` / `src/ota_pull.h`
+- New log codes 6000–6021 for OTA pull lifecycle events
+- "Check Remote FW Update" button now fetches the manifest and shows version info before asking for confirmation; no automatic install without user approval (log 6021)
+
 ## [1.2.6] - 2026-08-01
 
 ### Fixed

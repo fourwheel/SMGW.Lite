@@ -15,7 +15,7 @@ static int logIndex = -1;
 // The first occurrence is always written; subsequent identical codes are
 // dropped until a different code is logged.
 // ---------------------------------------------------------------------------
-static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 3006};
+static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 3006, 6000, 6002};
 static int last_logged_statusCode = -1; // last code actually written to the buffer
 
 void LogBuffer_reset()
@@ -112,6 +112,28 @@ String Log_StatusCodeToString(int statusCode)
   case 8002: return "Cert saved";
   case 8003: return "Error reading cert file";
   case 8004: return "No Cert received";
+  case 6000: return "OTA pull: check started";
+  case 6001: return "OTA pull: manifest — connection failed";
+  case 6002: return "OTA pull: firmware is up to date";
+  case 6003: return "OTA pull: update available, starting download";
+  case 6004: return "OTA pull: Update.begin() failed (check partition table)";
+  case 6005: return "OTA pull: stream write error";
+  case 6006: return "OTA pull: SHA256 mismatch — download aborted";
+  case 6007: return "OTA pull: Update.end() failed";
+  case 6008: return "OTA pull: flash successful — rebooting";
+  case 6009: return "OTA pull: post-OTA validation — contacting backend";
+  case 6010: return "OTA pull: validation successful — firmware confirmed";
+  case 6011: return "OTA pull: validation failed — rolling back";
+  case 6012: return "OTA pull: manifest — server returned non-200 (file missing?)";
+  case 6013: return "OTA pull: manifest — invalid JSON or missing fields";
+  case 6014: return "OTA pull: check triggered by backend hint";
+  case 6015: return "OTA pull: check triggered by 24 h fallback";
+  case 6016: return "OTA pull: skipped — WiFi not connected";
+  case 6017: return "OTA pull: skipped — ota_active flag set";
+  case 6018: return "OTA pull: skipped — backend ID empty";
+  case 6019: return "OTA pull: skipped — backend host empty";
+  case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
+  case 6021: return "OTA pull: check triggered manually";
   }
   if (statusCode < 1000) return "# meter slots to transfer";
   return "Unknown status code";
