@@ -182,7 +182,7 @@ unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
-unsigned long last_telegram_received      = 0; // millis() of last successfully parsed telegram; initialised in setup()
+unsigned long last_telegram_parsed      = 0; // millis() of last successfully parsed telegram; initialised in setup()
 unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
 // unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 
@@ -550,7 +550,7 @@ void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
   LogBuffer_reset();
-  last_telegram_received = millis(); // start watchdog timer from boot
+  last_telegram_parsed = millis(); // start watchdog timer from boot
   Log_AddEntry(1001);
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
@@ -1107,7 +1107,7 @@ void handle_Telegram_receive()
     }
     if (parsed)
     {
-      last_telegram_received = millis(); // reset watchdog
+      last_telegram_parsed = millis(); // reset watchdog
       last_urgent_log_call   = 0;       // restart alert cycle if meter comes back online
       if (!startup_print_done) {
         startup_print_done = true;
@@ -1555,7 +1555,7 @@ void handle_telegram_watchdog()
     return; // 3005 (parse failure) would be redundant — suppress it
   }
 
-  if (millis() - last_telegram_received >= 300000UL)
+  if (millis() - last_telegram_parsed >= 300000UL)
   {
     // Bytes arriving but no valid telegram parsed for 5 min (baud/parity mismatch?).
     if (urgentReady)
@@ -2018,6 +2018,7 @@ void Webserver_HandleSysInfo()
 <div class="btns" style="margin-top:.6rem;">
 <a class="btn" href="PinAssistant">PIN Assistant</a>
 <a class="btn" href="PinAssistantDeluxe">PIN Assistant Deluxe</a>
+<a class="btn btn-s" href="/wifiScan">&#128246; WLAN-Netzwerke</a>
 </div>
 </div>
 
@@ -2180,11 +2181,14 @@ footer a:hover{color:#1a3799;}
 .footer-love{font-size:.78rem;color:#aaa;}
 .wifi-card{background:#fff3cd;border:1px solid #ffc107;border-radius:14px;padding:1rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.6rem;}
 .wifi-card h3{font-size:.92rem;font-weight:700;color:#856404;margin:0;}
-.wifi-card small{font-size:.77rem;color:#856404;opacity:.85;}
+.wifi-scan-btn{display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.75rem 1rem;border-radius:10px;background:#1a3799;color:#fff;font-size:.92rem;font-weight:700;text-decoration:none;text-align:center;}
+.wifi-scan-btn:hover{background:#142b7a;color:#fff;}
+.wifi-or{display:flex;align-items:center;gap:.6rem;font-size:.78rem;color:#856404;opacity:.75;}
+.wifi-or::before,.wifi-or::after{content:'';flex:1;height:1px;background:#ffc107;opacity:.6;}
 .wifi-form{display:flex;flex-direction:column;gap:.5rem;}
 .wifi-form input[type=text],.wifi-form input[type=password]{width:100%;padding:.55rem .75rem;border-radius:8px;border:1px solid #ccc;font-size:.88rem;background:#fff;}
-.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
-.wifi-form button:hover{background:#142b7a;}
+.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#856404;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
+.wifi-form button:hover{background:#6d4f00;}
 </style>
 </head>
 <body>
@@ -2291,7 +2295,8 @@ footer a:hover{color:#1a3799;}
   if (isApMode) {
     s += R"rawliteral(<div class='wifi-card' id='wifi-card'>
 <h3>&#128246; Kein WLAN verbunden &ndash; Netzwerk einrichten</h3>
-<small>Das Ger&auml;t ist im Access-Point-Modus. Gib dein WLAN-Passwort ein, um eine Verbindung herzustellen.</small>
+<a class='wifi-scan-btn' href='/wifiScan'>&#128246; Verf&uuml;gbare WLANs anzeigen</a>
+<div class='wifi-or'><span>oder manuell eingeben</span></div>
 <form class='wifi-form' action='/wifiSetup' method='POST'>
 <input type='text'     name='ssid'     placeholder='WLAN-Name (SSID)'    autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'>
 <input type='password' name='password' placeholder='WLAN-Passwort'       autocomplete='current-password'>

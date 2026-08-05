@@ -162,8 +162,10 @@ void Webserver_UrlConfig()
   server.on("/flash",                Webserver_FlashPulse);
   server.on("/flashlong",            Webserver_FlashLongPulse);
   server.on("/upload", [] { Webserver_HandleCertUpload(); Webclient_loadCertToChar(); });
-  server.on("/wifiSetup",  HTTP_POST,  Webserver_HandleWifiSetup);
-  server.on("/wifiStatus",             Webserver_HandleWifiStatus);
+  server.on("/wifiSetup",       HTTP_POST, Webserver_HandleWifiSetup);
+  server.on("/wifiStatus",                Webserver_HandleWifiStatus);
+  server.on("/wifiScan",                  Webserver_HandleWifiScan);
+  server.on("/wifiScanResults",           Webserver_HandleWifiScanResults);
 
   // Captive portal suppression
   server.on("/hotspot-detect.html",      [] { server.send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); });
@@ -519,4 +521,130 @@ void Webserver_HandleWifiStatus()
   {
     server.send(200, "application/json", "{\"connected\":false}");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_HandleWifiScan — GET /wifiScan: network list page with async poll
+// ---------------------------------------------------------------------------
+void Webserver_HandleWifiScan()
+{
+  WiFi.scanNetworks(true);
+
+  String page;
+  page.reserve(5500);
+  page += R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; WLAN-Netzwerke</title>)rawliteral";
+  page += HTML_STYLE_MODERN;
+  page += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/">&#8592; Zur&uuml;ck</a>
+<div class="card">
+<div class="card-title">Verf&uuml;gbare WLAN-Netzwerke</div>
+<div id="scan-status" style="color:#888;font-size:.9rem;margin-bottom:.8rem;">Suche nach Netzwerken&hellip;</div>
+<div id="networks"></div>
+<div class="btns" id="rescan-row" style="display:none;margin-top:.6rem;">
+<button class="btn btn-s" onclick="doRescan()">&#128260; Erneut suchen</button>
+</div>
+</div>
+<script>
+var t;
+function bars(r){
+  var s=(r>=-55?5:r>=-65?4:r>=-75?3:r>=-85?2:1);
+  var col=(r>=-65?'#2e7d32':r>=-80?'#f9a825':'#c62828');
+  var b='';
+  for(var i=0;i<5;i++)b+='<span style="opacity:'+(i<s?'1':'.18')+'">&#9646;</span>';
+  return'<span style="color:'+col+';letter-spacing:-1px;font-size:1.05rem;">'+b+'</span>';
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toggle(i){
+  var f=document.getElementById('f'+i);
+  if(!f)return;
+  var vis=f.style.display!=='none';
+  f.style.display=vis?'none':'block';
+  if(!vis){var p=document.getElementById('pw'+i);if(p)p.focus();}
+}
+function render(nets){
+  if(!nets||nets.length===0){
+    document.getElementById('scan-status').textContent='Keine Netzwerke gefunden.';
+    document.getElementById('rescan-row').style.display='flex';
+    return;
+  }
+  document.getElementById('scan-status').textContent=nets.length+' Netzwerk'+(nets.length!==1?'e':'')+' gefunden.';
+  var h='';
+  for(var i=0;i<nets.length;i++){
+    var n=nets[i],se=esc(n.ssid);
+    h+='<div style="border:1px solid #dde3f0;border-radius:8px;margin-bottom:.45rem;overflow:hidden;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;padding:.55rem .8rem;background:#f5f7fb;">'
+      +'<span style="font-weight:600;font-size:.93rem;">'+(n.enc?'&#128274;&thinsp;':'&#128275;&thinsp;')+se+'</span>'
+      +'<span style="display:flex;align-items:center;gap:.5rem;">'+bars(n.rssi)
+      +'<button class="btn btn-s" style="font-size:.8rem;padding:.22rem .6rem;min-height:0;" onclick="toggle('+i+')">Verbinden &#9660;</button>'
+      +'</span></div>'
+      +'<div id="f'+i+'" style="display:none;padding:.65rem .8rem;background:#fff;border-top:1px solid #eee;">'
+      +'<form action="/wifiSetup" method="POST">'
+      +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">SSID</label>'
+      +'<input name="ssid" type="text" value="'+se+'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.45rem;">'
+      +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">Passwort</label>'
+      +'<input id="pw'+i+'" name="password" type="password" placeholder="WLAN-Passwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.55rem;">'
+      +'<div class="btns"><button class="btn" type="submit">Verbinden</button>'
+      +'<button class="btn btn-s" type="button" onclick="toggle('+i+')">Abbrechen</button></div>'
+      +'</form></div></div>';
+  }
+  document.getElementById('networks').innerHTML=h;
+  document.getElementById('rescan-row').style.display='flex';
+}
+function doRescan(){
+  document.getElementById('scan-status').textContent='Suche nach Netzwerken…';
+  document.getElementById('networks').innerHTML='';
+  document.getElementById('rescan-row').style.display='none';
+  clearInterval(t);
+  fetch('/wifiScanResults?rescan=1').then(function(){t=setInterval(poll,800);});
+}
+function poll(){
+  fetch('/wifiScanResults').then(function(r){return r.json();}).then(function(d){
+    if(d.state==='scanning')return;
+    clearInterval(t);
+    render(d.networks);
+  }).catch(function(){});
+}
+t=setInterval(poll,800);
+</script>
+</body></html>)rawliteral";
+  server.send(200, "text/html", page);
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_HandleWifiScanResults — GET /wifiScanResults: JSON scan results
+// ---------------------------------------------------------------------------
+void Webserver_HandleWifiScanResults()
+{
+  if (server.hasArg("rescan")) {
+    WiFi.scanNetworks(true);
+    server.send(200, "application/json", "{\"state\":\"scanning\"}");
+    return;
+  }
+
+  int n = WiFi.scanComplete();
+  if (n < 0) {
+    if (n == WIFI_SCAN_FAILED) WiFi.scanNetworks(true);
+    server.send(200, "application/json", "{\"state\":\"scanning\"}");
+    return;
+  }
+
+  String json = "{\"state\":\"done\",\"networks\":[";
+  for (int i = 0; i < n; i++) {
+    if (i > 0) json += ',';
+    String ssid = WiFi.SSID(i);
+    ssid.replace("\\", "\\\\");
+    ssid.replace("\"", "\\\"");
+    json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
+         + ",\"enc\":" + (WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + "}";
+  }
+  json += "]}";
+  WiFi.scanDelete();
+  server.send(200, "application/json", json);
 }
