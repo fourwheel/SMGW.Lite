@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-05
+
+### Added
+- WiFi network scan page (`/wifiScan`): lists available networks with signal strength bars and encryption indicator; selecting a network expands an inline form with pre-filled SSID and password field that POSTs to `/wifiSetup`
+- `/wifiScanResults` JSON endpoint for async scan polling (returns `{"state":"scanning"}` while running, then `{"state":"done","networks":[...]}`)
+- Link to `/wifiScan` added to the AP-mode WiFi setup card on the home page
+- Button "WLAN-Netzwerke" added to the Helpers section of the sysinfo page (`/sysinfo`)
+
 ## [1.3.0] - 2026-08-01
 
 ### Added
