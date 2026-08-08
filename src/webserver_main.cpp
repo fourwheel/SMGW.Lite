@@ -329,7 +329,7 @@ poll();
   // OTA update handler
   server.on("/update", HTTP_GET, []() {
     String page;
-    page.reserve(1200);
+    page.reserve(2600);
     page += R"rawliteral(<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -343,43 +343,106 @@ poll();
 <a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
 <div class="card">
   <div class="card-title">Firmware Update</div>
-  <p style="font-size:.84rem;color:#444;margin-bottom:.8rem;">W&auml;hle eine <code>.bin</code>-Datei aus und klicke auf &bdquo;Update starten&ldquo;. Das Ger&auml;t startet nach dem Update automatisch neu.</p>
-  <form method="POST" action="/update" enctype="multipart/form-data">
-    <input type="file" name="update" accept=".bin" style="font-size:.85rem;margin-bottom:.8rem;display:block;width:100%;">
-    <div class="btns">
-      <button class="btn" type="submit">Update starten</button>
-      <a class="btn btn-s" href="/sysinfo">Abbrechen</a>
+  <p class="hint" id="fw-hint">W&auml;hle eine <code>.bin</code>-Datei aus und klicke auf &bdquo;Update starten&ldquo;. Das Ger&auml;t startet nach dem Update automatisch neu.</p>
+  <input type="file" id="fw-file" accept=".bin" style="font-size:.85rem;margin:.8rem 0;display:block;width:100%;">
+  <div class="btns">
+    <button class="btn" id="fw-btn" onclick="fwStart()">Update starten</button>
+    <a class="btn btn-s" id="fw-cancel" href="/sysinfo">Abbrechen</a>
+  </div>
+  <div id="fw-status" style="display:none;margin-top:1rem;">
+    <div style="background:#f0f2f7;border-radius:8px;height:10px;overflow:hidden;margin-bottom:.5rem;">
+      <div id="fw-bar" style="background:#1a3799;height:100%;width:0%;transition:width .2s;"></div>
     </div>
-  </form>
+    <p id="fw-msg" style="font-size:.85rem;font-weight:600;"></p>
+  </div>
 </div>
+<script>
+function fwSetBusy(busy){
+  document.getElementById('fw-btn').disabled=busy;
+  document.getElementById('fw-file').disabled=busy;
+}
+function fwStart(){
+  var f=document.getElementById('fw-file').files[0];
+  if(!f){alert('Bitte zuerst eine .bin-Datei auswählen.');return;}
+  fwSetBusy(true);
+  document.getElementById('fw-status').style.display='block';
+  var bar=document.getElementById('fw-bar'), msg=document.getElementById('fw-msg');
+  msg.className=''; msg.textContent='Hochladen … 0%';
+  var fd=new FormData(); fd.append('update', f);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/update',true);
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var pct=Math.round(e.loaded/e.total*100);
+      bar.style.width=pct+'%';
+      msg.textContent='Hochladen … '+pct+'%';
+    }
+  };
+  xhr.onload=function(){
+    bar.style.width='100%';
+    if(xhr.status===200){
+      msg.className='ok';
+      msg.textContent='Update erfolgreich – Gerät startet neu …';
+      fwWaitForReboot();
+    } else {
+      msg.className='fail';
+      msg.textContent='Update fehlgeschlagen: '+(xhr.responseText||('HTTP '+xhr.status));
+      fwSetBusy(false);
+    }
+  };
+  xhr.onerror=function(){
+    // The connection can drop while the response is in flight if the
+    // device restarts a moment too early - a successful flash is more
+    // likely than a network fault, so treat it as tentative success.
+    bar.style.width='100%';
+    msg.className='ok';
+    msg.textContent='Verbindung unterbrochen – Gerät startet vermutlich neu …';
+    fwWaitForReboot();
+  };
+  xhr.send(fd);
+}
+var fwAttempt=0;
+function fwWaitForReboot(){
+  document.getElementById('fw-cancel').style.display='none';
+  document.getElementById('fw-msg').textContent='Warte auf Geräteneustart …';
+  fwAttempt=0;
+  setTimeout(fwPollReboot,15000);
+}
+function fwPollReboot(){
+  var msg=document.getElementById('fw-msg');
+  fwAttempt++;
+  fetch('/sysinfo',{cache:'no-store'}).then(function(r){
+    if(!r.ok) throw new Error();
+    msg.textContent='Gerät ist wieder online – Weiterleitung …';
+    setTimeout(function(){window.location.href='/sysinfo';},800);
+  }).catch(function(){
+    if(fwAttempt<15){
+      msg.textContent='Warte auf Neustart … (Versuch '+fwAttempt+'/15)';
+      setTimeout(fwPollReboot,2000);
+    } else {
+      msg.className='fail';
+      msg.textContent='Gerät antwortet nicht. Bitte Status manuell prüfen (z.B. IP im Router).';
+    }
+  });
+}
+</script>
 </body></html>)rawliteral";
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", page);
   });
   server.on("/update", HTTP_POST, []() {
-    String result = Update.hasError() ? "Update fehlgeschlagen." : "Update erfolgreich &ndash; Neustart&hellip;";
-    String page;
-    page.reserve(800);
-    page += R"rawliteral(<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SmartMeterLite &ndash; Update</title>)rawliteral";
-    page += HTML_STYLE_MODERN;
-    page += R"rawliteral(</head>
-<body>
-<div class="logo">&#9889; SmartMeterLite</div>
-<div class="card">
-  <div class="card-title">Firmware Update</div>
-  <p style="font-size:.95rem;font-weight:600;color:#1a1a1a;">)rawliteral";
-    page += result;
-    page += R"rawliteral(</p>
-</div>
-</body></html>)rawliteral";
+    bool ok = !Update.hasError();
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", page);
-    ESP.restart();
+    if (ok) {
+      server.send(200, "text/plain", "OK");
+    } else {
+      server.send(500, "text/plain", Update.errorString());
+    }
+    // Give the TCP stack a moment to flush the response before the reboot
+    // tears down the connection, otherwise the client never sees the result.
+    server.client().flush();
+    delay(300);
+    if (ok) ESP.restart();
   }, []() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
@@ -401,6 +464,7 @@ void Webserver_HandleWifiSetup()
 {
   String ssid     = server.arg("ssid");
   String password = server.arg("password");
+  int    channel  = server.hasArg("channel") ? server.arg("channel").toInt() : 0;
 
   ssid.trim();
 
@@ -420,9 +484,16 @@ void Webserver_HandleWifiSetup()
   DLOGLN("WiFi-Setup: credentials saved, starting direct connection attempt.");
 
   iotWebConf.forceApMode(true);
-  WiFi.begin(ssid.c_str(), password.c_str());
-  g_wifiSetupPending  = true;
-  g_apStopAt          = 0;
+  // Passing the known channel (from a prior /wifiScan) skips the multi-channel
+  // scan that WiFi.begin() would otherwise do to locate the SSID - that scan
+  // hops the shared AP+STA radio across channels and briefly drops the AP the
+  // client (phone/laptop) is connected to. Falls back to auto-scan (channel 0)
+  // for the manual-entry form on the home page, which doesn't know the channel.
+  if (channel > 0) WiFi.begin(ssid.c_str(), password.c_str(), channel);
+  else              WiFi.begin(ssid.c_str(), password.c_str());
+  g_wifiSetupPending   = true;
+  g_wifiSetupStartedAt = millis();
+  g_apStopAt           = 0;
 
   String page = R"rawliteral(<!DOCTYPE html>
 <html lang="de">
@@ -440,7 +511,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .msg{font-size:.95rem;color:#444;}
 .ssid{font-weight:700;color:#1a3799;}
 .hint{font-size:.82rem;color:#888;line-height:1.5;}
-.err{color:#c0392b;font-size:.88rem;display:none;}
+.err{color:#c0392b;font-size:.88rem;display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
 .result{display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
 .ip-box{background:#f0f2f7;border-radius:10px;padding:.9rem 1.2rem;font-size:1.05rem;color:#333;letter-spacing:.04em;}
 .ip-last{font-weight:800;color:#1a3799;font-size:1.2rem;}
@@ -467,10 +538,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     </ol>
     <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>
   </div>
-  <p class="err" id="err">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+  <div class="err" id="err">
+    <p id="err-msg">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+    <a class="open-btn" href="/">&#8634; Erneut versuchen</a>
+  </div>
 </div>
 <script>
 var attempts = 0, max = 20;
+function showError(msg) {
+  document.getElementById('connecting').style.display = 'none';
+  if (msg) document.getElementById('err-msg').textContent = msg;
+  document.getElementById('err').style.display = 'flex';
+}
 function poll() {
   fetch('/wifiStatus')
     .then(function(r){ return r.json(); })
@@ -485,11 +564,12 @@ function poll() {
         document.getElementById('open-btn').href = url;
         document.getElementById('connecting').style.display = 'none';
         document.getElementById('result').style.display     = 'flex';
+      } else if (d.failed) {
+        showError();
       } else if (++attempts < max) {
         setTimeout(poll, 2000);
       } else {
-        document.getElementById('connecting').style.display = 'none';
-        document.getElementById('err').style.display        = 'block';
+        showError();
       }
     })
     .catch(function(){ if (++attempts < max) setTimeout(poll, 2000); });
@@ -506,7 +586,9 @@ setTimeout(poll, 2000);
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiStatus()
 {
-  if (WiFi.status() == WL_CONNECTED)
+  wl_status_t status = WiFi.status();
+
+  if (status == WL_CONNECTED)
   {
     String ip = WiFi.localIP().toString();
     if (g_wifiSetupPending)
@@ -516,11 +598,26 @@ void Webserver_HandleWifiStatus()
       DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
     }
     server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
+    return;
   }
-  else
+
+  // Definitive failure (wrong password / SSID out of range) or a connection
+  // attempt that never resolves — stop the STA radio from silently retrying
+  // in the background so the AP stays responsive, and let the UI offer an
+  // immediate retry instead of blindly polling for up to 40 s.
+  bool definitiveFailure = status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL;
+  bool timedOut          = g_wifiSetupPending && (millis() - g_wifiSetupStartedAt > 20000);
+
+  if (g_wifiSetupPending && (definitiveFailure || timedOut))
   {
-    server.send(200, "application/json", "{\"connected\":false}");
+    g_wifiSetupPending = false;
+    WiFi.disconnect();
+    DLOGLN("WiFi-Setup: connection attempt failed, freeing radio for AP.");
+    server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
+    return;
   }
+
+  server.send(200, "application/json", "{\"connected\":false}");
 }
 
 // ---------------------------------------------------------------------------
@@ -586,8 +683,9 @@ function render(nets){
       +'</span></div>'
       +'<div id="f'+i+'" style="display:none;padding:.65rem .8rem;background:#fff;border-top:1px solid #eee;">'
       +'<form action="/wifiSetup" method="POST">'
+      +'<input type="hidden" name="channel" id="ch'+i+'" value="'+n.channel+'">'
       +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">SSID</label>'
-      +'<input name="ssid" type="text" value="'+se+'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.45rem;">'
+      +'<input name="ssid" type="text" value="'+se+'" oninput="document.getElementById(\'ch'+i+'\').value=\'\'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.45rem;">'
       +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">Passwort</label>'
       +'<input id="pw'+i+'" name="password" type="password" placeholder="WLAN-Passwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.55rem;">'
       +'<div class="btns"><button class="btn" type="submit">Verbinden</button>'
@@ -642,6 +740,7 @@ void Webserver_HandleWifiScanResults()
     ssid.replace("\\", "\\\\");
     ssid.replace("\"", "\\\"");
     json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
+         + ",\"channel\":" + String(WiFi.channel(i))
          + ",\"enc\":" + (WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + "}";
   }
   json += "]}";

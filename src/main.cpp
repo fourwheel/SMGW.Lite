@@ -104,6 +104,7 @@ int   cached_backend_call_minute    = 2;
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
+unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() was issued from /wifiSetup
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 volatile bool ota_active          = false; // set during OTA to block new backend calls

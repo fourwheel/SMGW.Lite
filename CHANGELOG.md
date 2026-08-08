@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-08-08
+
+### Changed
+- Manual firmware update page (`/update`): file upload now goes through `XMLHttpRequest` with a live progress bar instead of a plain form POST, so large `.bin` uploads no longer look frozen
+- After a successful flash the page shows the result inline, waits 15s, then polls `/sysinfo` every 2s (up to 15 attempts) and auto-redirects once the device is back online, instead of leaving the user without feedback after the reboot
+- Status text now switches to "Warte auf Geräteneustart …" once the 15s wait begins, instead of leaving the upload-success message on screen until it jumps straight to the redirect message
+- `POST /update` response is now sent, flushed, and given a short delay before `ESP.restart()` is called, so the client reliably receives the success/error status instead of the connection sometimes dropping mid-response
+- WiFi setup (`/wifiSetup` "connecting" page): a wrong password or out-of-range SSID is now detected within seconds instead of only after a blind 40s poll timeout &ndash; `GET /wifiStatus` reports a definitive `failed:true` as soon as `WiFi.status()` returns `WL_CONNECT_FAILED`/`WL_NO_SSID_AVAIL`, or after a 20s cap if the status never resolves
+- On detected failure the firmware calls `WiFi.disconnect()` to stop the STA radio from silently retrying in the background, so the AP stays responsive instead of appearing to hang for ~30s
+- The failure screen now shows an actual "Erneut versuchen" button back to `/` instead of just static text with no way to retry
+- `/wifiScan` results now include the network's channel; selecting a network and submitting `/wifiSetup` passes it along so `WiFi.begin()` can connect directly on that channel instead of scanning all channels &ndash; the multi-channel scan was hopping the shared AP+STA radio and briefly dropping the client's connection to the device's own AP while it searched for the target SSID (channel is cleared again if the SSID field is hand-edited, falling back to auto-scan)
+
 ## [1.3.2] - 2026-08-13
 
 ### Fixed
