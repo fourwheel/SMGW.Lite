@@ -31,6 +31,7 @@ extern String         meter_model;
 // WiFi / AP state
 extern bool          wifi_connected;
 extern bool          g_wifiSetupPending;
+extern bool          g_wifiSetupFailed;
 extern unsigned long g_wifiSetupStartedAt;
 extern unsigned long g_apStopAt;
 extern bool          redirect_to_sysinfo;
