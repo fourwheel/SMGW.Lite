@@ -1489,7 +1489,12 @@ void handle_wifi_setup_lifecycle()
   if (!g_wifiSetupPending) { failSince = 0; return; }
 
   wl_status_t status = WiFi.status();
-  if (status == WL_CONNECTED) { failSince = 0; return; } // handled by /wifiStatus once the client asks
+  if (status == WL_CONNECTED)
+  {
+    failSince = 0;
+    Webserver_CheckWifiSetupFallback(); // handled by /wifiStatus normally; this is the fallback if the client never polls again
+    return;
+  }
 
   bool definitiveFailure = status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL;
   if (definitiveFailure) {

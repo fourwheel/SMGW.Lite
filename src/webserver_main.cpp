@@ -607,10 +607,48 @@ setTimeout(poll, 2000);
 }
 
 // ---------------------------------------------------------------------------
+// Webserver_ConfirmWifiSetupSuccess — commit a confirmed-working /wifiSetup
+// attempt: persist the pending credentials to flash and clear the setup
+// state. Called from the success path of Webserver_HandleWifiStatus() once
+// the client polls again after connecting, and from
+// Webserver_CheckWifiSetupFallback() if the client never polls again after
+// the device actually connected (closed tab, backgrounded app, etc.).
+// ---------------------------------------------------------------------------
+void Webserver_ConfirmWifiSetupSuccess()
+{
+  g_wifiSetupPending = false;
+  g_apStopAt = millis() + 2000;
+
+  // Only now that the credentials are confirmed to work are they written
+  // to flash — see the comment in Webserver_HandleWifiSetup().
+  strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     g_pendingWifiSsid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
+  strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, g_pendingWifiPassword.c_str(), IOTWEBCONF_WORD_LEN - 1);
+  iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
+  iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
+  iotWebConf.saveConfig();
+  g_pendingWifiPassword = "";
+
+  DLOGLN("WiFi-Setup: connected, credentials saved, stopping AP in 2 s.");
+}
+
+// ---------------------------------------------------------------------------
 // Webserver_HandleWifiStatus — GET /wifiStatus: JSON with connected + IP
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiStatus()
 {
+  // g_wifiSetupFailed is a sticky verdict for the current attempt, set either
+  // here or by Webserver_CheckWifiSetupFallback() from the main loop. It must
+  // be checked before WiFi.status(), not just in the not-connected path below:
+  // the fallback-to-old-network case leaves WiFi.status() == WL_CONNECTED
+  // (the old network still works), so without this early check a poll
+  // arriving after the loop-driven fallback already ran would fall through
+  // to the WL_CONNECTED branch below and wrongly report success.
+  if (g_wifiSetupFailed)
+  {
+    server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
+    return;
+  }
+
   if (WiFi.status() == WL_CONNECTED)
   {
     // WL_CONNECTED alone isn't proof that THIS attempt succeeded: if the new
@@ -629,37 +667,57 @@ void Webserver_HandleWifiStatus()
     }
 
     String ip = WiFi.localIP().toString();
-    if (g_wifiSetupPending)
-    {
-      g_wifiSetupPending = false;
-      g_apStopAt = millis() + 2000;
-
-      // Only now that the credentials are confirmed to work are they written
-      // to flash — see the comment in Webserver_HandleWifiSetup().
-      strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     g_pendingWifiSsid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
-      strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, g_pendingWifiPassword.c_str(), IOTWEBCONF_WORD_LEN - 1);
-      iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
-      iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
-      iotWebConf.saveConfig();
-      g_pendingWifiPassword = "";
-
-      DLOGLN("WiFi-Setup: connected, credentials saved, stopping AP in 2 s.");
-    }
+    if (g_wifiSetupPending) Webserver_ConfirmWifiSetupSuccess();
     server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
     return;
   }
 
-  // The actual failure detection + WiFi.disconnect() happens unconditionally
-  // in handle_wifi_setup_watchdog() (main loop), not here — this request may
-  // itself be delayed while the STA connection attempt is starving the AP's
-  // radio time, so it must not be the only place that aborts the attempt.
-  if (g_wifiSetupFailed)
-  {
-    server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
-    return;
-  }
-
+  // Not connected and not (yet) marked failed — the actual failure detection
+  // + WiFi.disconnect() happens unconditionally in handle_wifi_setup_lifecycle()
+  // (main loop), not here — this request may itself be delayed while the STA
+  // connection attempt is starving the AP's radio time, so it must not be the
+  // only place that aborts the attempt.
   server.send(200, "application/json", "{\"connected\":false}");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_CheckWifiSetupFallback — called every loop() iteration (via
+// handle_wifi_setup_lifecycle()) while a /wifiSetup attempt is connected but
+// not yet confirmed.
+//
+// The normal path is Webserver_HandleWifiStatus(): the browser polls
+// /wifiStatus, sees the connection, and that request persists the
+// credentials / clears the pending state. If the client never polls again
+// after the device actually connects — tab closed, app backgrounded, browser
+// navigated away — that confirmation never happens. Without this fallback
+// the new credentials would then silently never reach flash and be lost on
+// the next reboot, even though the device is connected right now; and the
+// forced AP would keep running alongside the STA connection forever, since
+// nothing else clears g_wifiSetupPending in this case (IotWebConf's own AP
+// timeout doesn't help either — forceApMode(true) makes it stay in AP mode
+// unconditionally).
+//
+// Uses the same SSID check as Webserver_HandleWifiStatus() so a connection
+// that fell back to the old saved network is never mistaken for success.
+// ---------------------------------------------------------------------------
+void Webserver_CheckWifiSetupFallback()
+{
+  if (!g_wifiSetupPending || WiFi.status() != WL_CONNECTED) return;
+  if (millis() - g_wifiSetupStartedAt < 60000) return; // give /wifiStatus a fair chance first
+
+  if (WiFi.SSID() == g_pendingWifiSsid)
+  {
+    DLOGLN("WiFi-Setup: connected but client never confirmed - saving credentials now.");
+    Webserver_ConfirmWifiSetupSuccess();
+  }
+  else
+  {
+    // Connected, but to the old fallback network, not the requested one -
+    // nothing new to persist, just stop blocking the pending state forever.
+    g_wifiSetupPending = false;
+    g_wifiSetupFailed  = true;
+    DLOGLN("WiFi-Setup: connected to fallback network, client never confirmed - marking failed.");
+  }
 }
 
 // ---------------------------------------------------------------------------
