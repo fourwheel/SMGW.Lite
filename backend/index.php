@@ -45,7 +45,7 @@ if (isset($_GET['backend_test']) && $_GET['backend_test'] === "true") {
 $known_fields = [
     'ts'    => 4,   // Unix timestamp (uint32_t)
     'm180'  => 4,   // OBIS 1.8.0 consumption counter (uint32_t, unit: 0.1 Wh)
-    'temp'  => 4,   // temperature * 100 (uint32_t, e.g. 2150 = 21.50 degC)
+    'temp'  => 4,   // temperature * 100 (int32_t, signed, e.g. 2150 = 21.50 degC, -523 = -5.23 degC)
     'solar' => 4,   // PV / MyStrom energy counter (uint32_t)
     'm280'  => 4,   // OBIS 2.8.0 feed-in counter (uint32_t, unit: 0.1 Wh)
 ];
@@ -137,7 +137,18 @@ for ($i = 0; $i < $dataCount; $i++) {
 
     foreach ($active_fields as $field_name => $field_size) {
         // "V" = unsigned 32-bit little-endian, matching uint32_t on the ESP32
-        $parsed[$field_name] = unpack("V", substr($rawData, $o, $field_size))[1];
+        $raw = unpack("V", substr($rawData, $o, $field_size))[1];
+
+        // 'temp' is signed on the firmware (int32_t, negative for sub-zero
+        // readings). PHP has no portable signed-LE unpack code ("l" depends
+        // on machine byte order), so convert manually via two's complement.
+        // This works for firmware sent before and after the int32_t struct
+        // fix, since the wire bytes are identical either way.
+        if ($field_name === 'temp' && $raw >= 0x80000000) {
+            $raw -= 0x100000000;
+        }
+
+        $parsed[$field_name] = $raw;
         $o += $field_size;
     }
 

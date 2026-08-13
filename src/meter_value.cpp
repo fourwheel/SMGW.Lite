@@ -57,7 +57,7 @@ String MeterValue_BuildFieldsParam()
 // Buffer read / write
 // ---------------------------------------------------------------------------
 void MeterValue_write(int index, uint32_t ts, uint32_t m180,
-                      uint32_t temp, uint32_t solar, uint32_t m280)
+                      int32_t temp, uint32_t solar, uint32_t m280)
 {
   if (!MeterValueBuffer) return;
   size_t o = MeterValue_Offset(index);
@@ -69,7 +69,7 @@ void MeterValue_write(int index, uint32_t ts, uint32_t m180,
 }
 
 void MeterValue_read(int index, uint32_t &ts, uint32_t &m180,
-                     uint32_t &temp, uint32_t &solar, uint32_t &m280)
+                     int32_t &temp, uint32_t &solar, uint32_t &m280)
 {
   ts = 0; m180 = 0; temp = 0; solar = 0; m280 = 0;
   if (!MeterValueBuffer) return;
@@ -83,7 +83,8 @@ void MeterValue_read(int index, uint32_t &ts, uint32_t &m180,
 
 bool MeterValue_slot_empty(int index)
 {
-  uint32_t ts, m180, temp, solar, m280;
+  uint32_t ts, m180, solar, m280;
+  int32_t  temp;
   MeterValue_read(index, ts, m180, temp, solar, m280);
   return (ts == 0 && m180 == 0);
 }
@@ -167,7 +168,7 @@ void MeterValue_init_Buffer()
 void resetMeterValue(MeterValue &val)
 {
   int32_t  saved_solar = val.solar;
-  uint32_t saved_temp  = val.temperature;
+  int32_t  saved_temp  = val.temperature;
   val = MeterValue{};
   if (mystrom_PV_object.isChecked()) val.solar = saved_solar;
   val.temperature = saved_temp;

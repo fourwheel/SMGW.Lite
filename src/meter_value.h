@@ -8,7 +8,7 @@
 struct MeterValue {
   uint32_t timestamp;        // Unix epoch, seconds
   uint32_t meter_value_180;  // OBIS 1.8.0 consumption counter, unit: 0.1 Wh
-  uint32_t temperature;      // temperature * 100 (e.g. 2150 = 21.50 degC)
+  int32_t  temperature;      // temperature * 100, signed (e.g. 2150 = 21.50 degC, -523 = -5.23 degC)
   uint32_t solar;            // MyStrom / solar energy counter
   uint32_t meter_value_280;  // OBIS 2.8.0 feed-in counter, unit: 0.1 Wh
   uint32_t power_import;     // OBIS 1.7.0 import power, unit: W
@@ -49,9 +49,9 @@ static const size_t  BUFFER_REFERENCE_BYTES = 16384;
 size_t MeterValue_EntrySize();
 String MeterValue_BuildFieldsParam();
 void   MeterValue_write(int index, uint32_t ts, uint32_t m180,
-                        uint32_t temp, uint32_t solar, uint32_t m280);
+                        int32_t temp, uint32_t solar, uint32_t m280);
 void   MeterValue_read(int index, uint32_t &ts, uint32_t &m180,
-                       uint32_t &temp, uint32_t &solar, uint32_t &m280);
+                       int32_t &temp, uint32_t &solar, uint32_t &m280);
 bool   MeterValue_slot_empty(int index);
 int    MeterValue_slots_from_budget(size_t budgetBytes);
 int    MeterValue_calc_max_slots_for_display();

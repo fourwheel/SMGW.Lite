@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-08-13
+
+### Fixed
+- Negative temperature readings (below 0 degC) were stored as huge near-`UINT32_MAX` values instead of negative ones. `MeterValue.temperature` was declared `uint32_t` even though sub-zero readings are negative, so assigning a negative `int` wrapped around. Changed the field to `int32_t` throughout the firmware (ring-buffer struct, `MeterValue_write`/`MeterValue_read`, local web UI table). The backend's binary parser also unpacked the `temp` field as unsigned; it now converts it to signed via two's complement. The on-wire byte layout is unchanged, so the backend fix is compatible with firmware already deployed in the field.
+
 ## [1.3.1] - 2026-08-05
 
 ### Added

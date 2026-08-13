@@ -331,7 +331,8 @@ void Webserver_ShowMeterValues()
   bool first = true;
   for (int m = 0; m < Meter_Value_Buffer_Size; m++)
   {
-    uint32_t ts, m180, temp, solar, m280;
+    uint32_t ts, m180, solar, m280;
+    int32_t  temp;
     MeterValue_read(m, ts, m180, temp, solar, m280);
     if (ts == 0 && m180 == 0) {
       if (first) { first = false; server.sendContent("<tr><td>-----</td></tr>"); }
