@@ -104,7 +104,7 @@ int   cached_backend_call_minute    = 2;
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
-bool          g_wifiSetupFailed   = false; // set by handle_wifi_setup_watchdog(), read by /wifiStatus
+bool          g_wifiSetupFailed   = false; // set by handle_wifi_setup_lifecycle(), read by /wifiStatus
 unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() was issued from /wifiSetup
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
@@ -140,7 +140,7 @@ unsigned long last_remote_meter_value = 0;
 void handle_call_backend();
 void handle_remote_ota();
 void handle_check_wifi_connection();
-void handle_wifi_setup_watchdog();
+void handle_wifi_setup_lifecycle();
 void handle_MeterValue_trigger();
 void handle_telegram_watchdog();
 void handle_MeterValue_store();
@@ -1461,8 +1461,10 @@ bool MeterValue_store(bool override)
 }
 
 // ---------------------------------------------------------------------------
-// handle_wifi_setup_watchdog — abort a failed /wifiSetup connection attempt
-// from the main loop, not just when the browser happens to poll /wifiStatus.
+// handle_wifi_setup_lifecycle — owns both ends of an in-progress /wifiSetup
+// connection attempt: dropping the AP a couple of seconds after a confirmed
+// success, and aborting a failed attempt from the main loop rather than only
+// when the browser happens to poll /wifiStatus.
 //
 // ESP32 has a single radio shared between AP and STA, which must run on the
 // same channel. While the STA is actively negotiating (and, with a wrong
@@ -1473,8 +1475,15 @@ bool MeterValue_store(bool override)
 // in the main loop means the retrying STA connection gets aborted as soon as
 // possible, regardless of whether the config portal is currently reachable.
 // ---------------------------------------------------------------------------
-void handle_wifi_setup_watchdog()
+void handle_wifi_setup_lifecycle()
 {
+  if (g_apStopAt > 0 && millis() >= g_apStopAt)
+  {
+    g_apStopAt = 0;
+    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
+    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
+  }
+
   static unsigned long failSince = 0;
 
   if (!g_wifiSetupPending) { failSince = 0; return; }
@@ -1841,17 +1850,10 @@ void loop()
 {
   iotWebConf.doLoop();
 
-  if (g_apStopAt > 0 && millis() >= g_apStopAt)
-  {
-    g_apStopAt = 0;
-    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
-    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
-  }
-
   ArduinoOTA.handle();
   handle_temperature();
   // handle_Telegram_receive();  // handled by dedicated FreeRTOS task
-  handle_wifi_setup_watchdog();
+  handle_wifi_setup_lifecycle();
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
