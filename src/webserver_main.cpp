@@ -452,12 +452,12 @@ function fwPollReboot(){
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       Serial.printf("Update Start: %s\n", upload.filename.c_str());
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { Update.printError(Serial); Log_AddEntry(6101); }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { Update.printError(Serial); Log_AddEntry(6102); }
     } else if (upload.status == UPLOAD_FILE_END) {
-      if (Update.end(true)) Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-      else Update.printError(Serial);
+      if (Update.end(true)) { Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); Log_AddEntry(6104); }
+      else { Update.printError(Serial); Log_AddEntry(6103); }
     }
   });
 }
@@ -628,7 +628,19 @@ void Webserver_ConfirmWifiSetupSuccess()
   iotWebConf.saveConfig();
   g_pendingWifiPassword = "";
 
+  Log_AddEntry(7004);
   DLOGLN("WiFi-Setup: connected, credentials saved, stopping AP in 2 s.");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_ClearPendingWifiCredentials — drop a no-longer-needed candidate
+// password from RAM. Called from every /wifiSetup failure path (never on
+// success — Webserver_ConfirmWifiSetupSuccess() clears it itself after use).
+// ---------------------------------------------------------------------------
+void Webserver_ClearPendingWifiCredentials()
+{
+  g_pendingWifiSsid     = "";
+  g_pendingWifiPassword = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -639,10 +651,11 @@ void Webserver_HandleWifiStatus()
   // g_wifiSetupFailed is a sticky verdict for the current attempt, set either
   // here or by Webserver_CheckWifiSetupFallback() from the main loop. It must
   // be checked before WiFi.status(), not just in the not-connected path below:
-  // the fallback-to-old-network case leaves WiFi.status() == WL_CONNECTED
-  // (the old network still works), so without this early check a poll
-  // arriving after the loop-driven fallback already ran would fall through
-  // to the WL_CONNECTED branch below and wrongly report success.
+  // the case where the STA falls back to the previously-saved network leaves
+  // WiFi.status() == WL_CONNECTED (the old network still works), so without
+  // this early check a poll arriving after the loop-driven fallback check
+  // already ran would fall through to the WL_CONNECTED branch below and
+  // wrongly report success.
   if (g_wifiSetupFailed)
   {
     server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
@@ -661,7 +674,9 @@ void Webserver_HandleWifiStatus()
     {
       g_wifiSetupPending = false;
       g_wifiSetupFailed  = true;
-      DLOGLN("WiFi-Setup: connected to a different network than requested (fallback to saved config) - treating as failed.");
+      Log_AddEntry(7003);
+      DLOGLN("WiFi-Setup: connected to a different network than requested (previously-saved config) - treating as failed.");
+      Webserver_ClearPendingWifiCredentials();
       server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
       return;
     }
@@ -712,11 +727,13 @@ void Webserver_CheckWifiSetupFallback()
   }
   else
   {
-    // Connected, but to the old fallback network, not the requested one -
-    // nothing new to persist, just stop blocking the pending state forever.
+    // Connected, but to the old, previously-saved network, not the requested
+    // one - nothing new to persist, just stop blocking the pending state forever.
     g_wifiSetupPending = false;
     g_wifiSetupFailed  = true;
-    DLOGLN("WiFi-Setup: connected to fallback network, client never confirmed - marking failed.");
+    Log_AddEntry(7003);
+    DLOGLN("WiFi-Setup: connected to previously-saved network, client never confirmed - marking failed.");
+    Webserver_ClearPendingWifiCredentials();
   }
 }
 

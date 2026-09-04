@@ -1515,7 +1515,9 @@ void handle_wifi_setup_lifecycle()
   g_wifiSetupPending = false;
   g_wifiSetupFailed  = true;
   WiFi.disconnect();
+  Log_AddEntry(7002);
   DLOGLN("WiFi-Setup: connection attempt failed, freeing radio for AP.");
+  Webserver_ClearPendingWifiCredentials();
 }
 
 void handle_check_wifi_connection()
@@ -1883,13 +1885,35 @@ void Webserver_HandleSysInfo()
 <div class="logo">&#9889; SmartMeterLite</div>
 <a class="back" href="/">&#8592; Home</a>
 
-<a class="cfg-link" href="config">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;width:100%;max-width:600px;">
+<a class="cfg-link" href="config" style="max-width:none;">
 <span class="cfg-icon">&#9881;</span>
 <span class="cfg-text">
-<strong>Konfigurationsseite</strong>
-<small>Werte mit &#9999; k&ouml;nnen dort ge&auml;ndert werden</small>
+<strong>Systemparameter</strong>
 </span>
 </a>
+
+<a class="cfg-link" href="/wifiScan" style="max-width:none;">
+<span class="cfg-icon">&#128246;</span>
+<span class="cfg-text">
+<strong>WLAN-Netzwerke</strong>
+</span>
+</a>
+
+<a class="cfg-link" href="PinAssistant" style="max-width:none;">
+<span class="cfg-icon">&#128274;</span>
+<span class="cfg-text">
+<strong>PIN Assistant</strong>
+</span>
+</a>
+
+<a class="cfg-link" href="PinAssistantDeluxe" style="max-width:none;">
+<span class="cfg-icon">&#128274;</span>
+<span class="cfg-text">
+<strong>PIN Assistant Deluxe</strong>
+</span>
+</a>
+</div>
 
 <div class="card">
 <div class="card-title">Last Meter Value <small style="font-weight:400;color:#888;">&mdash; green = in wire format</small></div>
@@ -2080,11 +2104,6 @@ void Webserver_HandleSysInfo()
 <div class="kv last"><span class="kl e">Remote Client IP</span>)rawliteral";
   s += String(DebugMeterValueFromOtherClientIP);
   s += R"rawliteral(</div>
-<div class="btns" style="margin-top:.6rem;">
-<a class="btn" href="PinAssistant">PIN Assistant</a>
-<a class="btn" href="PinAssistantDeluxe">PIN Assistant Deluxe</a>
-<a class="btn btn-s" href="/wifiScan">&#128246; WLAN-Netzwerke</a>
-</div>
 </div>
 
 <div class="card">

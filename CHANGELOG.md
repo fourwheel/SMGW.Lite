@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/wifiScan`: the SSID field in each network's connect form is now `readonly` &ndash; multiple forms on the page share `name="ssid"`, which could let the browser substitute a previously-submitted value (e.g. showing/submitting the old network name instead of the one just clicked)
 - `/wifiStatus` now verifies `WiFi.SSID()` actually matches the requested network before reporting success &ndash; previously any `WL_CONNECTED` state was accepted, so if a new attempt failed and the STA fell back to a still-saved previous network, that was wrongly reported as success (showing the wrong network as connected) and the new, never-verified credentials were saved over the working old ones
 
+### Added
+- New ring-log codes for the WiFi setup flow: `7002` (connection attempt failed), `7003` (connected to previously-saved network instead of the requested SSID), `7004` (connection confirmed, credentials saved)
+- New ring-log codes for the manual `/update` upload: `6101` (`Update.begin()` failed), `6102` (write error during upload), `6103` (`Update.end()` failed), `6104` (upload successful, rebooting)
+- `/sysinfo`: WLAN-Netzwerke is now reachable via a permanent quick-link at the top of the page, regardless of connection state &ndash; previously the only way in was the home page's WiFi card, which is hidden once connected
+
+### Changed
+- `/sysinfo`: the top of the page now shows "Systemparameter", "WLAN-Netzwerke", "PIN Assistant" and "PIN Assistant Deluxe" as a 2&times;2 grid of quick-links, replacing the single "Konfigurationsseite" link and the PIN Assistant buttons previously buried in the "Helpers" card
+- `/wifiSetup`: a candidate password held in RAM (`g_pendingWifiPassword`) is now cleared on every failure path (timeout, definitive connect failure, fallback-to-old-network), not just on confirmed success &ndash; previously it lingered in RAM until overwritten by the next attempt
+
 ## [1.3.2] - 2026-08-13
 
 ### Fixed

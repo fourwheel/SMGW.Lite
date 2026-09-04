@@ -78,12 +78,20 @@ SELECT
   WHEN status_code = 6020 THEN 'OTA: cooldown after rollback — skipping for 15 min'
   WHEN status_code = 6021 THEN 'OTA: check triggered manually'
 
+  WHEN status_code = 6101 THEN 'Manual update: Update.begin() failed'
+  WHEN status_code = 6102 THEN 'Manual update: write error during upload'
+  WHEN status_code = 6103 THEN 'Manual update: Update.end() failed'
+  WHEN status_code = 6104 THEN 'Manual update: upload successful, rebooting'
+
   WHEN status_code = 5000 THEN 'myStrom: connection failed'
   WHEN status_code = 5001 THEN 'myStrom: connect() failed'
   WHEN status_code = 5002 THEN 'myStrom: deserializeJson() failed'
 
   WHEN status_code = 7000 THEN 'Stopping WiFi, backend call unsuccessful'
   WHEN status_code = 7001 THEN 'Restarting WiFi'
+  WHEN status_code = 7002 THEN 'WiFi setup: connection attempt failed'
+  WHEN status_code = 7003 THEN 'WiFi setup: connected to previously-saved network instead of requested SSID'
+  WHEN status_code = 7004 THEN 'WiFi setup: connection confirmed, credentials saved'
 
   WHEN status_code = 8000 THEN 'SPIFFS not mounted'
   WHEN status_code = 8001 THEN 'No custom cert, using bundled ISRG Root X1'
