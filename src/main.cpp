@@ -104,6 +104,8 @@ int   cached_backend_call_minute    = 2;
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
 bool          g_wifiSetupPending  = false;
+bool          g_wifiSetupFailed   = false; // set by handle_wifi_setup_lifecycle(), read by /wifiStatus
+unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() was issued from /wifiSetup
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 volatile bool ota_active          = false; // set during OTA to block new backend calls
@@ -138,6 +140,7 @@ unsigned long last_remote_meter_value = 0;
 void handle_call_backend();
 void handle_remote_ota();
 void handle_check_wifi_connection();
+void handle_wifi_setup_lifecycle();
 void handle_MeterValue_trigger();
 void handle_telegram_watchdog();
 void handle_MeterValue_store();
@@ -1457,6 +1460,66 @@ bool MeterValue_store(bool override)
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// handle_wifi_setup_lifecycle — owns both ends of an in-progress /wifiSetup
+// connection attempt: dropping the AP a couple of seconds after a confirmed
+// success, and aborting a failed attempt from the main loop rather than only
+// when the browser happens to poll /wifiStatus.
+//
+// ESP32 has a single radio shared between AP and STA, which must run on the
+// same channel. While the STA is actively negotiating (and, with a wrong
+// password, repeatedly retrying the auth handshake), that radio time is
+// taken away from the softAP, which is exactly the AP the user's browser is
+// connected to — so the very request needed to detect and abort the failed
+// attempt can itself be delayed or dropped. Running the check unconditionally
+// in the main loop means the retrying STA connection gets aborted as soon as
+// possible, regardless of whether the config portal is currently reachable.
+// ---------------------------------------------------------------------------
+void handle_wifi_setup_lifecycle()
+{
+  if (g_apStopAt > 0 && millis() >= g_apStopAt)
+  {
+    g_apStopAt = 0;
+    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
+    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
+  }
+
+  static unsigned long failSince = 0;
+
+  if (!g_wifiSetupPending) { failSince = 0; return; }
+
+  wl_status_t status = WiFi.status();
+  if (status == WL_CONNECTED)
+  {
+    failSince = 0;
+    Webserver_CheckWifiSetupFallback(); // handled by /wifiStatus normally; this is the fallback if the client never polls again
+    return;
+  }
+
+  bool definitiveFailure = status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL;
+  if (definitiveFailure) {
+    if (failSince == 0) failSince = millis();
+  } else {
+    failSince = 0; // status recovered (e.g. back to idle/disconnected mid-handshake) - don't act on a blip
+  }
+
+  // ESP32 can report WL_CONNECT_FAILED transiently for a moment during a
+  // handshake that still goes on to succeed - require the failure to persist
+  // for a bit before treating it as final, so a real connection isn't killed
+  // by this loop-driven watchdog on its very first bad reading.
+  bool failureConfirmed = definitiveFailure && (millis() - failSince > 3000);
+  bool timedOut         = millis() - g_wifiSetupStartedAt > 20000;
+  if (!failureConfirmed && !timedOut) return;
+
+  failSince           = 0;
+  g_wifiSetupPending = false;
+  g_wifiSetupFailed  = true;
+  WiFi.disconnect();
+  Log_AddEntry(7002);
+  DLOGLN("WiFi-Setup: connection attempt failed, freeing radio for AP.");
+  Webserver_ClearPendingWifiCredentials();
+}
+
 void handle_check_wifi_connection()
 {
   wl_status_t current_wifi_status = WiFi.status();
@@ -1495,15 +1558,25 @@ void handle_check_wifi_connection()
       if (millis() - last_reconnect_attempt > 60000)
       {
         last_reconnect_attempt = millis();
-        iotwebconf::NetworkState state = iotWebConf.getState();
-        if (state == iotwebconf::NetworkState::ApMode)
+        // Skip while a /wifiSetup attempt is in flight: it manages
+        // forceApMode() itself, and IotWebConf::forceApMode(false) clears
+        // the internal _forceApMode flag even when it can't leave ApMode
+        // right away (it just logs and stays put) - if that flag is cleared
+        // out from under us, IotWebConf's own AP timeout can tear the AP
+        // down entirely (WiFi.mode(WIFI_STA)) once _apTimeoutMs elapses,
+        // right in the middle of our own connection attempt.
+        if (!g_wifiSetupPending)
         {
-          DLOGLN("AP mode: triggering reconnect via IotWebConf");
-          iotWebConf.forceApMode(false);
+          iotwebconf::NetworkState state = iotWebConf.getState();
+          if (state == iotwebconf::NetworkState::ApMode)
+          {
+            DLOGLN("AP mode: triggering reconnect via IotWebConf");
+            iotWebConf.forceApMode(false);
+          }
+          // In Connecting state: let IotWebConf manage its own reconnect cycle.
+          // Calling WiFi.begin() here would reset an in-progress association
+          // attempt, making reconnection harder (especially with hidden SSIDs).
         }
-        // In Connecting state: let IotWebConf manage its own reconnect cycle.
-        // Calling WiFi.begin() here would reset an in-progress association
-        // attempt, making reconnection harder (especially with hidden SSIDs).
       }
     }
   }
@@ -1784,16 +1857,10 @@ void loop()
 {
   iotWebConf.doLoop();
 
-  if (g_apStopAt > 0 && millis() >= g_apStopAt)
-  {
-    g_apStopAt = 0;
-    DLOGLN("WiFi-Setup: AP hold time elapsed, handing over to IotWebConf.");
-    iotWebConf.forceApMode(false); // _forceApMode was true -> triggers changeState(Connecting)
-  }
-
   ArduinoOTA.handle();
   handle_temperature();
   // handle_Telegram_receive();  // handled by dedicated FreeRTOS task
+  handle_wifi_setup_lifecycle();
   handle_check_wifi_connection();
   handle_MeterValue_trigger();
   handle_MeterValue_store();
@@ -1818,13 +1885,35 @@ void Webserver_HandleSysInfo()
 <div class="logo">&#9889; SmartMeterLite</div>
 <a class="back" href="/">&#8592; Home</a>
 
-<a class="cfg-link" href="config">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;width:100%;max-width:600px;">
+<a class="cfg-link" href="config" style="max-width:none;">
 <span class="cfg-icon">&#9881;</span>
 <span class="cfg-text">
-<strong>Konfigurationsseite</strong>
-<small>Werte mit &#9999; k&ouml;nnen dort ge&auml;ndert werden</small>
+<strong>Systemparameter</strong>
 </span>
 </a>
+
+<a class="cfg-link" href="/wifiScan" style="max-width:none;">
+<span class="cfg-icon">&#128246;</span>
+<span class="cfg-text">
+<strong>WLAN-Netzwerke</strong>
+</span>
+</a>
+
+<a class="cfg-link" href="PinAssistant" style="max-width:none;">
+<span class="cfg-icon">&#128274;</span>
+<span class="cfg-text">
+<strong>PIN Assistant</strong>
+</span>
+</a>
+
+<a class="cfg-link" href="PinAssistantDeluxe" style="max-width:none;">
+<span class="cfg-icon">&#128274;</span>
+<span class="cfg-text">
+<strong>PIN Assistant Deluxe</strong>
+</span>
+</a>
+</div>
 
 <div class="card">
 <div class="card-title">Last Meter Value <small style="font-weight:400;color:#888;">&mdash; green = in wire format</small></div>
@@ -2015,11 +2104,6 @@ void Webserver_HandleSysInfo()
 <div class="kv last"><span class="kl e">Remote Client IP</span>)rawliteral";
   s += String(DebugMeterValueFromOtherClientIP);
   s += R"rawliteral(</div>
-<div class="btns" style="margin-top:.6rem;">
-<a class="btn" href="PinAssistant">PIN Assistant</a>
-<a class="btn" href="PinAssistantDeluxe">PIN Assistant Deluxe</a>
-<a class="btn btn-s" href="/wifiScan">&#128246; WLAN-Netzwerke</a>
-</div>
 </div>
 
 <div class="card">
@@ -2181,14 +2265,14 @@ footer a:hover{color:#1a3799;}
 .footer-love{font-size:.78rem;color:#aaa;}
 .wifi-card{background:#fff3cd;border:1px solid #ffc107;border-radius:14px;padding:1rem 1.1rem;width:100%;max-width:400px;display:flex;flex-direction:column;gap:.6rem;}
 .wifi-card h3{font-size:.92rem;font-weight:700;color:#856404;margin:0;}
-.wifi-scan-btn{display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.75rem 1rem;border-radius:10px;background:#1a3799;color:#fff;font-size:.92rem;font-weight:700;text-decoration:none;text-align:center;}
-.wifi-scan-btn:hover{background:#142b7a;color:#fff;}
+.wifi-scan-btn{display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.75rem 1rem;border-radius:10px;background:linear-gradient(135deg,#ffc94d,#f9a825);color:#3d2b00;font-size:.92rem;font-weight:700;text-decoration:none;text-align:center;box-shadow:0 2px 8px rgba(249,168,37,.4);}
+.wifi-scan-btn:hover{background:linear-gradient(135deg,#f9a825,#e69500);color:#3d2b00;}
 .wifi-or{display:flex;align-items:center;gap:.6rem;font-size:.78rem;color:#856404;opacity:.75;}
 .wifi-or::before,.wifi-or::after{content:'';flex:1;height:1px;background:#ffc107;opacity:.6;}
 .wifi-form{display:flex;flex-direction:column;gap:.5rem;}
 .wifi-form input[type=text],.wifi-form input[type=password]{width:100%;padding:.55rem .75rem;border-radius:8px;border:1px solid #ccc;font-size:.88rem;background:#fff;}
-.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#856404;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
-.wifi-form button:hover{background:#6d4f00;}
+.wifi-form button{padding:.65rem 1rem;border-radius:8px;background:#1a3799;color:#fff;font-size:.88rem;font-weight:700;border:none;cursor:pointer;}
+.wifi-form button:hover{background:#142b7a;}
 </style>
 </head>
 <body>

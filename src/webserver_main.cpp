@@ -27,6 +27,11 @@ void Webserver_FlashLongPulse();
 void Webserver_HandleCertUpload();
 void Webclient_loadCertToChar();
 
+// Credentials from an in-progress /wifiSetup attempt, held in RAM only until
+// the connection is confirmed to work — see Webserver_HandleWifiSetup().
+static String g_pendingWifiSsid;
+static String g_pendingWifiPassword;
+
 // ---------------------------------------------------------------------------
 // IotWebConf HTML format provider — customises the /config page appearance
 // ---------------------------------------------------------------------------
@@ -329,7 +334,7 @@ poll();
   // OTA update handler
   server.on("/update", HTTP_GET, []() {
     String page;
-    page.reserve(1200);
+    page.reserve(2600);
     page += R"rawliteral(<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -343,53 +348,116 @@ poll();
 <a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
 <div class="card">
   <div class="card-title">Firmware Update</div>
-  <p style="font-size:.84rem;color:#444;margin-bottom:.8rem;">W&auml;hle eine <code>.bin</code>-Datei aus und klicke auf &bdquo;Update starten&ldquo;. Das Ger&auml;t startet nach dem Update automatisch neu.</p>
-  <form method="POST" action="/update" enctype="multipart/form-data">
-    <input type="file" name="update" accept=".bin" style="font-size:.85rem;margin-bottom:.8rem;display:block;width:100%;">
-    <div class="btns">
-      <button class="btn" type="submit">Update starten</button>
-      <a class="btn btn-s" href="/sysinfo">Abbrechen</a>
+  <p class="hint" id="fw-hint">W&auml;hle eine <code>.bin</code>-Datei aus und klicke auf &bdquo;Update starten&ldquo;. Das Ger&auml;t startet nach dem Update automatisch neu.</p>
+  <input type="file" id="fw-file" accept=".bin" style="font-size:.85rem;margin:.8rem 0;display:block;width:100%;">
+  <div class="btns">
+    <button class="btn" id="fw-btn" onclick="fwStart()">Update starten</button>
+    <a class="btn btn-s" id="fw-cancel" href="/sysinfo">Abbrechen</a>
+  </div>
+  <div id="fw-status" style="display:none;margin-top:1rem;">
+    <div style="background:#f0f2f7;border-radius:8px;height:10px;overflow:hidden;margin-bottom:.5rem;">
+      <div id="fw-bar" style="background:#1a3799;height:100%;width:0%;transition:width .2s;"></div>
     </div>
-  </form>
+    <p id="fw-msg" style="font-size:.85rem;font-weight:600;"></p>
+  </div>
 </div>
+<script>
+function fwSetBusy(busy){
+  document.getElementById('fw-btn').disabled=busy;
+  document.getElementById('fw-file').disabled=busy;
+}
+function fwStart(){
+  var f=document.getElementById('fw-file').files[0];
+  if(!f){alert('Bitte zuerst eine .bin-Datei auswählen.');return;}
+  fwSetBusy(true);
+  document.getElementById('fw-status').style.display='block';
+  var bar=document.getElementById('fw-bar'), msg=document.getElementById('fw-msg');
+  msg.className=''; msg.textContent='Hochladen … 0%';
+  var fd=new FormData(); fd.append('update', f);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/update',true);
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var pct=Math.round(e.loaded/e.total*100);
+      bar.style.width=pct+'%';
+      msg.textContent='Hochladen … '+pct+'%';
+    }
+  };
+  xhr.onload=function(){
+    bar.style.width='100%';
+    if(xhr.status===200){
+      msg.className='ok';
+      msg.textContent='Update erfolgreich – Gerät startet neu …';
+      fwWaitForReboot();
+    } else {
+      msg.className='fail';
+      msg.textContent='Update fehlgeschlagen: '+(xhr.responseText||('HTTP '+xhr.status));
+      fwSetBusy(false);
+    }
+  };
+  xhr.onerror=function(){
+    // The connection can drop while the response is in flight if the
+    // device restarts a moment too early - a successful flash is more
+    // likely than a network fault, so treat it as tentative success.
+    bar.style.width='100%';
+    msg.className='ok';
+    msg.textContent='Verbindung unterbrochen – Gerät startet vermutlich neu …';
+    fwWaitForReboot();
+  };
+  xhr.send(fd);
+}
+var fwAttempt=0;
+function fwWaitForReboot(){
+  document.getElementById('fw-cancel').style.display='none';
+  document.getElementById('fw-msg').textContent='Warte auf Geräteneustart …';
+  fwAttempt=0;
+  setTimeout(fwPollReboot,15000);
+}
+function fwPollReboot(){
+  var msg=document.getElementById('fw-msg');
+  fwAttempt++;
+  fetch('/sysinfo',{cache:'no-store'}).then(function(r){
+    if(!r.ok) throw new Error();
+    msg.textContent='Gerät ist wieder online – Weiterleitung …';
+    setTimeout(function(){window.location.href='/sysinfo';},800);
+  }).catch(function(){
+    if(fwAttempt<15){
+      msg.textContent='Warte auf Neustart … (Versuch '+fwAttempt+'/15)';
+      setTimeout(fwPollReboot,2000);
+    } else {
+      msg.className='fail';
+      msg.textContent='Gerät antwortet nicht. Bitte Status manuell prüfen (z.B. IP im Router).';
+    }
+  });
+}
+</script>
 </body></html>)rawliteral";
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", page);
   });
   server.on("/update", HTTP_POST, []() {
-    String result = Update.hasError() ? "Update fehlgeschlagen." : "Update erfolgreich &ndash; Neustart&hellip;";
-    String page;
-    page.reserve(800);
-    page += R"rawliteral(<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SmartMeterLite &ndash; Update</title>)rawliteral";
-    page += HTML_STYLE_MODERN;
-    page += R"rawliteral(</head>
-<body>
-<div class="logo">&#9889; SmartMeterLite</div>
-<div class="card">
-  <div class="card-title">Firmware Update</div>
-  <p style="font-size:.95rem;font-weight:600;color:#1a1a1a;">)rawliteral";
-    page += result;
-    page += R"rawliteral(</p>
-</div>
-</body></html>)rawliteral";
+    bool ok = !Update.hasError();
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", page);
-    ESP.restart();
+    if (ok) {
+      server.send(200, "text/plain", "OK");
+    } else {
+      server.send(500, "text/plain", Update.errorString());
+    }
+    // Give the TCP stack a moment to flush the response before the reboot
+    // tears down the connection, otherwise the client never sees the result.
+    server.client().flush();
+    delay(300);
+    if (ok) ESP.restart();
   }, []() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       Serial.printf("Update Start: %s\n", upload.filename.c_str());
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { Update.printError(Serial); Log_AddEntry(6101); }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { Update.printError(Serial); Log_AddEntry(6102); }
     } else if (upload.status == UPLOAD_FILE_END) {
-      if (Update.end(true)) Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-      else Update.printError(Serial);
+      if (Update.end(true)) { Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); Log_AddEntry(6104); }
+      else { Update.printError(Serial); Log_AddEntry(6103); }
     }
   });
 }
@@ -401,6 +469,7 @@ void Webserver_HandleWifiSetup()
 {
   String ssid     = server.arg("ssid");
   String password = server.arg("password");
+  int    channel  = server.hasArg("channel") ? server.arg("channel").toInt() : 0;
 
   ssid.trim();
 
@@ -410,19 +479,14 @@ void Webserver_HandleWifiSetup()
     return;
   }
 
-  strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     ssid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
-  strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, password.c_str(), IOTWEBCONF_WORD_LEN - 1);
-  iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
-  iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
+  // Hold the credentials in RAM only for now — they're only written to flash
+  // (see Webserver_HandleWifiStatus) once the connection is confirmed to
+  // work, so a typo'd password can't overwrite a previously working config.
+  g_pendingWifiSsid     = ssid;
+  g_pendingWifiPassword = password;
 
-  iotWebConf.saveConfig();
   redirect_to_sysinfo = false;
-  DLOGLN("WiFi-Setup: credentials saved, starting direct connection attempt.");
-
-  iotWebConf.forceApMode(true);
-  WiFi.begin(ssid.c_str(), password.c_str());
-  g_wifiSetupPending  = true;
-  g_apStopAt          = 0;
+  DLOGLN("WiFi-Setup: starting direct connection attempt (not yet saved).");
 
   String page = R"rawliteral(<!DOCTYPE html>
 <html lang="de">
@@ -440,7 +504,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .msg{font-size:.95rem;color:#444;}
 .ssid{font-weight:700;color:#1a3799;}
 .hint{font-size:.82rem;color:#888;line-height:1.5;}
-.err{color:#c0392b;font-size:.88rem;display:none;}
+.err{color:#c0392b;font-size:.88rem;display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
 .result{display:none;flex-direction:column;align-items:center;gap:1rem;width:100%;}
 .ip-box{background:#f0f2f7;border-radius:10px;padding:.9rem 1.2rem;font-size:1.05rem;color:#333;letter-spacing:.04em;}
 .ip-last{font-weight:800;color:#1a3799;font-size:1.2rem;}
@@ -453,9 +517,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 <body>
 <div class="logo">&#9889; SmartMeterLite</div>
 <div class="card">
-  <div id="connecting">
+  <div id="connecting" style="display:flex;flex-direction:column;align-items:center;gap:1.1rem;">
     <div class="spinner"></div>
-    <p class="msg" style="margin-top:1rem;">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+    <p class="msg">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
   </div>
   <div class="result" id="result">
     <p class="msg">&#10003;&nbsp; Verbunden! Deine IP-Adresse:</p>
@@ -467,13 +531,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     </ol>
     <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>
   </div>
-  <p class="err" id="err">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+  <div class="err" id="err">
+    <p id="err-msg">Verbindung fehlgeschlagen &ndash; SSID oder Passwort pr&uuml;fen und erneut versuchen.</p>
+    <a class="open-btn" href="/">&#8634; Erneut versuchen</a>
+  </div>
 </div>
 <script>
 var attempts = 0, max = 20;
+function showError(msg) {
+  document.getElementById('connecting').style.display = 'none';
+  if (msg) document.getElementById('err-msg').textContent = msg;
+  document.getElementById('err').style.display = 'flex';
+}
 function poll() {
-  fetch('/wifiStatus')
-    .then(function(r){ return r.json(); })
+  // The AP can be briefly unreachable while the STA connection attempt is
+  // using the shared radio - without an explicit timeout, a single fetch()
+  // can hang far longer than the 2s retry interval (up to the browser's own
+  // connect timeout, which can be tens of seconds), making this look stuck
+  // even though it would eventually move on by itself.
+  var ctrl = new AbortController();
+  var to = setTimeout(function(){ ctrl.abort(); }, 5000);
+  fetch('/wifiStatus', {signal: ctrl.signal})
+    .then(function(r){ clearTimeout(to); return r.json(); })
     .then(function(d){
       if (d.connected) {
         var parts = d.ip.split('.');
@@ -485,20 +564,83 @@ function poll() {
         document.getElementById('open-btn').href = url;
         document.getElementById('connecting').style.display = 'none';
         document.getElementById('result').style.display     = 'flex';
+      } else if (d.failed) {
+        showError();
       } else if (++attempts < max) {
         setTimeout(poll, 2000);
       } else {
-        document.getElementById('connecting').style.display = 'none';
-        document.getElementById('err').style.display        = 'block';
+        showError();
       }
     })
-    .catch(function(){ if (++attempts < max) setTimeout(poll, 2000); });
+    .catch(function(){ clearTimeout(to); if (++attempts < max) setTimeout(poll, 2000); });
 }
 setTimeout(poll, 2000);
 </script>
 </body></html>)rawliteral";
 
   server.send(200, "text/html", page);
+  // server.send() only queues the response for the TCP stack - it doesn't
+  // wait for the client to actually receive it. Give it a moment before the
+  // radio activity below (association, possibly a channel scan) competes
+  // with that delivery for the shared AP/STA radio, same as the /update
+  // handler already does before its own disruptive ESP.restart().
+  server.client().flush();
+  delay(300);
+
+  // Only start the actual connection attempt after the page has been sent —
+  // WiFi.begin() drives real radio activity (association, possibly a channel
+  // scan) on the same shared AP/STA radio that's still delivering this very
+  // response; starting it earlier was delaying/aborting this request's own
+  // TCP connection (ERR_CONNECTION_RESET), the same issue /wifiScan had.
+  iotWebConf.forceApMode(true);
+  // Passing the known channel (from a prior /wifiScan) skips the multi-channel
+  // scan that WiFi.begin() would otherwise do to locate the SSID - that scan
+  // hops the shared AP+STA radio across channels and briefly drops the AP the
+  // client (phone/laptop) is connected to. Falls back to auto-scan (channel 0)
+  // for the manual-entry form on the home page, which doesn't know the channel.
+  if (channel > 0) WiFi.begin(ssid.c_str(), password.c_str(), channel);
+  else              WiFi.begin(ssid.c_str(), password.c_str());
+  g_wifiSetupPending   = true;
+  g_wifiSetupFailed    = false;
+  g_wifiSetupStartedAt = millis();
+  g_apStopAt           = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_ConfirmWifiSetupSuccess — commit a confirmed-working /wifiSetup
+// attempt: persist the pending credentials to flash and clear the setup
+// state. Called from the success path of Webserver_HandleWifiStatus() once
+// the client polls again after connecting, and from
+// Webserver_CheckWifiSetupFallback() if the client never polls again after
+// the device actually connected (closed tab, backgrounded app, etc.).
+// ---------------------------------------------------------------------------
+void Webserver_ConfirmWifiSetupSuccess()
+{
+  g_wifiSetupPending = false;
+  g_apStopAt = millis() + 2000;
+
+  // Only now that the credentials are confirmed to work are they written
+  // to flash — see the comment in Webserver_HandleWifiSetup().
+  strncpy(iotWebConf.getWifiSsidParameter()->valueBuffer,     g_pendingWifiSsid.c_str(),     IOTWEBCONF_WORD_LEN - 1);
+  strncpy(iotWebConf.getWifiPasswordParameter()->valueBuffer, g_pendingWifiPassword.c_str(), IOTWEBCONF_WORD_LEN - 1);
+  iotWebConf.getWifiSsidParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1]     = '\0';
+  iotWebConf.getWifiPasswordParameter()->valueBuffer[IOTWEBCONF_WORD_LEN - 1] = '\0';
+  iotWebConf.saveConfig();
+  g_pendingWifiPassword = "";
+
+  Log_AddEntry(7004);
+  DLOGLN("WiFi-Setup: connected, credentials saved, stopping AP in 2 s.");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_ClearPendingWifiCredentials — drop a no-longer-needed candidate
+// password from RAM. Called from every /wifiSetup failure path (never on
+// success — Webserver_ConfirmWifiSetupSuccess() clears it itself after use).
+// ---------------------------------------------------------------------------
+void Webserver_ClearPendingWifiCredentials()
+{
+  g_pendingWifiSsid     = "";
+  g_pendingWifiPassword = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -506,20 +648,92 @@ setTimeout(poll, 2000);
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiStatus()
 {
+  // g_wifiSetupFailed is a sticky verdict for the current attempt, set either
+  // here or by Webserver_CheckWifiSetupFallback() from the main loop. It must
+  // be checked before WiFi.status(), not just in the not-connected path below:
+  // the case where the STA falls back to the previously-saved network leaves
+  // WiFi.status() == WL_CONNECTED (the old network still works), so without
+  // this early check a poll arriving after the loop-driven fallback check
+  // already ran would fall through to the WL_CONNECTED branch below and
+  // wrongly report success.
+  if (g_wifiSetupFailed)
+  {
+    server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
+    return;
+  }
+
   if (WiFi.status() == WL_CONNECTED)
   {
-    String ip = WiFi.localIP().toString();
-    if (g_wifiSetupPending)
+    // WL_CONNECTED alone isn't proof that THIS attempt succeeded: if the new
+    // credentials fail, the STA can fall back to a previously-saved network
+    // (still on flash, since we haven't overwritten it yet) and report
+    // WL_CONNECTED for that instead. Mistaking that for success would both
+    // show the wrong network as "connected" and overwrite the old, working
+    // config with the new, never-actually-verified one.
+    if (g_wifiSetupPending && WiFi.SSID() != g_pendingWifiSsid)
     {
       g_wifiSetupPending = false;
-      g_apStopAt = millis() + 2000;
-      DLOGLN("WiFi-Setup: connected, stopping AP in 2 s.");
+      g_wifiSetupFailed  = true;
+      Log_AddEntry(7003);
+      DLOGLN("WiFi-Setup: connected to a different network than requested (previously-saved config) - treating as failed.");
+      Webserver_ClearPendingWifiCredentials();
+      server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
+      return;
     }
+
+    String ip = WiFi.localIP().toString();
+    if (g_wifiSetupPending) Webserver_ConfirmWifiSetupSuccess();
     server.send(200, "application/json", "{\"connected\":true,\"ip\":\"" + ip + "\"}");
+    return;
+  }
+
+  // Not connected and not (yet) marked failed — the actual failure detection
+  // + WiFi.disconnect() happens unconditionally in handle_wifi_setup_lifecycle()
+  // (main loop), not here — this request may itself be delayed while the STA
+  // connection attempt is starving the AP's radio time, so it must not be the
+  // only place that aborts the attempt.
+  server.send(200, "application/json", "{\"connected\":false}");
+}
+
+// ---------------------------------------------------------------------------
+// Webserver_CheckWifiSetupFallback — called every loop() iteration (via
+// handle_wifi_setup_lifecycle()) while a /wifiSetup attempt is connected but
+// not yet confirmed.
+//
+// The normal path is Webserver_HandleWifiStatus(): the browser polls
+// /wifiStatus, sees the connection, and that request persists the
+// credentials / clears the pending state. If the client never polls again
+// after the device actually connects — tab closed, app backgrounded, browser
+// navigated away — that confirmation never happens. Without this fallback
+// the new credentials would then silently never reach flash and be lost on
+// the next reboot, even though the device is connected right now; and the
+// forced AP would keep running alongside the STA connection forever, since
+// nothing else clears g_wifiSetupPending in this case (IotWebConf's own AP
+// timeout doesn't help either — forceApMode(true) makes it stay in AP mode
+// unconditionally).
+//
+// Uses the same SSID check as Webserver_HandleWifiStatus() so a connection
+// that fell back to the old saved network is never mistaken for success.
+// ---------------------------------------------------------------------------
+void Webserver_CheckWifiSetupFallback()
+{
+  if (!g_wifiSetupPending || WiFi.status() != WL_CONNECTED) return;
+  if (millis() - g_wifiSetupStartedAt < 60000) return; // give /wifiStatus a fair chance first
+
+  if (WiFi.SSID() == g_pendingWifiSsid)
+  {
+    DLOGLN("WiFi-Setup: connected but client never confirmed - saving credentials now.");
+    Webserver_ConfirmWifiSetupSuccess();
   }
   else
   {
-    server.send(200, "application/json", "{\"connected\":false}");
+    // Connected, but to the old, previously-saved network, not the requested
+    // one - nothing new to persist, just stop blocking the pending state forever.
+    g_wifiSetupPending = false;
+    g_wifiSetupFailed  = true;
+    Log_AddEntry(7003);
+    DLOGLN("WiFi-Setup: connected to previously-saved network, client never confirmed - marking failed.");
+    Webserver_ClearPendingWifiCredentials();
   }
 }
 
@@ -528,8 +742,6 @@ void Webserver_HandleWifiStatus()
 // ---------------------------------------------------------------------------
 void Webserver_HandleWifiScan()
 {
-  WiFi.scanNetworks(true);
-
   String page;
   page.reserve(5500);
   page += R"rawliteral(<!DOCTYPE html>
@@ -539,13 +751,17 @@ void Webserver_HandleWifiScan()
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>SmartMeterLite &ndash; WLAN-Netzwerke</title>)rawliteral";
   page += HTML_STYLE_MODERN;
+  page += R"rawliteral(<style>
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin-sm{display:inline-block;width:13px;height:13px;border:2px solid #d0d8f0;border-top-color:#1a3799;border-radius:50%;animation:spin 0.9s linear infinite;vertical-align:middle;margin-right:.45rem;}
+</style>)rawliteral";
   page += R"rawliteral(</head>
 <body>
 <div class="logo">&#9889; SmartMeterLite</div>
 <a class="back" href="/">&#8592; Zur&uuml;ck</a>
 <div class="card">
 <div class="card-title">Verf&uuml;gbare WLAN-Netzwerke</div>
-<div id="scan-status" style="color:#888;font-size:.9rem;margin-bottom:.8rem;">Suche nach Netzwerken&hellip;</div>
+<div id="scan-status" style="color:#888;font-size:.9rem;margin-bottom:.8rem;"><span class="spin-sm"></span>Suche nach Netzwerken&hellip;</div>
 <div id="networks"></div>
 <div class="btns" id="rescan-row" style="display:none;margin-top:.6rem;">
 <button class="btn btn-s" onclick="doRescan()">&#128260; Erneut suchen</button>
@@ -575,6 +791,7 @@ function render(nets){
     return;
   }
   document.getElementById('scan-status').textContent=nets.length+' Netzwerk'+(nets.length!==1?'e':'')+' gefunden.';
+  nets=nets.slice().sort(function(a,b){return b.rssi-a.rssi;});
   var h='';
   for(var i=0;i<nets.length;i++){
     var n=nets[i],se=esc(n.ssid);
@@ -586,8 +803,9 @@ function render(nets){
       +'</span></div>'
       +'<div id="f'+i+'" style="display:none;padding:.65rem .8rem;background:#fff;border-top:1px solid #eee;">'
       +'<form action="/wifiSetup" method="POST">'
+      +'<input type="hidden" name="channel" value="'+n.channel+'">'
       +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">SSID</label>'
-      +'<input name="ssid" type="text" value="'+se+'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.45rem;">'
+      +'<input name="ssid" type="text" value="'+se+'" readonly style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.45rem;background:#f5f5f5;color:#555;">'
       +'<label style="font-size:.8rem;color:#555;display:block;margin-bottom:.15rem;">Passwort</label>'
       +'<input id="pw'+i+'" name="password" type="password" placeholder="WLAN-Passwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.38rem .55rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;margin-bottom:.55rem;">'
       +'<div class="btns"><button class="btn" type="submit">Verbinden</button>'
@@ -598,7 +816,7 @@ function render(nets){
   document.getElementById('rescan-row').style.display='flex';
 }
 function doRescan(){
-  document.getElementById('scan-status').textContent='Suche nach Netzwerken…';
+  document.getElementById('scan-status').innerHTML='<span class="spin-sm"></span>Suche nach Netzwerken…';
   document.getElementById('networks').innerHTML='';
   document.getElementById('rescan-row').style.display='none';
   clearInterval(t);
@@ -611,10 +829,17 @@ function poll(){
     render(d.networks);
   }).catch(function(){});
 }
+poll();
 t=setInterval(poll,800);
 </script>
 </body></html>)rawliteral";
   server.send(200, "text/html", page);
+
+  // Start scanning only after the page has been sent — WiFi.scanNetworks()
+  // hops the shared AP/STA radio across channels immediately, which was
+  // delaying delivery of this very page (including the waiting spinner)
+  // until the scan had already progressed.
+  WiFi.scanNetworks(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +867,7 @@ void Webserver_HandleWifiScanResults()
     ssid.replace("\\", "\\\\");
     ssid.replace("\"", "\\\"");
     json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
+         + ",\"channel\":" + String(WiFi.channel(i))
          + ",\"enc\":" + (WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + "}";
   }
   json += "]}";

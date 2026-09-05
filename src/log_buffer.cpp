@@ -107,6 +107,9 @@ String Log_StatusCodeToString(int statusCode)
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
   case 7000: return "Stopping Wifi, Backendcall unsuccessful";
   case 7001: return "Restarting Wifi";
+  case 7002: return "WiFi-Setup: connection attempt failed";
+  case 7003: return "WiFi-Setup: connected to previously-saved network instead of requested SSID";
+  case 7004: return "WiFi-Setup: connection confirmed, credentials saved";
   case 8000: return "Spiffs not mounted";
   case 8001: return "No custom cert, using bundled ISRG Root X1";
   case 8002: return "Cert saved";
@@ -134,6 +137,10 @@ String Log_StatusCodeToString(int statusCode)
   case 6019: return "OTA pull: skipped — backend host empty";
   case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
   case 6021: return "OTA pull: check triggered manually";
+  case 6101: return "Manual update: Update.begin() failed";
+  case 6102: return "Manual update: write error during upload";
+  case 6103: return "Manual update: Update.end() failed";
+  case 6104: return "Manual update: upload successful, rebooting";
   }
   if (statusCode < 1000) return "# meter slots to transfer";
   return "Unknown status code";
