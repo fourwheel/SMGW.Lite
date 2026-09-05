@@ -104,6 +104,7 @@ extern bool MeterValue_trigger_override;
 extern char          FullCert[];
 extern volatile bool ota_active;
 extern volatile bool g_ota_check_requested;
+extern volatile bool g_ota_manual_install_requested;
 
 // Forward declarations for functions called across modules
 void Led_update_Blink();

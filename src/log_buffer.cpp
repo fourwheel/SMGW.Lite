@@ -137,6 +137,7 @@ String Log_StatusCodeToString(int statusCode)
   case 6019: return "OTA pull: skipped — backend host empty";
   case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
   case 6021: return "OTA pull: check triggered manually";
+  case 6022: return "OTA pull: check triggered by manual install confirmation";
   case 6101: return "Manual update: Update.begin() failed";
   case 6102: return "Manual update: write error during upload";
   case 6103: return "Manual update: Update.end() failed";

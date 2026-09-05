@@ -77,6 +77,7 @@ SELECT
   WHEN status_code = 6019 THEN 'OTA: skipped — backend host empty'
   WHEN status_code = 6020 THEN 'OTA: cooldown after rollback — skipping for 15 min'
   WHEN status_code = 6021 THEN 'OTA: check triggered manually'
+  WHEN status_code = 6022 THEN 'OTA: check triggered by manual install confirmation'
 
   WHEN status_code = 6101 THEN 'Manual update: Update.begin() failed'
   WHEN status_code = 6102 THEN 'Manual update: write error during upload'
