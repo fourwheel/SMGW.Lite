@@ -1416,14 +1416,19 @@ bool MeterValue_store(bool override)
   {
     // TAF7 entries represent the grid mark itself (e.g. HH:00/:15/:30/:45),
     // not the arbitrary second within the window the telegram happened to
-    // arrive on — floor the real timestamp down to that boundary so the
-    // stored value lines up exactly with the mark it stands for.
+    // arrive on. Flooring the real timestamp down to that boundary was
+    // tried here but trades away real precision (telegram is usually found
+    // within ~2s of the mark, not the full 14s window) for a cosmetically
+    // clean grid mark — parked behind #if 0 rather than removed, decide
+    // later whether the tidiness is worth it.
     uint32_t storeTimestamp = snap.timestamp;
+#if 0
     if (override)
     {
       unsigned long windowSec = (unsigned long)cached_taf7_param * 60UL;
       storeTimestamp = (snap.timestamp / windowSec) * windowSec;
     }
+#endif
 
     // Write the current reading into the packed buffer at the selected slot.
     // Fields that are disabled (temperature, solar, obis280) are silently
