@@ -181,7 +181,7 @@ bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
 bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
-// bool last_store_was_override         = false; // used by handle_MeterValue_store (#if 0)
+bool last_store_was_override         = false; // true when the last successful store was a TAF7 override
 unsigned long last_meter_value_successful = 0;
 unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
@@ -1414,11 +1414,22 @@ bool MeterValue_store(bool override)
 
   if (override == true || meter_value_buffer_full == false)
   {
+    // TAF7 entries represent the grid mark itself (e.g. HH:00/:15/:30/:45),
+    // not the arbitrary second within the window the telegram happened to
+    // arrive on — floor the real timestamp down to that boundary so the
+    // stored value lines up exactly with the mark it stands for.
+    uint32_t storeTimestamp = snap.timestamp;
+    if (override)
+    {
+      unsigned long windowSec = (unsigned long)cached_taf7_param * 60UL;
+      storeTimestamp = (snap.timestamp / windowSec) * windowSec;
+    }
+
     // Write the current reading into the packed buffer at the selected slot.
     // Fields that are disabled (temperature, solar, obis280) are silently
     // skipped inside MeterValue_write() — they consume no bytes.
     MeterValue_write(write_i,
-      snap.timestamp,
+      storeTimestamp,
       snap.meter_value_180,
       snap.temperature,
       snap.solar,
@@ -1784,29 +1795,27 @@ void handle_MeterValue_store()
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
-#if 0
     // Remove the most recent non-override entry if it was stored shortly before
-    // this TAF7 trigger — keeps the grid mark uncluttered.
-    static const unsigned long TAF7_REPLACE_WINDOW_MS = 5000UL;
+    // this TAF7 trigger — the TAF7 store below lands precisely on the grid mark
+    // (see the timestamp floor in MeterValue_store()), so a TAF14 reading a few
+    // seconds ahead of it is redundant and would otherwise sit right next to it.
+    static const unsigned long TAF7_REPLACE_WINDOW_MS = 10000UL;
     if (!last_store_was_override &&
         last_meter_value_successful > 0 &&
         millis() - last_meter_value_successful < TAF7_REPLACE_WINDOW_MS &&
         meter_value_NON_override_i < Meter_Value_Buffer_Size - 1)
     {
       meter_value_NON_override_i++;
-      memset(MeterValueBuffer + MeterValue_Offset(meter_value_NON_override_i), 0, MeterValue_EntrySize());
+      MeterValue_ClearSlot(meter_value_NON_override_i);
       Log_AddEntry(1025);
     }
-#endif
     retVal = MeterValue_store(true);
-    if (retVal == true) last_taf7_meter_value = millis();
-    // if (retVal == true) { last_taf7_meter_value = millis(); last_store_was_override = true; }
+    if (retVal == true) { last_taf7_meter_value = millis(); last_store_was_override = true; }
   }
   else if (MeterValue_trigger_non_override == true)
   {
     retVal = MeterValue_store(false);
-    if (retVal == true) last_taf14_meter_value = millis();
-    // if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
+    if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
   }
 
   if (retVal == true)
@@ -1835,9 +1844,15 @@ void handle_MeterValue_trigger()
     return;
   }
 
+  // True during the first 15s after a TAF7 grid mark (e.g. HH:00/:15/:30/:45).
+  // TAF14 is held back for the whole window (see below) so a regular reading
+  // can no longer land a few seconds ahead of the TAF7 snapshot and produce
+  // two stores seconds apart for the same grid mark.
+  bool taf7WindowOpen = taf7_b_object.isChecked() &&
+                         ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15);
+
   if (MeterValue_trigger_override == false &&
-      taf7_b_object.isChecked() &&
-      ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15) &&
+      taf7WindowOpen &&
       (millis() - last_taf7_meter_value > 45000))
   {
     Log_AddEntry(1010);
@@ -1847,6 +1862,7 @@ void handle_MeterValue_trigger()
   else if (MeterValue_trigger_override == false &&
            MeterValue_trigger_non_override == false &&
            taf14_b_object.isChecked() &&
+           !taf7WindowOpen &&
            millis() - last_meter_value_successful >= 1000UL * (unsigned long)cached_taf14_param &&
            millis() - last_taf14_meter_value      >= 1000UL * (unsigned long)cached_taf14_param)
   {
