@@ -110,6 +110,7 @@ unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = 
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 volatile bool ota_active          = false; // set during OTA to block new backend calls
 volatile bool g_ota_check_requested = false;
+volatile bool g_ota_manual_install_requested = false;
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
@@ -1670,14 +1671,19 @@ void handle_remote_ota()
   static const unsigned long FALLBACK_MS = 24UL * 3600UL * 1000UL;
   static unsigned long last_check = 0;
 
+  bool manual   = g_ota_manual_install_requested;
   bool hint     = g_ota_check_requested;
   bool fallback = millis() - last_check >= FALLBACK_MS;
 
-  if (!hint && !fallback) return;
+  if (!manual && !hint && !fallback) return;
 
-  g_ota_check_requested = false;
-  last_check            = millis();
-  Log_AddEntry(hint ? 6014 : 6015);
+  g_ota_manual_install_requested = false;
+  g_ota_check_requested          = false;
+  last_check                     = millis();
+  // manual and hint both end up here after a page redirect / the next hint
+  // response, so distinguish them explicitly instead of collapsing "user
+  // clicked Installieren" into the same code as a genuine backend hint.
+  Log_AddEntry(manual ? 6022 : (hint ? 6014 : 6015));
   OtaPull_check();
 }
 

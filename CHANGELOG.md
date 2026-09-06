@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-09-05
+
+### Fixed
+- Remote FW update ring-log entries `6014` ("check triggered by backend hint") were also logged when the user manually clicked "Installieren" on the Remote FW Update page &ndash; `/installRemoteFw` set the same `g_ota_check_requested` flag that the genuine backend hint (parsed from the meter-value response) also sets, so `handle_remote_ota()` could not tell the two apart and always attributed the check to "backend hint". Introduced a separate `g_ota_manual_install_requested` flag and new log code `6022` ("check triggered by manual install confirmation") so the two trigger sources are distinguishable in the log again.
+
 ## [1.3.3] - 2026-08-08
 
 ### Changed
