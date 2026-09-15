@@ -53,6 +53,7 @@ void   MeterValue_write(int index, uint32_t ts, uint32_t m180,
 void   MeterValue_read(int index, uint32_t &ts, uint32_t &m180,
                        int32_t &temp, uint32_t &solar, uint32_t &m280);
 bool   MeterValue_slot_empty(int index);
+void   MeterValue_ClearSlot(int index);
 int    MeterValue_slots_from_budget(size_t budgetBytes);
 int    MeterValue_calc_max_slots_for_display();
 void   MeterValue_init_Buffer();
