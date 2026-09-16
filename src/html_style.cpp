@@ -94,10 +94,13 @@ textarea{width:100%;font-family:monospace;font-size:.78rem;border:1px solid #d0d
 code{font-family:monospace;font-size:.85em;background:#f0f2f7;padding:.1em .3em;border-radius:3px;}
 small{font-size:.79rem;}
 .kl.e::after{content:" \270F";font-size:.68rem;color:#1a3799;opacity:.6;vertical-align:middle;}
-.cfg-link{display:flex;align-items:center;gap:.9rem;background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.85rem 1.3rem;width:100%;max-width:600px;text-decoration:none;color:#1a1a1a;transition:border-color .15s;}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;width:100%;max-width:600px;}
+@media(max-width:480px){.cfg-grid{grid-template-columns:1fr;}}
+.cfg-link{display:flex;align-items:center;gap:.9rem;background:#fff;border-radius:14px;border:1px solid #d0d8f0;padding:.85rem 1.1rem;width:100%;max-width:600px;min-width:0;text-decoration:none;color:#1a1a1a;transition:border-color .15s;}
 .cfg-link:hover{background:#f5f7ff;text-decoration:none;border-color:#1a3799;}
 .cfg-icon{font-size:1.5rem;color:#1a3799;flex-shrink:0;line-height:1;}
-.cfg-text strong{display:block;font-size:.9rem;font-weight:700;color:#1a3799;}
+.cfg-text{min-width:0;flex:1 1 auto;}
+.cfg-text strong{display:block;font-size:.9rem;font-weight:700;color:#1a3799;overflow-wrap:break-word;}
 .cfg-text small{font-size:.77rem;color:#777;}
 @media(max-width:440px){.kv{flex-wrap:wrap;}.kl{min-width:unset;width:100%;color:#888;font-size:.78rem;padding-bottom:0;white-space:normal;}}
 </style>

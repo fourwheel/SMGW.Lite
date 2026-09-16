@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-09-15
+
+### Fixed
+- `/flashlong` (used by the "Zustand wechseln" button on both PIN Assistant pages to toggle `InF`/`PIN` on/off on the meter's optical interface) sent a 1500&nbsp;ms pulse, but the FNN "Lastenheft Basiszähler" spec that all certified German mME meters implement requires a "langer Tastendruck" of at least ~5 seconds &ndash; a 1.5s pulse falls below even the short-press threshold (&lt;2s) these meters use, so it never registered as a long press and the toggle silently did nothing. Verified against six manufacturers' official manuals (Landis+Gyr, DZG, Iskraemeco, Apator, EFR, ZPA) &ndash; all specify the same ~5s long-press threshold, confirming this wasn't a single-meter quirk. Default long-pulse duration raised to 6000&nbsp;ms.
+- `Webserver_Flashlight`'s numpad `digit(0)` button skipped the ~3s settle wait entirely (it returned immediately instead of calling the countdown), so a `0` in the PIN could be advanced past before the meter had accepted it. Now waits the full settle time like every other digit.
+- `/sysinfo`'s 2&times;2 quick-link grid (`Systemparameter`/`WLAN-Netzwerke`/`PIN Assistant`/`PIN Assistant Deluxe`) overflowed off-screen on narrow phones &ndash; the `.cfg-link` cards had no `min-width:0`, so the grid tracks grew to fit each card's unshrinkable content instead of wrapping the text. Fixed by letting the cards shrink (`min-width:0` on `.cfg-link`/`.cfg-text`, `overflow-wrap:break-word` on the title) and, since a single long unbreakable word like "Systemparameter" still wrapped awkwardly mid-word in a squeezed 2-column card, by stacking the grid to one column below 480&nbsp;px width (new `.cfg-grid` class replacing the inline grid style in `Webserver_HandleSysInfo()`) so every card gets full width instead.
+
+### Added
+- `/flash` and `/flashlong` now accept an optional `ms` query arg to override the pulse duration (clamped to sane bounds server-side), since the "long press" threshold and other timings are meter-model-specific and previously hardcoded for one model.
+- Both PIN Assistant pages gained a collapsible "Timing-Einstellungen" panel (short pulse, long pulse, inter-pulse gap, digit-settle wait, all in ms) so a different meter model's thresholds can be dialed in from the UI without a firmware rebuild; values persist per-browser via `localStorage`.
+- Hint text for "Zustand wechseln" now explains the actual confirm step: the long pulse only changes the displayed `InF`/`PIN` option, then a single short "Weiter" press commits it and advances the menu &ndash; confirmed against real hardware and cross-checked against six manufacturers' official manuals, so the same instructions work across meter brands, not just one.
+- Both PIN Assistant pages gained a 👀 hint reminding the customer to watch the meter's own display during the procedure (the firmware has no way to read it back), and were reworked to fit within one screen on common phones without scrolling (smaller buttons/paddings, shortened hint text, status/progress text sharing one row).
+
 ## [1.3.5] - 2026-09-06
 
 ### Fixed

@@ -1912,7 +1912,7 @@ void Webserver_HandleSysInfo()
 <div class="logo">&#9889; SmartMeterLite</div>
 <a class="back" href="/">&#8592; Home</a>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;width:100%;max-width:600px;">
+<div class="cfg-grid">
 <a class="cfg-link" href="config" style="max-width:none;">
 <span class="cfg-icon">&#9881;</span>
 <span class="cfg-text">
