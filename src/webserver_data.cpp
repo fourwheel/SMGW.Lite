@@ -352,9 +352,39 @@ void Webserver_ShowMeterValues()
   server.sendContent("");
 }
 
+// Streams the full log (chunked) instead of building one large String, which
+// failed silently (HTTP 200, empty body) once the ring buffer was full and the
+// heap fragmented.
 void Webserver_ShowLogBuffer()
 {
-  server.send(200, "text/html", Log_BufferToString());
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+
+  String s = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; Log Buffer</title>)rawliteral";
+  s += HTML_STYLE_MODERN;
+  s += R"rawliteral(</head>
+<body>
+<div class="logo">&#9889; SmartMeterLite</div>
+<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
+<div class="card" style="max-width:800px;">
+<div class="card-title">Log Buffer</div>
+<div class="tbl">)rawliteral";
+  s += LOG_TABLE_HEADER_HTML;
+  server.sendContent(s);
+
+  for (int n = 0; n < LOG_BUFFER_SIZE; n++)
+  {
+    String row = Log_EntryRowByAge(n);
+    if (row.length() > 0) server.sendContent(row);
+  }
+
+  server.sendContent("</table></div></div></body></html>");
+  server.sendContent("");
 }
 
 void Webserver_ShowTelegram_Raw()
