@@ -2545,7 +2545,7 @@ function _live(d){
   }else if(exp>0){
     _set('net-arr','↑');_set('net-val',_pwr(exp));_set('net-lbl','Netzeinspeisung');
   }
-  var ageS=d.timestamp>0?Math.round(Date.now()/1000-d.timestamp):0;
+  var ageS=d.age_s;
   var el=document.getElementById('m-age');
   if(el){
     if(ageS>=30&&d.last_byte_age_s<30){el.className='m-age m-age-warn';el.innerHTML='&#9888; Empfange Bytes, kann Telegramm nicht lesen &mdash; <a href=\'\/serialScan\' style=\'color:#ffb300;\'>Baud\/Parity prüfen<\/a>';}

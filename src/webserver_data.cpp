@@ -461,6 +461,10 @@ void Webserver_ShowLastMeterValue()
   JsonDocument jsonDoc;
   jsonDoc["meter_value_180"] = LastMeterValue.meter_value_180;
   jsonDoc["timestamp"]       = LastMeterValue.timestamp;
+  // Age computed with the device clock — clients must not use their own clock,
+  // it may differ (or the device may not be time-synced yet, still at 1970).
+  long ageS = (long)Time_getEpochTime() - (long)LastMeterValue.timestamp;
+  jsonDoc["age_s"]           = (LastMeterValue.timestamp > 0 && ageS > 0) ? ageS : 0;
   jsonDoc["temperature"]     = LastMeterValue.temperature;
   jsonDoc["solar"]           = LastMeterValue.solar;
   jsonDoc["meter_value_280"] = LastMeterValue.meter_value_280;

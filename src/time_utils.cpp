@@ -25,7 +25,16 @@ static void Time_onNtpSync(struct timeval *tv)
 void Time_begin()
 {
   sntp_set_time_sync_notification_cb(Time_onNtpSync);
+#ifdef TEST_NTP_BLOCKED
+  // Test only: simulate a network where NTP (UDP/123) is blocked, to exercise
+  // the backend Date-header fallback (expect log 1029 -> 1024, no 1028).
+  //   PowerShell: $env:PLATFORMIO_BUILD_FLAGS="-DTEST_NTP_BLOCKED"; pio run -e esp32-nodemcu -t upload
+  //               Remove-Item Env:PLATFORMIO_BUILD_FLAGS
+  // Then power-cycle the device: a software reset (incl. OTA) keeps the system time.
+  configTime(0, 0, "ntp.invalid", "ntp.invalid", "ntp.invalid");
+#else
   configTime(0, 0, "ptbtime1.ptb.de", "de.pool.ntp.org", "time.cloudflare.com");
+#endif
 }
 
 bool Time_isNtpSynced()
