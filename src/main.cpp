@@ -645,7 +645,7 @@ void setup()
   // be called after iotWebConf.init() (inside Param_setup) has restored them.
   MeterValue_init_Buffer();
 
-  configTime(0, 0, "ptbnts1.ptb.de", "ptbtime1.ptb.de", "ptbtime2.ptb.de");
+  Time_begin();
   Temp_sensors.begin();
   DLOG("Temp sensors found: ");
   DLOGLN(Temp_sensors.getDeviceCount());
@@ -1191,7 +1191,14 @@ void Webclient_send_log_to_backend()
     {
       String line = client.readStringUntil('\n');
       DLOGLN(line);
-      if (line.startsWith("HTTP/1.1 200")) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; logOk = true; break; }
+      if (line.startsWith("HTTP/1.1 200")) {
+        DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; logOk = true;
+        if (Time_isNtpSynced()) break; // otherwise read on: the Date header is the time fallback
+      }
+      else if (logOk) {
+        Time_setFromHttpDate(line);
+        if (line.length() <= 1) break; // blank line = end of headers
+      }
       else b_send_log_to_backend = true;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -1325,6 +1332,7 @@ void Webclient_send_meter_values_to_backend()
 
       if (!headers_done)
       {
+        Time_setFromHttpDate(line); // no-op once NTP is synced or for non-Date lines
         if (line.startsWith("HTTP/1.1 200"))
         {
           DLOGLN("MeterValues successfully sent");
@@ -1394,6 +1402,11 @@ bool MeterValue_store(bool override)
   MeterValue snap = LastMeterValue;
 
   if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
+
+  // The telegram may have been parsed before the time sync even if the store
+  // runs after it. Refuse it; the trigger stays set and the next telegram
+  // (seconds later) carries a valid timestamp.
+  if (!Time_isPlausible(snap.timestamp)) { Log_AddEntry(1027); return false; }
 
   // Skip storing if the value has not changed since the last successful store.
   if (snap.meter_value_180 == PrevMeterValue.meter_value_180
@@ -1685,7 +1698,7 @@ void handle_call_backend()
       Webclient_Send_Log_to_backend_wrapper();
     }
 
-    if ((last_call_backend == 0 && Time_getEpochTime() > 0) || // first boot: fire as soon as NTP is ready
+    if ((last_call_backend == 0 && Time_isSynced()) || // first boot: fire as soon as the time is valid
         (!call_backend_successfull && millis() - last_call_backend > 180000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
           Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
@@ -1854,14 +1867,18 @@ void handle_MeterValue_store()
   }
 }
 
-// Minimum plausible epoch for a reliable NTP sync (2020-01-01 00:00:00 UTC).
-static const unsigned long EPOCH_MIN_PLAUSIBLE = 1577836800UL;
-
 void handle_MeterValue_trigger()
 {
-  // Boot snapshot: fire once as soon as the first telegram has been received
-  // AND the system time is reliably NTP-synced (not the 1970 default).
-  if (!boot_snapshot_done && startup_print_done && Time_getEpochTime() > EPOCH_MIN_PLAUSIBLE)
+  // No TAF triggers before the system time is valid (NTP or backend Date
+  // header, see time_utils): readings would carry
+  // 1970 timestamps (rejected by the backend anyway), the TAF7 grid would be
+  // meaningless, and a trigger left pending would later store a "grid" value
+  // at an arbitrary time. The boot snapshot below takes the first value once
+  // the time is valid.
+  if (!Time_isSynced()) return;
+
+  // Boot snapshot: fire once as soon as the first telegram has been received.
+  if (!boot_snapshot_done && startup_print_done)
   {
     boot_snapshot_done              = true;
     Log_AddEntry(1024);
@@ -2423,6 +2440,15 @@ footer a:hover{color:#1a3799;}
   }
   s += "</div>";
 
+  // Time sync card — no readings are stored until the system time is valid
+  bool timeSynced = Time_isSynced();
+  if (!timeSynced) {
+    s += "<div class='sc' id='sc-time'><div class='sc-top'><div class='dot do'></div><div class='st'>"
+         "<strong>Warte auf Zeitsynchronisation</strong>"
+         "<small>Ohne g&uuml;ltige Uhrzeit werden keine Messwerte gespeichert. Daf&uuml;r ist eine Internetverbindung n&ouml;tig.</small>"
+         "</div></div></div>";
+  }
+
   // WiFi setup card — only shown in AP mode
   if (isApMode) {
     s += R"rawliteral(<div class='wifi-card' id='wifi-card'>
@@ -2491,6 +2517,8 @@ footer a:hover{color:#1a3799;}
   s += hasReading ? "false" : "true";
   s += ";var had280=";
   s += (hasReading && LastMeterValue.meter_value_280 > 0) ? "true" : "false";
+  s += ";var timeSynced=";
+  s += timeSynced ? "true" : "false";
   s += R"rawliteral(;
 function _set(id,txt){var e=document.getElementById(id);if(e)e.textContent=txt;}
 function _pwr(w){var a=Math.abs(w);return a>=1000?(a/1000).toFixed(2)+' kW':a+' W';}
@@ -2498,6 +2526,7 @@ function _meter(v){return Math.floor(v/10000)+','+String(v%10000).padStart(4,'0'
 function _live(d){
   if(needsReload&&d.meter_value_180>0){location.reload();return;}
   if(!had280&&d.meter_value_280>0){location.reload();return;}
+  if(timeSynced!==d.time_synced){location.reload();return;}
   _set('val180',_meter(d.meter_value_180));
   if(d.meter_value_280>0)_set('val280',_meter(d.meter_value_280));
   var imp=d.power_import,exp=d.power_export,net=d.net_power;

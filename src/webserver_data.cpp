@@ -469,6 +469,7 @@ void Webserver_ShowLastMeterValue()
   jsonDoc["net_power"]       = LastMeterValue.net_power;
   jsonDoc["last_byte_age_s"]  = lastByteTime > 0 ? (unsigned long)(millis() - lastByteTime) / 1000 : 9999;
   jsonDoc["wifi_connected"]   = wifi_connected;
+  jsonDoc["time_synced"]      = Time_isSynced();
   jsonDoc["backend_called"]   = last_call_backend > 0;
   jsonDoc["backend_ok"]       = call_backend_successfull;
   jsonDoc["backend_ago_min"]  = (last_call_backend > 0) ? (millis() - last_call_backend) / 60000UL : 0UL;
