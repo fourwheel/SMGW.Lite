@@ -28,6 +28,8 @@ SELECT
   WHEN status_code = 1022 THEN 'TAF 14 trigger not possible, buffer full'
   WHEN status_code = 1023 THEN 'No backend host configured, skipping'
   WHEN status_code = 1024 THEN 'Boot snapshot triggered'
+  WHEN status_code = 1025 THEN 'TAF7: removed recent non-override entry for grid precision'
+  WHEN status_code = 1026 THEN 'Store deferred: meter value upload in progress'
 
   WHEN status_code = 1200 THEN 'Meter value <= 0'
   WHEN status_code = 1201 THEN 'Current meter value = previous meter value'

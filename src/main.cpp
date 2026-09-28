@@ -108,6 +108,10 @@ bool          g_wifiSetupFailed   = false; // set by handle_wifi_setup_lifecycle
 unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() was issued from /wifiSetup
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
+// Guards MeterValueBuffer + write pointers while a meter-value upload is in
+// flight, so a store between "payload sent" and "HTTP 200 -> clear buffer"
+// cannot be wiped without ever having been transmitted.
+static SemaphoreHandle_t Sema_MeterBuffer;
 volatile bool ota_active          = false; // set during OTA to block new backend calls
 volatile bool g_ota_check_requested = false;
 volatile bool g_ota_manual_install_requested = false;
@@ -553,6 +557,7 @@ void telegramTask(void * pvParameters) {
 void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
+  Sema_MeterBuffer = xSemaphoreCreateMutex();
   LogBuffer_reset();
   last_telegram_parsed = millis(); // start watchdog timer from boot
   Log_AddEntry(1001);
@@ -1227,6 +1232,10 @@ void Webclient_send_meter_values_to_backend()
 
   if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
 
+  // Hold the buffer lock from computing the ranges until the buffer is cleared
+  // (or the send failed). handle_MeterValue_store() defers new stores meanwhile.
+  xSemaphoreTake(Sema_MeterBuffer, portMAX_DELAY);
+
   // Determine which byte ranges of the buffer actually contain data.
   //
   // Buffer layout:
@@ -1292,8 +1301,14 @@ void Webclient_send_meter_values_to_backend()
 
   // TAF7 range (front of buffer), then TAF14 range (back of buffer).
   // The backend sorts all entries by timestamp, so the order here doesn't matter.
-  if (taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes))  { client.stop(); call_backend_successfull = false; return; }
-  if (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)) { client.stop(); call_backend_successfull = false; return; }
+  if ((taf7_bytes  > 0 && !sendRange(MeterValueBuffer,                taf7_bytes)) ||
+      (taf14_bytes > 0 && !sendRange(MeterValueBuffer + taf14_offset, taf14_bytes)))
+  {
+    xSemaphoreGive(Sema_MeterBuffer);
+    client.stop();
+    call_backend_successfull = false;
+    return;
+  }
 
   bool ok           = false;
   bool headers_done = false;
@@ -1336,6 +1351,7 @@ void Webclient_send_meter_values_to_backend()
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  xSemaphoreGive(Sema_MeterBuffer);
 
   if (ok && body.length() > 0)
   {
@@ -1797,6 +1813,10 @@ void handle_MeterValue_store()
   if (millis() - last_meter_value_store < 1000) return;
   last_meter_value_store = millis();
 
+  // Upload in flight: defer instead of writing into a buffer that is about to
+  // be cleared. The trigger stays set, so the store is retried in ~1 s.
+  if (xSemaphoreTake(Sema_MeterBuffer, 0) != pdTRUE) { Log_AddEntry(1026); return; }
+
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
@@ -1822,6 +1842,7 @@ void handle_MeterValue_store()
     retVal = MeterValue_store(false);
     if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
   }
+  xSemaphoreGive(Sema_MeterBuffer);
 
   if (retVal == true)
   {

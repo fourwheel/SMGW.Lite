@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-09-27
+
+### Fixed
+- Meter values stored while a backend upload was in flight could be lost: the upload task clears the whole ring buffer after HTTP 200, but `loop()` kept writing new entries into it between sending the payload and receiving the response, so those entries were wiped without ever being transmitted. A new mutex (`Sema_MeterBuffer`) now guards the buffer from computing the upload ranges until it is cleared (or the send fails); `handle_MeterValue_store()` only try-locks it and, if the upload holds it, leaves the trigger set so the store is simply retried ~1 s later instead of blocking `loop()`.
+
+### Added
+- Ring-log code `1026` ("Store deferred: meter value upload in progress"), suppressed on consecutive repeats; added `1025` and `1026` to the Grafana log query mapping.
+
 ## [1.3.6] - 2026-09-15
 
 ### Fixed
