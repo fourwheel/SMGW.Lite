@@ -12,7 +12,9 @@ struct LogEntry {
 void   LogBuffer_reset();
 void   Log_AddEntry(int statusCode);
 String Log_StatusCodeToString(int statusCode);
-String Log_BufferToString(int showNumber = LOG_BUFFER_SIZE);
+extern const char LOG_TABLE_HEADER_HTML[];
+String Log_EntryRowByAge(int n);            // HTML row of the n-th newest entry, "" if unused
+String Log_BufferToString(int showNumber);  // short excerpt (table only), e.g. last 10 for /sysinfo
 
 // Raw buffer access for binary backend transmission (do not modify directly)
 const LogEntry* Log_getRawBuffer();

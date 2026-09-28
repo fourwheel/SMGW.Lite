@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-09-27
+
+### Fixed
+- `/showLogBuffer` returned HTTP 200 with an empty body once the log ring buffer was full (it fills in ~1 h of normal operation: ~7 entries per 2 min) and the heap had fragmented. The page was built as one ~28 KB `String` and copied twice on return, needing several such blocks at once; when an allocation fails, the Arduino `String` silently empties itself. The page is now streamed row by row (chunked, like `/showMeterValues`). `Log_BufferToString()` is reduced to the short table excerpt used by `/sysinfo`; rows come from the new `Log_EntryRowByAge()`.
+
 ## [1.3.8] - 2026-09-27
 
 ### Fixed

@@ -1,6 +1,5 @@
 #include "log_buffer.h"
 #include "time_utils.h"
-#include "html_style.h"
 #include <Arduino.h>
 #if defined(ESP32)
 #include <esp_system.h>
@@ -165,43 +164,27 @@ static String Log_EntryToString(int i)
   return s;
 }
 
+const char LOG_TABLE_HEADER_HTML[] =
+  "<table><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
+
+// Returns the HTML table row of the n-th newest entry (0 = newest), or "" if
+// that slot is unused. Walking n = 0..LOG_BUFFER_SIZE-1 visits the ring buffer
+// newest-first, including the wrap-around.
+String Log_EntryRowByAge(int n)
+{
+  if (logIndex < 0 || n < 0 || n >= LOG_BUFFER_SIZE) return "";
+  return Log_EntryToString((logIndex - n + LOG_BUFFER_SIZE) % LOG_BUFFER_SIZE);
+}
+
+// Short excerpt for /sysinfo. The full log page is streamed row by row
+// instead (Webserver_ShowLogBuffer) — building all 200 rows as one String
+// needs several ~30 KB blocks at once and fails on a fragmented heap.
 String Log_BufferToString(int showNumber)
 {
-  bool fullPage = showNumber > 10;
-  int showed_number = 0;
-  String logString;
-
-  if (fullPage) {
-    logString  = R"rawliteral(<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SmartMeterLite &ndash; Log Buffer</title>)rawliteral";
-    logString += String(HTML_STYLE_MODERN);
-    logString += R"rawliteral(</head>
-<body>
-<div class="logo">&#9889; SmartMeterLite</div>
-<a class="back" href="/sysinfo">&#8592; Zur&uuml;ck</a>
-<div class="card" style="max-width:800px;">
-<div class="card-title">Log Buffer</div>
-<div class="tbl">)rawliteral";
-  }
-
-  logString += "<table><tr><th>Index</th><th>Timestamp</th><th>Timestamp</th><th>Uptime</th><th>Statuscode</th><th>Status</th></tr>";
-
-  for (int i = logIndex; i >= 0; i--) {
-    logString += Log_EntryToString(i);
-    if (++showed_number >= showNumber)
-      return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
-  }
-  if (logIndex < LOG_BUFFER_SIZE - 1) {
-    for (int i = LOG_BUFFER_SIZE - 1; i > logIndex; i--) {
-      logString += Log_EntryToString(i);
-      if (++showed_number >= showNumber) break;
-    }
-  }
-  return logString + "</table>" + (fullPage ? "</div></div></body></html>" : "");
+  String logString = LOG_TABLE_HEADER_HTML;
+  for (int n = 0; n < showNumber; n++) logString += Log_EntryRowByAge(n);
+  logString += "</table>";
+  return logString;
 }
 
 #if defined(ESP32)
