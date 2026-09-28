@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-09-27
+
+### Fixed
+- Meter values were stored with 1970 timestamps until the first NTP sync (e.g. after a power outage when the ESP boots faster than the router, or while the internet stays down). The backend rejects them as `older_than_db_prev`, and for a device without DB history they were inserted as 1970 rows. TAF7/TAF14 triggers now only fire once the system time is plausible (new `Time_isSynced()` in `time_utils`), and `MeterValue_store()` additionally refuses a reading whose telegram timestamp predates the sync (trigger stays set, the next telegram is stored). The boot snapshot takes the first value after the sync. A software reset (OTA, restart) keeps the system time, so it is unaffected.
+- The first backend call after boot fired immediately instead of "as soon as NTP is ready" as the comment claimed &ndash; the condition `Time_getEpochTime() > 0` was always true. It now waits for `Time_isSynced()`.
+- Home page live update computed the telegram age with the browser clock (`Date.now()`) against the device timestamp &ndash; while the device was not time-synced (1970) or whenever the two clocks differed by more than 30s, the status flipped between "PIN eingegeben" (server-rendered) and "Kein Telegramm empfangen" / "Empfange Bytes, kann Telegramm nicht lesen" (script). `/showLastMeterValue` now returns `age_s` computed with the device clock, and the page uses it.
+
+### Changed
+- Time sync is more robust, since meter values now depend on it: the three NTP servers now come from three different operators (`ptbtime1.ptb.de`, `de.pool.ntp.org`, `time.cloudflare.com`) instead of all from PTB, and if NTP never succeeds (e.g. UDP/123 blocked) the time is taken from the `Date:` header of the backend's HTTPS response (log and meter-value uploads) &ndash; only while NTP is not synced and only on a deviation of more than 2 s. TLS works without a valid time (`MBEDTLS_HAVE_TIME_DATE` is off in the Arduino SDK), so the log upload right after WiFi connect can deliver the time. SNTP setup moved to `Time_begin()` in `time_utils`.
+
+### Added
+- Home page shows a "Warte auf Zeitsynchronisation" status card while the system time is not synced; `/showLastMeterValue` gained a `time_synced` field and the page reloads when it flips.
+- Ring-log codes `1027` ("Store skipped: system time not synced"), `1028` ("Time synced via NTP", first sync only) and `1029` ("Time set from backend HTTP Date header"), mapped in the Grafana log query; `1027`/`1029` are suppressed on consecutive repeats.
+- Test-only build flag `TEST_NTP_BLOCKED` replaces the NTP servers with unresolvable names to exercise the Date-header fallback without blocking UDP/123 on the router; usage is documented at `Time_begin()`.
+
 ## [1.3.7] - 2026-09-27
 
 ### Fixed

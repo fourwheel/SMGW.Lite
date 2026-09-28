@@ -15,7 +15,7 @@ static int logIndex = -1;
 // The first occurrence is always written; subsequent identical codes are
 // dropped until a different code is logged.
 // ---------------------------------------------------------------------------
-static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 1026, 3006, 6000, 6002};
+static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 1026, 1027, 1029, 3006, 6000, 6002};
 static int last_logged_statusCode = -1; // last code actually written to the buffer
 
 void LogBuffer_reset()
@@ -80,6 +80,9 @@ String Log_StatusCodeToString(int statusCode)
   case 1024: return "Boot snapshot triggered";
   case 1025: return "TAF7: removed recent non-override entry for grid precision";
   case 1026: return "Store deferred: meter value upload in progress";
+  case 1027: return "Store skipped: system time not synced";
+  case 1028: return "Time synced via NTP";
+  case 1029: return "Time set from backend HTTP Date header (NTP not synced)";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
