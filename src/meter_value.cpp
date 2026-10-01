@@ -89,12 +89,6 @@ bool MeterValue_slot_empty(int index)
   return (ts == 0 && m180 == 0);
 }
 
-void MeterValue_ClearSlot(int index)
-{
-  if (!MeterValueBuffer) return;
-  memset(MeterValueBuffer + MeterValue_Offset(index), 0, MeterValue_EntrySize());
-}
-
 // ---------------------------------------------------------------------------
 // Slot count / budget
 // ---------------------------------------------------------------------------

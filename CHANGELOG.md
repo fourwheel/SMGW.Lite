@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-09-28
+
+### Fixed
+- Data gaps of up to ~10 minutes around TAF7 grid marks: the "remove recent non-override entry" logic re-enabled in 1.3.5 removed one more TAF14 entry on every retry of a TAF7 store. When a TAF14 reading with the same counter value had just been stored (low consumption), the TAF7 store was refused by the 1-min cooldown (`1201`) and retried every second, and each retry cleared the next older TAF14 slot (`meter_value_NON_override_i++`) &ndash; observed as 9 consecutive `1025`/`1201` pairs wiping the previous 9 TAF14 values.
+- A TAF14 reading taken exactly at the grid mark was deleted and replaced by a TAF7 reading 2&ndash;3 s later. The removal logic is gone entirely (`MeterValue_ClearSlot()` removed). Instead TAF7 is considered fulfilled and stores nothing (new log code `1030`) when the last stored value is a TAF14 reading whose telegram timestamp is within &plusmn;10 s of the grid mark. Otherwise TAF7 stores its own value immediately &ndash; unless the counters (1.8.0, 2.8.0, solar, with myStrom fetched fresh) haven't changed since the last stored value, see next entry.
+- TAF7 values could land up to a minute after their grid mark, and the same value could be stored twice with different timestamps: override stores (TAF7, boot snapshot, manual TAF6) with an unchanged value were refused for 1 min, retried every second and then stored late as a duplicate. An override store with an unchanged value is now never stored and its trigger is dropped instead of retried. TAF14 keeps storing an unchanged value again after 15 min as an "alive" heartbeat.
+
 ## [1.3.9] - 2026-09-27
 
 ### Fixed

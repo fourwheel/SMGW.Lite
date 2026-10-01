@@ -33,6 +33,7 @@ SELECT
   WHEN status_code = 1027 THEN 'Store skipped: system time not synced'
   WHEN status_code = 1028 THEN 'Time synced via NTP'
   WHEN status_code = 1029 THEN 'Time set from backend HTTP Date header (NTP not synced)'
+  WHEN status_code = 1030 THEN 'TAF7 fulfilled by TAF14 value at grid mark'
 
   WHEN status_code = 1200 THEN 'Meter value <= 0'
   WHEN status_code = 1201 THEN 'Current meter value = previous meter value'
