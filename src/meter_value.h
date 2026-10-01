@@ -24,8 +24,8 @@ extern bool     config_obis280_enabled;
 // Ring-buffer state
 extern uint8_t* MeterValueBuffer;
 extern int      Meter_Value_Buffer_Size;
-extern int      meter_value_override_i;
-extern int      meter_value_NON_override_i;
+extern int      meter_value_override_i;      // TAF7 write index: upward from 0, overwrites existing entries (see meter_value.cpp)
+extern int      meter_value_NON_override_i;  // TAF14 write index: downward from the end, never overwrites (see meter_value.cpp)
 extern bool     meter_value_buffer_overflow;
 extern bool     meter_value_buffer_full;
 
@@ -53,6 +53,7 @@ void   MeterValue_write(int index, uint32_t ts, uint32_t m180,
 void   MeterValue_read(int index, uint32_t &ts, uint32_t &m180,
                        int32_t &temp, uint32_t &solar, uint32_t &m280);
 bool   MeterValue_slot_empty(int index);
+void   MeterValue_ClearSlot(int index);
 int    MeterValue_slots_from_budget(size_t budgetBytes);
 int    MeterValue_calc_max_slots_for_display();
 void   MeterValue_init_Buffer();

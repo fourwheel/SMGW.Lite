@@ -14,6 +14,19 @@ uint8_t* MeterValueBuffer           = nullptr;
 int      Meter_Value_Buffer_Size    = 234;
 bool     meter_value_buffer_overflow = false;
 bool     meter_value_buffer_full     = false;
+// Write indices into the ring buffer. TAF7 and TAF14 fill it from opposite ends:
+//
+// meter_value_override_i — next slot for override stores (TAF7, also boot
+//   snapshot and manual TAF6). Grows upward from index 0 and OVERWRITES
+//   whatever is in the slot, including TAF14 entries; on reaching the end it
+//   wraps to 0 and sets meter_value_buffer_overflow. TAF7 has priority, so its
+//   values are always stored even when the buffer is full.
+//
+// meter_value_NON_override_i — next slot for TAF14 stores. Grows downward from
+//   the last index and NEVER overwrites: if the target slot is not empty, the
+//   buffer counts as full (meter_value_buffer_full) and the TAF14 value is
+//   dropped (log 1016/1206). The most recent TAF14 entry is therefore at
+//   meter_value_NON_override_i + 1.
 int      meter_value_override_i      = 0;
 int      meter_value_NON_override_i  = 233; // Meter_Value_Buffer_Size - 1
 
@@ -87,6 +100,12 @@ bool MeterValue_slot_empty(int index)
   int32_t  temp;
   MeterValue_read(index, ts, m180, temp, solar, m280);
   return (ts == 0 && m180 == 0);
+}
+
+void MeterValue_ClearSlot(int index)
+{
+  if (!MeterValueBuffer) return;
+  memset(MeterValueBuffer + MeterValue_Offset(index), 0, MeterValue_EntrySize());
 }
 
 // ---------------------------------------------------------------------------

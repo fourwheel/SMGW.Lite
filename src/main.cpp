@@ -184,6 +184,13 @@ HardwareSerial mySerial(1);
 
 bool MeterValue_trigger_override     = false;
 bool MeterValue_trigger_non_override = false;
+// MeterValue_trigger_is_taf7 narrows MeterValue_trigger_override down to TAF7
+// TAF7 mark stores. The override trigger is also set by the boot snapshot and
+// by a manual TAF6 store (/StoreMeterValue); all three share the override store
+// path, but only a TAF7 mark store may remove a TAF14 entry stored <10 s before
+// it (see handle_MeterValue_store()). A manual TAF6 must keep every reading it
+// is asked for, so it must never remove anything.
+bool MeterValue_trigger_is_taf7      = false;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
 bool boot_snapshot_done              = false; // boot snapshot: fired once after first telegram + reliable time
 bool last_store_was_override         = false; // true when the last successful store was a TAF7 override
@@ -659,6 +666,11 @@ void setup()
     float raw_temp = Temp_sensors.getTempCByIndex(0) * 100;
     if (raw_temp > -10000) // filter out -127°C sensor error (-12700 in raw units)
       current_temperature = (int)raw_temp;
+    // Seed LastMeterValue too: the parser carries the previous temperature over
+    // into each new reading and only overwrites it after the first-telegram
+    // diagnostics, while the boot snapshot (loop(), other core) may already
+    // store that first reading.
+    LastMeterValue.temperature = current_temperature;
     DLOG("Initial temperature: ");
     DLOGLN(current_temperature);
     // Next conversion is requested by handle_temperature() after the regular 20 s interval
@@ -1447,11 +1459,10 @@ bool MeterValue_store(bool override)
       return false;
     }
     // New telegram received but counter value unchanged. Override stores (TAF7,
-    // boot snapshot, manual TAF6) never store the same value twice — the value
-    // at this moment is already known from the last stored entry, and
-    // handle_MeterValue_store() then drops the trigger instead of retrying.
-    // TAF14 stores it again after 15 min as an "alive" heartbeat.
-    if (override == true || millis() - last_meter_value_successful < 900000)
+    // boot snapshot, manual TAF6) store it anyway, right away, so every TAF7
+    // mark gets its own entry. TAF14 stores it again only after 15 min as an
+    // "alive" heartbeat.
+    if (override == false && millis() - last_meter_value_successful < 900000)
     {
       Log_AddEntry(1201);
       return false;
@@ -1469,12 +1480,12 @@ bool MeterValue_store(bool override)
 
   if (override == true || meter_value_buffer_full == false)
   {
-    // TAF7 entries represent the grid mark itself (e.g. HH:00/:15/:30/:45),
+    // TAF7 entries represent the TAF7 mark itself (e.g. HH:00/:15/:30/:45),
     // not the arbitrary second within the window the telegram happened to
     // arrive on. Flooring the real timestamp down to that boundary was
     // tried here but trades away real precision (telegram is usually found
     // within ~2s of the mark, not the full 14s window) for a cosmetically
-    // clean grid mark — parked behind #if 0 rather than removed, decide
+    // clean TAF7 mark — parked behind #if 0 rather than removed, decide
     // later whether the tidiness is worth it.
     uint32_t storeTimestamp = snap.timestamp;
 #if 0
@@ -1859,14 +1870,46 @@ void handle_MeterValue_store()
   bool retVal = false;
   if (MeterValue_trigger_override == true)
   {
-    // The former "remove recent TAF14 entry before TAF7" logic (MeterValue_ClearSlot,
-    // log 1025) was removed in 1.3.10 — see git history before that version if needed.
+    // Remember the entry stored before this one: if it is a TAF14 reading taken
+    // less than TAF7_REPLACE_WINDOW_S before the TAF7 value at the mark, it is removed
+    // below so the TAF7 mark isn't preceded by a near-duplicate.
+    static const uint32_t TAF7_REPLACE_WINDOW_S = 10;
+    uint32_t prevTs       = PrevMeterValue.timestamp;
+    bool     prevWasTaf14 = !last_store_was_override && prevTs > 0;
+
     retVal = MeterValue_store(true);
-    if (retVal == true) { last_taf7_meter_value = millis(); last_store_was_override = true; }
-    // Refused because nothing changed since the last stored value: that value
-    // already is the reading at this moment, so the override is fulfilled —
-    // don't keep retrying and store it late once the counter moves.
+    if (retVal == true)
+    {
+      last_taf7_meter_value   = millis();
+      last_store_was_override = true;
+
+      // Runs only after a successful store, i.e. at most once per TAF7 mark —
+      // a refused store that is retried can never remove further entries.
+      // The slot is checked against the remembered timestamp, so nothing else
+      // is removed if the buffer was uploaded/cleared or wrapped in between.
+      uint32_t newTs = PrevMeterValue.timestamp;
+      int      lastTaf14_i = meter_value_NON_override_i + 1;
+      if (MeterValue_trigger_is_taf7 && prevWasTaf14 &&
+          newTs >= prevTs && newTs - prevTs < TAF7_REPLACE_WINDOW_S &&
+          lastTaf14_i < Meter_Value_Buffer_Size)
+      {
+        uint32_t ts, m180, solar, m280;
+        int32_t  temp;
+        MeterValue_read(lastTaf14_i, ts, m180, temp, solar, m280);
+        if (ts == prevTs)
+        {
+          MeterValue_ClearSlot(lastTaf14_i);
+          meter_value_NON_override_i = lastTaf14_i;
+          Log_AddEntry(1025);
+        }
+      }
+    }
+    // Refused although nothing changed since the last stored value — only
+    // possible when no new telegram arrived since then (frozen reading). That
+    // value already is the reading at this moment, so drop the trigger instead
+    // of retrying and storing it late once a telegram comes in.
     else if (MeterValue_unchangedSincePrev(LastMeterValue)) MeterValue_trigger_override = false;
+    if (!MeterValue_trigger_override || retVal) MeterValue_trigger_is_taf7 = false;
   }
   else if (MeterValue_trigger_non_override == true)
   {
@@ -1889,8 +1932,8 @@ void handle_MeterValue_trigger()
 {
   // No TAF triggers before the system time is valid (NTP or backend Date
   // header, see time_utils): readings would carry
-  // 1970 timestamps (rejected by the backend anyway), the TAF7 grid would be
-  // meaningless, and a trigger left pending would later store a "grid" value
+  // 1970 timestamps (rejected by the backend anyway), the TAF7 marks would be
+  // meaningless, and a trigger left pending would later store a "TAF7 mark" value
   // at an arbitrary time. The boot snapshot below takes the first value once
   // the time is valid.
   if (!Time_isSynced()) return;
@@ -1902,13 +1945,14 @@ void handle_MeterValue_trigger()
     Log_AddEntry(1024);
     MeterValue_trigger_override     = true;
     MeterValue_trigger_non_override = false;
+    MeterValue_trigger_is_taf7      = false;
     return;
   }
 
-  // True during the first 15s after a TAF7 grid mark (e.g. HH:00/:15/:30/:45).
+  // True during the first 15s after a TAF7 mark (e.g. HH:00/:15/:30/:45).
   // TAF14 is held back for the whole window (see below) so it cannot land a few
   // seconds after the TAF7 snapshot; a TAF14 reading right before the mark is
-  // handled by the "TAF7 fulfilled" check below.
+  // removed once the TAF7 value is stored (see handle_MeterValue_store()).
   bool taf7WindowOpen = taf7_b_object.isChecked() &&
                          ((Time_getEpochTime() - 1) % ((unsigned long)cached_taf7_param * 60) < 15);
 
@@ -1916,33 +1960,14 @@ void handle_MeterValue_trigger()
       taf7WindowOpen &&
       (millis() - last_taf7_meter_value > 45000))
   {
-    // TAF7 is fulfilled (stores nothing) if the last stored value is a TAF14
-    // reading whose telegram timestamp is within TAF7_TAF14_TOLERANCE_S of this
-    // grid mark (either side — at a second rollover TAF14 can land on or just
-    // after the mark): it already is the grid value. Nothing is ever removed
-    // from the buffer, so a good reading can't be replaced by a later one.
-    // Unchanged counters are not checked here but in MeterValue_store(), which
-    // fetches the current myStrom value first; an unchanged override store is
-    // refused there and its trigger dropped (see handle_MeterValue_store()).
-    static const long TAF7_TAF14_TOLERANCE_S = 10;
-    unsigned long now      = Time_getEpochTime();
-    unsigned long gridSec  = (unsigned long)cached_taf7_param * 60UL;
-    unsigned long gridMark = (now - 1) - ((now - 1) % gridSec);
-    long          offsetS  = (long)PrevMeterValue.timestamp - (long)gridMark;
-
-    last_taf7_meter_value = millis(); // one TAF7 decision per grid mark
-    bool taf14AtMark = !last_store_was_override && PrevMeterValue.timestamp > 0 &&
-                       offsetS >= -TAF7_TAF14_TOLERANCE_S && offsetS <= TAF7_TAF14_TOLERANCE_S;
-    if (taf14AtMark)
-    {
-      Log_AddEntry(1030);
-    }
-    else
-    {
-      Log_AddEntry(1010);
-      MeterValue_trigger_override     = true;
-      MeterValue_trigger_non_override = false;
-    }
+    // TAF7 always stores its own value at the mark. A TAF14 reading
+    // stored less than 10 s before it is removed after the TAF7 store succeeded
+    // (see handle_MeterValue_store()).
+    Log_AddEntry(1010);
+    last_taf7_meter_value = millis(); // one TAF7 trigger per TAF7 mark
+    MeterValue_trigger_override     = true;
+    MeterValue_trigger_non_override = false;
+    MeterValue_trigger_is_taf7      = true;
   }
   else if (MeterValue_trigger_override == false &&
            MeterValue_trigger_non_override == false &&
