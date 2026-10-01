@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.11] - 2026-10-01
+
+### Fixed
+- After a reboot the first meter values were stored with temperature `0`: `current_temperature` started at 0 and the DS18B20 was only read later from `loop()`, while telegrams were already being parsed. The sensor is now read once (blocking, ~750 ms) in `setup()` when the temperature sensor is enabled. This also avoids the sensor's 85&nbsp;&deg;C power-on value, which the first read in `handle_temperature()` could return because it happened without a prior `requestTemperatures()`.
+
 ## [1.3.10] - 2026-09-28
 
 ### Fixed
