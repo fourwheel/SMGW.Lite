@@ -77,11 +77,11 @@ String Log_StatusCodeToString(int statusCode)
   case 1022: return "taf14 trigger not possible, buffer full";
   case 1023: return "No backend host configured, skipping";
   case 1024: return "Boot snapshot triggered";
+  case 1025: return "TAF7: removed TAF14 entry stored <10s before TAF7 value";
   case 1026: return "Store deferred: meter value upload in progress";
   case 1027: return "Store skipped: system time not synced";
   case 1028: return "Time synced via NTP";
   case 1029: return "Time set from backend HTTP Date header (NTP not synced)";
-  case 1030: return "TAF7 fulfilled by TAF14 value at grid mark";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
