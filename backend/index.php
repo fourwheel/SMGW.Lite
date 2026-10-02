@@ -14,14 +14,23 @@ include("../config.php");
 // ---------------------------------------------------------------------------
 $id = authenticate();
 
+// Firmware >= 1.4.0 reports its version and build target with every call.
+$fw_version = fw_param('fw');
+$fw_hw      = fw_param('hw');
+
 // ---------------------------------------------------------------------------
 // Early-exit for connectivity tests
-// The ESP32 calls this endpoint with backend_test=true on startup and from
-// the "Test Backend Connection" page to verify reachability and credentials.
+// The ESP32 calls this endpoint with backend_test=true after an OTA update
+// (validation), from the "Test Backend Connection" page and from the
+// "Check Remote FW Update" page. Firmware >= 1.4.0 requires ok/id in the body,
+// so a server that answers 200 without running this script is not mistaken
+// for a working backend. Firmware before 1.4.0 only checks for HTTP 200.
 // ---------------------------------------------------------------------------
 if (isset($_GET['backend_test']) && $_GET['backend_test'] === "true") {
-    http_response_code(200);
-    exit;
+    $resp = ['ok' => true, 'id' => $id];
+    $fw_update = fw_update_for($id, $fw_version, $fw_hw);
+    if ($fw_update !== null) $resp['fw_update'] = $fw_update;
+    json_response($resp);
 }
 
 // ---------------------------------------------------------------------------
@@ -111,8 +120,10 @@ $rawLen  = strlen($rawData);
 
 // Reject payloads whose length is not an exact multiple of the entry size.
 // A mismatch means the field manifest in the URL does not match the firmware,
-// or the request body was truncated.
-if ($rawLen === 0 || ($rawLen % $entrySize) !== 0) {
+// or the request body was truncated. An empty body is valid: firmware >= 1.4.0
+// calls the backend even without stored values, so it still receives
+// fw_update and the call shows up in clients.last_reading.
+if (($rawLen % $entrySize) !== 0) {
     http_response_code(400);
     $fields_str = implode(',', array_keys($active_fields));
     echo "Invalid data length: $rawLen bytes, entry size $entrySize (fields: $fields_str).";
@@ -207,7 +218,7 @@ usort($entries, fn($a, $b) => $a["timestamp"] <=> $b["timestamp"]);
 // ---------------------------------------------------------------------------
 $enable_file_log  = false; // set to true to enable
 $log_id           = "BF1"; // only log entries from this client ID
-$enable_entry_log = false; // set to true to echo each entry (timestamp meter solar) — verbose, increases response size
+$enable_entry_log = false; // set to true to echo each entry (timestamp meter solar) — breaks the JSON acknowledgement, so devices >= 1.4.0 keep resending
 
 if ($enable_file_log && $id === $log_id && count($entries) > 0) {
     $filename = date("y-m-d-H-i-s") . "-" . $id . ".txt";
@@ -227,14 +238,11 @@ if ($enable_file_log && $id === $log_id && count($entries) > 0) {
     }
 }
 
-http_response_code(200);
-header('Content-Type: application/json');
-
 // ---------------------------------------------------------------------------
 // Database: update client metadata
 // ---------------------------------------------------------------------------
 $wireframe_str = implode(',', array_keys($active_fields));
-update_client_endpoint($id, $wireframe_str);
+update_client_endpoint($id, $wireframe_str, $fw_version);
 
 // ---------------------------------------------------------------------------
 // Database: fetch the last known state for this client
@@ -307,100 +315,114 @@ if ($id !== 'tks') {
     mysqli_stmt_close($stmt_upd);
 }
 
-foreach ($entries as $item) {
+// All inserts of a batch run in one transaction: one commit instead of one per
+// row, and either the whole batch is stored or none of it. On a database error
+// the script answers 500 without an acknowledgement, so the device keeps its
+// buffer and resends it on the next call.
+mysqli_begin_transaction($_link);
+try {
+    foreach ($entries as $item) {
 
-    if ($enable_entry_log) echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
+        if ($enable_entry_log) echo $item["timestamp"] . " " . $item["meter"] . " " . ($item["meter_solar"] ?? "null") . "\n";
 
-    $rejection = null;
+        $rejection = null;
 
-    // Entries older than the last known DB entry arrived out of order —
-    // typically a TAF14 reading buffered before a TAF7 entry that was already
-    // inserted in a previous backend call (e.g. connection dropped after the
-    // server responded 200 but before the ESP received it).
-    // Skip without advancing $prev so the next newer entry validates correctly.
-    if ($item["timestamp"] < $prev["timestamp"]) {
-        $rejection = "older_than_db_prev";
-    }
-    // Skip duplicate timestamps — the client may retry a failed send
-    elseif ($item["timestamp"] == $prev["timestamp"]) {
-        $rejection = "duplicate_timestamp";
-    }
-    // Skip entries where both meter counters are unchanged — no new energy was measured.
-    // Only applies to meters without PIN (whole-kWh precision): on those, identical values
-    // carry no information. PIN meters can legitimately report 0 W (e.g. during vacation)
-    // with unchanged readings, so we keep those entries.
-    // "tks" (fridge thermometer) is excluded entirely — it always reports the same meter value.
-    elseif ($id !== 'tks' && !$is_pin_meter && $item["meter"] == $prev["meter"] && ($item["meter_solar"] ?? null) === $prev["meter_solar"] && ($item["obis280"] ?? null) === $prev["obis280"]) {
-        $rejection = "identical_meter_values";
-    }
-
-    if ($rejection === null) {
-        // Compute average power between consecutive readings.
-        // meter values are in 0.1 Wh units; timestamps are Unix seconds.
-        $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
-        $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
-        $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
-
-        if ($prev["meter"] > $item["meter"]) {
-            $rejection = "meter_rollback(prev=" . $prev["meter"] . ")";
-            $power = 0;
-        } elseif ($power < 0 || $power > 40000) {
-            $rejection = "power_out_of_range(" . round($power) . "W)";
-            $power = 0;
+        // Entries older than the last known DB entry arrived out of order —
+        // typically a TAF14 reading buffered before a TAF7 entry that was already
+        // inserted in a previous backend call (e.g. connection dropped after the
+        // server responded 200 but before the ESP received it).
+        // Skip without advancing $prev so the next newer entry validates correctly.
+        if ($item["timestamp"] < $prev["timestamp"]) {
+            $rejection = "older_than_db_prev";
         }
-    } else {
-        $power = 0;
-        $delta_energy = 0;
-        $delta_time   = 0;
+        // Skip duplicate timestamps — the client may retry a failed send
+        elseif ($item["timestamp"] == $prev["timestamp"]) {
+            $rejection = "duplicate_timestamp";
+        }
+        // Skip entries where both meter counters are unchanged — no new energy was measured.
+        // Only applies to meters without PIN (whole-kWh precision): on those, identical values
+        // carry no information. PIN meters can legitimately report 0 W (e.g. during vacation)
+        // with unchanged readings, so we keep those entries.
+        // "tks" (fridge thermometer) is excluded entirely — it always reports the same meter value.
+        elseif ($id !== 'tks' && !$is_pin_meter && $item["meter"] == $prev["meter"] && ($item["meter_solar"] ?? null) === $prev["meter_solar"] && ($item["obis280"] ?? null) === $prev["obis280"]) {
+            $rejection = "identical_meter_values";
+        }
+
+        if ($rejection === null) {
+            // Compute average power between consecutive readings.
+            // meter values are in 0.1 Wh units; timestamps are Unix seconds.
+            $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
+            $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
+            $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
+
+            if ($prev["meter"] > $item["meter"]) {
+                $rejection = "meter_rollback(prev=" . $prev["meter"] . ")";
+                $power = 0;
+            } elseif ($power < 0 || $power > 40000) {
+                $rejection = "power_out_of_range(" . round($power) . "W)";
+                $power = 0;
+            }
+        } else {
+            $power = 0;
+            $delta_energy = 0;
+            $delta_time   = 0;
+        }
+
+        // Record row for diagnostic log regardless of outcome
+        $diag_rows[] = [
+            'ts'      => $item["timestamp"],
+            'ts_fmt'  => date("Y-m-d H:i:s", $item["timestamp"]),
+            'meter'   => $item["meter"],
+            'solar'   => $item["meter_solar"] ?? "",
+            'obis280' => $item["obis280"] ?? "",
+            'temp'    => isset($item["temperature"]) ? round($item["temperature"] / 100.0, 2) : "",
+            'power_w' => round($power),
+            'prev_ts' => $prev["timestamp"],
+            'prev_m'  => $prev["meter"],
+            'status'  => $rejection ?? "OK",
+        ];
+
+        if ($rejection !== null) {
+            // do not advance prev, do not insert
+            continue;
+        }
+
+        // Advance the "previous" pointer so the next entry is validated against
+        // this one, not the one loaded from the database
+        $prev["timestamp"]   = $item["timestamp"];
+        $prev["meter"]       = $item["meter"];
+        $prev["meter_solar"] = $item["meter_solar"] ?? null;
+        $prev["obis280"]     = $item["obis280"] ?? null;
+
+        // Clamp meter value to zero just in case (should never be negative here)
+        $meter_val = max(0, $item["meter"]);
+
+        // Temperature is stored as integer * 100 on the ESP32 (e.g. 2150 = 21.50 degC)
+        $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : 0.0;
+
+        // Optional fields are NULL when not included in this payload (vs. 0 which is a valid reading)
+        $solar_val   = $item["meter_solar"] ?? null;
+        $obis280_val = $item["obis280"]     ?? null;
+
+        mysqli_stmt_bind_param($insert, "siidddd",
+            $id,
+            $current_time,
+            $item["timestamp"],
+            $meter_val,
+            $solar_val,
+            $temp_val,
+            $obis280_val
+        );
+        if (!mysqli_stmt_execute($insert)) throw new RuntimeException(mysqli_stmt_error($insert));
+        $inserted++;
     }
-
-    // Record row for diagnostic log regardless of outcome
-    $diag_rows[] = [
-        'ts'      => $item["timestamp"],
-        'ts_fmt'  => date("Y-m-d H:i:s", $item["timestamp"]),
-        'meter'   => $item["meter"],
-        'solar'   => $item["meter_solar"] ?? "",
-        'obis280' => $item["obis280"] ?? "",
-        'temp'    => isset($item["temperature"]) ? round($item["temperature"] / 100.0, 2) : "",
-        'power_w' => round($power),
-        'prev_ts' => $prev["timestamp"],
-        'prev_m'  => $prev["meter"],
-        'status'  => $rejection ?? "OK",
-    ];
-
-    if ($rejection !== null) {
-        // do not advance prev, do not insert
-        continue;
-    }
-
-    // Advance the "previous" pointer so the next entry is validated against
-    // this one, not the one loaded from the database
-    $prev["timestamp"]   = $item["timestamp"];
-    $prev["meter"]       = $item["meter"];
-    $prev["meter_solar"] = $item["meter_solar"] ?? null;
-    $prev["obis280"]     = $item["obis280"] ?? null;
-
-    // Clamp meter value to zero just in case (should never be negative here)
-    $meter_val = max(0, $item["meter"]);
-
-    // Temperature is stored as integer * 100 on the ESP32 (e.g. 2150 = 21.50 degC)
-    $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : 0.0;
-
-    // Optional fields are NULL when not included in this payload (vs. 0 which is a valid reading)
-    $solar_val   = $item["meter_solar"] ?? null;
-    $obis280_val = $item["obis280"]     ?? null;
-
-    mysqli_stmt_bind_param($insert, "siidddd",
-        $id,
-        $current_time,
-        $item["timestamp"],
-        $meter_val,
-        $solar_val,
-        $temp_val,
-        $obis280_val
-    );
-    mysqli_stmt_execute($insert);
-    $inserted++;
+    mysqli_commit($_link);
+} catch (Throwable $e) {
+    mysqli_rollback($_link);
+    error_log("index.php: insert failed for $id, batch rolled back: " . $e->getMessage());
+    http_response_code(500);
+    echo "Database error.";
+    exit;
 }
 
 mysqli_stmt_close($insert);
@@ -450,17 +472,20 @@ if ($batch_rejected > 0) {
 
 // ---------------------------------------------------------------------------
 // Response body
-// ota_check is true when a manifest file exists for this device ID, signalling
-// the client to call the firmware update endpoint and compare versions there.
+// bytes/crc32 acknowledge the payload (firmware >= 1.4.0 only clears its
+// buffer if they match what it sent). fw_update is set when the device runs a
+// different version than assigned in fw_targets.php.
+// ota_check is for firmware before 1.4.0: true when a manifest file exists for
+// this device ID, signalling the client to fetch fwupdate/<ID>/manifest.json.
 // ---------------------------------------------------------------------------
 $manifest_path = __DIR__ . '/fwupdate/' . $id . '/manifest.json';
-$response = json_encode([
+$resp = array_merge([
     'received'  => $batch_received,
     'inserted'  => $inserted,
     'rejected'  => $batch_rejected,
     'ota_check' => file_exists($manifest_path),
-]);
-header('Content-Type: application/json');
-header('Content-Length: ' . strlen($response));
-echo $response;
+], payload_ack($rawData));
+$fw_update = fw_update_for($id, $fw_version, $fw_hw);
+if ($fw_update !== null) $resp['fw_update'] = $fw_update;
+json_response($resp);
 ?>

@@ -109,12 +109,12 @@ unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() wa
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
 // Guards MeterValueBuffer + write pointers while a meter-value upload is in
-// flight, so a store between "payload sent" and "HTTP 200 -> clear buffer"
+// flight, so a store between "payload sent" and "acknowledged -> clear buffer"
 // cannot be wiped without ever having been transmitted.
 static SemaphoreHandle_t Sema_MeterBuffer;
 volatile bool ota_active          = false; // set during OTA to block new backend calls
-volatile bool g_ota_check_requested = false;
-volatile bool g_ota_manual_install_requested = false;
+volatile bool g_ota_check_requested = false;          // backend offered another firmware version (OtaPull_setOffer)
+volatile bool g_ota_manual_install_requested = false; // user confirmed "Installieren" on the Remote FW Update page
 static TaskHandle_t h_meter_task = NULL;
 static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
@@ -168,6 +168,7 @@ void Webclient_send_meter_values_to_backend();
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters);
 void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_splitHostAndPath(const String &url, String &host, String &path);
+static int Webclient_read_response(WiFiClientSecure &client, String &body, unsigned long timeout_ms);
 void Webserver_HandleCertUpload();
 void Webserver_HandleRoot();
 void Webserver_HandleSysInfo();
@@ -449,11 +450,16 @@ void Webserver_TestBackendConnectionRun()
                  "Host: " + String(backend_host) + "\r\n" +
                  "X-Auth-Token: " + String(backend_token) + "\r\n" +
                  "Connection: close\r\n\r\n");
-    unsigned long t = millis();
-    while (client.available() == 0 && millis() - t < 5000) {}
-    String response = "";
-    while (client.available()) response += client.readString();
-    auth_ok = response.indexOf("200") != -1;
+    // ID & token only count as valid if the backend confirms them in the body
+    // ({"ok":true,"id":<backend_ID>}) — a bare HTTP 200 may come from a
+    // misconfigured server that never ran the backend script.
+    String body;
+    if (Webclient_read_response(client, body, 5000) == 200)
+    {
+      JsonDocument doc;
+      auth_ok = deserializeJson(doc, body) == DeserializationError::Ok &&
+                (doc["ok"] | false) && strcmp(doc["id"] | "", backend_ID) == 0;
+    }
     client.stop();
   }
 
@@ -1173,6 +1179,85 @@ void handle_Telegram_receive()
   }
 }
 
+// ---------------------------------------------------------------------------
+// Webclient_crc32
+// CRC-32 (IEEE 802.3), identical to PHP hash('crc32b') and zlib crc32().
+// Chainable: start with crc = 0 and pass the previous result for the next block.
+// ---------------------------------------------------------------------------
+static uint32_t Webclient_crc32(uint32_t crc, const uint8_t *data, size_t len)
+{
+  crc = ~crc;
+  while (len--)
+  {
+    crc ^= *data++;
+    for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320UL & (0UL - (crc & 1)));
+  }
+  return ~crc;
+}
+
+// ---------------------------------------------------------------------------
+// Webclient_read_response
+// Reads a backend response: returns the HTTP status code (0 if none arrived
+// in time) and the body. Header lines are offered to the HTTP Date time
+// fallback. The body is read byte-wise up to Content-Length (or until the
+// server closes), so no read waits for a trailing newline. Chunked transfer
+// encoding is not decoded — the backend always sends Content-Length.
+// ---------------------------------------------------------------------------
+static int Webclient_read_response(WiFiClientSecure &client, String &body, unsigned long timeout_ms)
+{
+  const unsigned int MAX_BODY = 1024; // backend responses are < 300 bytes
+  int  status         = 0;
+  long content_length = -1;
+  bool headers_done   = false;
+  body = "";
+  unsigned long deadline = millis() + timeout_ms;
+
+  while (millis() < deadline)
+  {
+    if (headers_done && (body.length() >= MAX_BODY ||
+                         (content_length >= 0 && (long)body.length() >= content_length))) break;
+    if (!client.available())
+    {
+      if (!client.connected()) break;
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+    if (headers_done) { body += (char)client.read(); continue; }
+
+    String line = client.readStringUntil('\n'); // header lines always end with \r\n
+    DLOGLN(line);
+    line.trim();
+    if (status == 0)
+    {
+      if (line.startsWith("HTTP/")) status = line.substring(line.indexOf(' ') + 1).toInt();
+      continue;
+    }
+    if (line.isEmpty())
+    {
+      headers_done = true;
+      if (status != 200) break; // error bodies are not evaluated
+      continue;
+    }
+    if (line.substring(0, 15).equalsIgnoreCase("Content-Length:")) content_length = line.substring(15).toInt();
+    Time_setFromHttpDate(line); // no-op once NTP is synced or for non-Date lines
+  }
+  return status;
+}
+
+// ---------------------------------------------------------------------------
+// Webclient_ack_valid
+// True if a backend response acknowledges exactly the payload that was sent:
+// "bytes" and "crc32" (see payload_ack() in the backend) must match. A server
+// that answers HTTP 200 without running the backend script cannot produce
+// this, so the device never discards data on a bare 200.
+// ---------------------------------------------------------------------------
+static bool Webclient_ack_valid(JsonDocument &doc, size_t bytes, uint32_t crc)
+{
+  char crc_hex[9];
+  snprintf(crc_hex, sizeof(crc_hex), "%08lx", (unsigned long)crc);
+  return (doc["bytes"] | -1L) == (long)bytes && strcmp(doc["crc32"] | "", crc_hex) == 0;
+}
+
 void Webclient_send_log_to_backend()
 {
   if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); return; }
@@ -1209,30 +1294,25 @@ void Webclient_send_log_to_backend()
 
   client.print(logHeader);
   client.write(logDataBuffer, logBufferSize);
+  uint32_t logCrc = Webclient_crc32(0, logDataBuffer, logBufferSize);
   free(logDataBuffer);
 
-  bool logOk = false;
-  unsigned long log_deadline = millis() + 15000;
-  while ((client.connected() || client.available()) && millis() < log_deadline)
+  // The log only counts as sent if the backend acknowledges exactly this payload.
+  String body;
+  int  status = Webclient_read_response(client, body, 15000);
+  bool logOk  = false;
+  if (status == 200)
   {
-    if (client.available())
-    {
-      String line = client.readStringUntil('\n');
-      DLOGLN(line);
-      if (line.startsWith("HTTP/1.1 200")) {
-        DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; logOk = true;
-        if (Time_isNtpSynced()) break; // otherwise read on: the Date header is the time fallback
-      }
-      else if (logOk) {
-        Time_setFromHttpDate(line);
-        if (line.length() <= 1) break; // blank line = end of headers
-      }
-      else b_send_log_to_backend = true;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
+    JsonDocument doc;
+    logOk = deserializeJson(doc, body) == DeserializationError::Ok &&
+            Webclient_ack_valid(doc, logBufferSize, logCrc);
+    if (!logOk) Log_AddEntry(4005);
   }
+  else Log_AddEntry(4003);
+
+  if (logOk) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; }
+  else b_send_log_to_backend = true;
   call_backend_successfull = logOk;
-  if (!logOk) Log_AddEntry(4003);
   client.stop();
 }
 
@@ -1249,6 +1329,10 @@ void Webclient_send_log_to_backend()
 //
 // The buffer is already in the correct wire format, so it is sent directly
 // without any intermediate copy.
+//
+// The buffer is only cleared if the backend acknowledges exactly this payload
+// (bytes + CRC32 in the JSON response). The URL also carries fw/hw, so a
+// confirmed response may contain an fw_update offer for OtaPull.
 // ---------------------------------------------------------------------------
 void Webclient_send_meter_values_to_backend()
 {
@@ -1258,7 +1342,9 @@ void Webclient_send_meter_values_to_backend()
   last_call_backend = millis();
 
   if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); call_backend_successfull = true; return; }
-  if (MeterValue_Num() == 0) { DLOGLN("Zero Values to transmit"); call_backend_successfull = true; return; }
+  // No early return without values: the call (with an empty payload) is also
+  // how the device learns about an assigned firmware update and shows up as
+  // alive in the backend, even if it receives no telegrams.
 
   WiFiClientSecure client;
   client.setTimeout(10000); // 10 s read timeout
@@ -1308,6 +1394,7 @@ void Webclient_send_meter_values_to_backend()
   header += "&heap=" + String(ESP.getFreeHeap());
   header += "&transmittedValues=" + String(MeterValue_Num());
   header += "&IP=" + String(IPlastOctet);
+  header += "&fw=" FIRMWARE_VERSION "&hw=" FIRMWARE_TARGET; // backend answers with fw_update if another version is assigned
   header += " HTTP/1.1\r\n";
   header += "Host: " + backend_host + "\r\n";
   header += "X-Auth-Token: " + String(backend_token) + "\r\n";
@@ -1321,6 +1408,8 @@ void Webclient_send_meter_values_to_backend()
   // drop the tail. WiFiClientSecure::write() may return less than requested.
   // sendRange() logs 4001 and returns false if write() returns 0 (connection
   // lost mid-transfer). Abort without clearing the buffer so data is retried.
+  // The CRC32 of everything sent is compared with the backend acknowledgement.
+  uint32_t crc = 0;
   auto sendRange = [&](const uint8_t* data, size_t len) -> bool {
     const size_t CHUNK = 1024;
     size_t offset = 0;
@@ -1329,6 +1418,7 @@ void Webclient_send_meter_values_to_backend()
       size_t toSend = min(CHUNK, len - offset);
       size_t sent   = client.write(data + offset, toSend);
       if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); return false; }
+      crc = Webclient_crc32(crc, data + offset, sent);
       offset += sent;
     }
     return true;
@@ -1345,59 +1435,35 @@ void Webclient_send_meter_values_to_backend()
     return;
   }
 
-  bool ok           = false;
-  bool headers_done = false;
+  // Clear the buffer only if the backend acknowledges exactly this payload —
+  // HTTP 200 alone is not enough (a misconfigured server may answer 200
+  // without storing anything).
   String body;
-  body.reserve(128);
-  unsigned long mv_deadline = millis() + 15000;
-
-  while ((client.connected() || client.available()) && millis() < mv_deadline)
+  int  status = Webclient_read_response(client, body, 15000);
+  bool ok     = false;
+  JsonDocument doc;
+  if (status == 200)
   {
-    if (client.available())
-    {
-      String line = client.readStringUntil('\n');
-      DLOGLN(line);
+    ok = deserializeJson(doc, body) == DeserializationError::Ok &&
+         Webclient_ack_valid(doc, totalPayload, crc);
+    if (!ok) Log_AddEntry(4004);
+  }
+  else Log_AddEntry(4002);
 
-      if (!headers_done)
-      {
-        Time_setFromHttpDate(line); // no-op once NTP is synced or for non-Date lines
-        if (line.startsWith("HTTP/1.1 200"))
-        {
-          DLOGLN("MeterValues successfully sent");
-          ok = true;
-          MeterValues_clear_Buffer();
-          last_call_backend = millis();
-          Log_AddEntry(1021);
-        }
-        else if (!ok && line.startsWith("HTTP/1.1"))
-        {
-          break; // non-200 status — abort
-        }
-        // blank line (\r stripped by readStringUntil) marks end of headers
-        if (line == "\r" || line.length() <= 1)
-        {
-          if (!ok) break;
-          headers_done = true;
-        }
-      }
-      else
-      {
-        body += line;
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
+  if (ok)
+  {
+    DLOGLN("MeterValues successfully sent");
+    MeterValues_clear_Buffer();
+    last_call_backend = millis();
+    Log_AddEntry(1021);
   }
   xSemaphoreGive(Sema_MeterBuffer);
 
-  if (ok && body.length() > 0)
-  {
-    JsonDocument doc;
-    if (deserializeJson(doc, body) == DeserializationError::Ok)
-      g_ota_check_requested = doc["ota_check"] | false;
-  }
+  // Only a confirmed response may offer a firmware update. Every caller of
+  // this function holds Sema_Backend, as OtaPull_setOffer() requires.
+  if (ok) OtaPull_setOffer(doc["fw_update"]);
 
   call_backend_successfull = ok;
-  if (!ok) Log_AddEntry(4002);
   client.stop();
 }
 
@@ -1452,7 +1518,7 @@ bool MeterValue_store(bool override)
     // Timestamp unchanged = no new telegram received (e.g. meter reader slipped off).
     // Never re-store a frozen reading regardless of elapsed time — this prevents
     // an infinite loop where TAF7 keeps re-queuing the same stale entry after the
-    // backend accepts it with HTTP 200 and clears the buffer.
+    // backend acknowledges it and the buffer is cleared.
     if (snap.timestamp == PrevMeterValue.timestamp)
     {
       Log_AddEntry(1201);
@@ -1750,23 +1816,20 @@ void handle_call_backend()
 
 void handle_remote_ota()
 {
-  static const unsigned long FALLBACK_MS = 24UL * 3600UL * 1000UL;
-  static unsigned long last_check = 0;
+  // hint   = the backend offered another firmware version (fw_update in a
+  //          confirmed response, see OtaPull_setOffer())
+  // manual = the user confirmed "Installieren" on the Remote FW Update page
+  // There is no time-based fallback: the backend is called in every interval,
+  // even without stored values, so an assigned update always arrives.
+  bool manual = g_ota_manual_install_requested;
+  bool hint   = g_ota_check_requested;
 
-  bool manual   = g_ota_manual_install_requested;
-  bool hint     = g_ota_check_requested;
-  bool fallback = millis() - last_check >= FALLBACK_MS;
-
-  if (!manual && !hint && !fallback) return;
+  if (!manual && !hint) return;
 
   g_ota_manual_install_requested = false;
   g_ota_check_requested          = false;
-  last_check                     = millis();
-  // manual and hint both end up here after a page redirect / the next hint
-  // response, so distinguish them explicitly instead of collapsing "user
-  // clicked Installieren" into the same code as a genuine backend hint.
-  Log_AddEntry(manual ? 6022 : (hint ? 6014 : 6015));
-  OtaPull_check();
+  Log_AddEntry(manual ? 6022 : 6014);
+  OtaPull_check(manual);
 }
 
 unsigned long last_meter_value_store   = 0;

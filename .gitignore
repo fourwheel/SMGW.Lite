@@ -2,6 +2,8 @@
 .vscode/
 .claude/
 backend/credentials.php
+backend/fw_targets.php
+backend/fw_releases/
 src/wifi_credentials.h
 src/build_info.h
 manifests/**/*.bin

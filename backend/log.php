@@ -105,12 +105,24 @@ if (!empty($logEntries)) {
             $entry['uptime'],
             $entry['statusCode']
         );
-        mysqli_stmt_execute($stmt);
+        // A failed insert must not be acknowledged — the device would mark
+        // its log as sent although the entries were never stored.
+        if (!mysqli_stmt_execute($stmt)) {
+            error_log("log.php: insert failed for $id: " . mysqli_stmt_error($stmt));
+            http_response_code(500);
+            echo "Database error.";
+            exit;
+        }
         $inserted += mysqli_stmt_affected_rows($stmt);
     }
     mysqli_stmt_close($stmt);
 }
 
-http_response_code(200);
-echo "Log received (" . count($logEntries) . " entries, $inserted new).";
+// bytes/crc32 acknowledge the payload: firmware >= 1.4.0 only counts the
+// upload as successful if they match what it sent. Firmware before 1.4.0 only
+// checks for HTTP 200 and ignores the body.
+json_response(array_merge([
+    'received' => count($logEntries),
+    'inserted' => $inserted,
+], payload_ack($inputData)));
 ?>
