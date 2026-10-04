@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-10-04
+
+### Changed
+- The log is now uploaded whenever a non-routine entry was logged: `Log_AddEntry()` marks the log for upload (`b_send_log_to_backend`) for every code except a short list of routine ones (backend call, TAF triggers, store, log upload, time sync, protocol detection, OTA check without result, value count). It then goes out with the next backend call, i.e. within one interval (usually 2 min). Before, the log was only uploaded after a WiFi (re)connect, a failed log upload, OTA events or `3005`/`3007` &ndash; with the ring buffer covering only ~1 h of normal operation, events like a full meter value buffer, backend failures (`4000`&ndash;`4005`), meter rollbacks, OTA download errors or myStrom errors were usually overwritten before they reached the backend. New codes are reported by default.
+- `3005`/`3007` (meter silent for 5 min) no longer have their own immediate log upload (`b_send_log_urgent`); like any non-routine code they go out with the next backend call. They are still logged every 30 min while the meter stays silent.
+- The number of values to transmit is logged as `100000` + n instead of n: with more than 999 values in the buffer (e.g. after ~16 h without backend) the bare number collided with status codes (1024 showed as "Boot snapshot triggered"). Dashboards understand both ranges.
+
+### Fixed
+- A log entry written while a log upload was running could be dropped from the next upload: the upload cleared the pending flag again after success. It is now only cleared right before the buffer is copied &ndash; and no longer when the upload task is skipped because of an OTA update.
+- A failed allocation of the log upload buffer is logged (`1002`), so the log stays marked for upload.
+
 ## [1.4.1] - 2026-10-04
 
 ### Added

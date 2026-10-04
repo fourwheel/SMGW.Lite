@@ -3,6 +3,11 @@
 
 const int LOG_BUFFER_SIZE = 200;
 
+// The number of values to transmit is logged as LOG_VALUE_COUNT_BASE + n, so it
+// can't collide with a status code (a full buffer holds more than 1000 values).
+// Firmware up to 1.4.1 logged the bare number n (0-999 in the dashboards).
+const int LOG_VALUE_COUNT_BASE = 100000;
+
 struct LogEntry {
   unsigned long timestamp;
   unsigned long uptime;

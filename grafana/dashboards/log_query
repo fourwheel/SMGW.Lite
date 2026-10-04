@@ -4,6 +4,7 @@ SELECT
   status_code AS "Code",
   CASE
   WHEN status_code >= 0 AND status_code < 1000 THEN CONCAT('# values transmitted: ', status_code)
+  WHEN status_code >= 100000 THEN CONCAT('# values transmitted: ', status_code - 100000)
 
   WHEN status_code = 1001 THEN 'setup()'
   WHEN status_code = 1002 THEN 'Memory allocation failed'

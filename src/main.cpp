@@ -217,7 +217,7 @@ unsigned long last_taf7_meter_value       = 0;
 unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
 unsigned long last_telegram_parsed      = 0; // millis() of last successfully parsed telegram; initialised in setup()
-unsigned long last_urgent_log_call        = 0; // millis() of last urgent log.php call
+unsigned long last_silence_log            = 0; // millis() 3005/3007 were last logged, see handle_telegram_watchdog()
 // unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 
 // Params, which you can set via webserver
@@ -311,7 +311,6 @@ IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParame
 
 
 bool b_send_log_to_backend = false;
-bool b_send_log_urgent     = false; // triggers immediate log.php call, independent of meter value cycle
 
 
 void Webserver_LocationHrefsysinfo(int delay)
@@ -569,12 +568,18 @@ void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 
 void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 {
-  b_send_log_to_backend = false;
   if (ota_active) { h_log_task = NULL; vTaskDelete(NULL); return; }
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
     g_log_task_started = millis(); // see Webclient_Send_Meter_Values_to_backend_Task()
-    if (!ota_active) Webclient_send_log_to_backend();
+    if (!ota_active)
+    {
+      // Cleared right before the buffer is copied: entries logged from now on
+      // set it again (Log_AddEntry) and go out with the next upload. Not
+      // cleared when skipped for OTA, so the pending log isn't lost.
+      b_send_log_to_backend = false;
+      Webclient_send_log_to_backend();
+    }
     xSemaphoreGive(Sema_Backend);
   }
   watermark_log_buffer = uxTaskGetStackHighWaterMark(NULL);
@@ -1225,7 +1230,7 @@ void handle_Telegram_receive()
     if (parsed)
     {
       last_telegram_parsed = millis(); // reset watchdog
-      last_urgent_log_call   = 0;       // restart alert cycle if meter comes back online
+      last_silence_log     = 0;         // restart alert cycle if meter comes back online
       if (!startup_print_done) {
         startup_print_done = true;
         Serial.printf("\n--- Startup Meter Diagnostic ---\n");
@@ -1346,7 +1351,7 @@ void Webclient_send_log_to_backend()
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
-  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); call_backend_successfull = false; return; }
+  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); Log_AddEntry(1002); call_backend_successfull = false; return; }
   memcpy(logDataBuffer, Log_getRawBuffer(), logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
@@ -1384,7 +1389,9 @@ void Webclient_send_log_to_backend()
   }
   else Log_AddEntry(4003);
 
-  if (logOk) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); b_send_log_to_backend = false; last_backend_success = millis(); }
+  // No b_send_log_to_backend = false here: the task cleared it before the
+  // buffer was copied; an entry logged since then must keep it set.
+  if (logOk) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); last_backend_success = millis(); }
   else b_send_log_to_backend = true;
   call_backend_successfull = logOk;
   client.stop();
@@ -1411,7 +1418,7 @@ void Webclient_send_log_to_backend()
 void Webclient_send_meter_values_to_backend()
 {
   Log_AddEntry(1005);
-  Log_AddEntry(MeterValue_Num());
+  Log_AddEntry(LOG_VALUE_COUNT_BASE + MeterValue_Num());
   DLOGLN("call_backend_V2");
   last_call_backend = millis();
 
@@ -1831,25 +1838,25 @@ void handle_temperature()
 
 // ---------------------------------------------------------------------------
 // handle_telegram_watchdog
-// Fires status 1024 and an urgent log.php call if no telegram has been
-// received for 5 minutes (e.g. optical reader slipped off the meter).
-// Repeats every 30 minutes while the meter remains silent.
+// Logs 3007 (no serial data) or 3005 (no valid telegram) if nothing has been
+// received for 5 minutes (e.g. optical reader slipped off the meter). Repeats
+// every 30 minutes while the meter remains silent. Like any non-routine code,
+// the entry marks the log for upload with the next backend call.
 // Resets automatically when a new telegram arrives (see handle_Telegram_receive).
 // ---------------------------------------------------------------------------
 void handle_telegram_watchdog()
 {
   if (DebugFromOtherClient_object.isChecked()) return; // no serial telegram expected in remote mode
 
-  bool urgentReady = (last_urgent_log_call == 0 || millis() - last_urgent_log_call >= 1800000UL);
+  bool alertDue = (last_silence_log == 0 || millis() - last_silence_log >= 1800000UL);
 
   if (millis() - lastByteTime >= 300000UL)
   {
     // No bytes at all on the serial interface — optical reader likely disconnected.
-    if (urgentReady)
+    if (alertDue)
     {
       Log_AddEntry(3007);
-      b_send_log_urgent    = true;
-      last_urgent_log_call = millis();
+      last_silence_log = millis();
     }
     return; // 3005 (parse failure) would be redundant — suppress it
   }
@@ -1857,11 +1864,10 @@ void handle_telegram_watchdog()
   if (millis() - last_telegram_parsed >= 300000UL)
   {
     // Bytes arriving but no valid telegram parsed for 5 min (baud/parity mismatch?).
-    if (urgentReady)
+    if (alertDue)
     {
       Log_AddEntry(3005);
-      b_send_log_urgent    = true;
-      last_urgent_log_call = millis();
+      last_silence_log = millis();
     }
   }
 }
@@ -1960,14 +1966,6 @@ void handle_call_backend()
 {
   if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
   {
-    // Urgent log call — triggered by alerts like "no telegram for 5 min".
-    // Runs independently of the meter value backend cycle.
-    if (b_send_log_urgent)
-    {
-      b_send_log_urgent = false;
-      Webclient_Send_Log_to_backend_wrapper();
-    }
-
     if ((last_call_backend == 0 && Time_isSynced()) || // first boot: fire as soon as the time is valid
         (!call_backend_successfull && millis() - last_call_backend > 180000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&

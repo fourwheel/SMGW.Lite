@@ -86,7 +86,6 @@ extern char config_280_char[];
 extern String         backend_host;
 extern String         backend_path;
 extern bool           b_send_log_to_backend;
-extern bool           b_send_log_urgent;
 extern bool           call_backend_successfull;
 
 // TAF cached params
