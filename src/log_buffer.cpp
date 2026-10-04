@@ -82,6 +82,23 @@ String Log_StatusCodeToString(int statusCode)
   case 1027: return "Store skipped: system time not synced";
   case 1028: return "Time synced via NTP";
   case 1029: return "Time set from backend HTTP Date header (NTP not synced)";
+  // 1100 + esp_reset_reason(), logged once at boot
+  case 1100: return "Boot: reset reason unknown";
+  case 1101: return "Boot: power on";
+  case 1102: return "Boot: external reset (reset pin)";
+  case 1103: return "Boot: software restart (OTA, user, self-recovery)";
+  case 1104: return "Boot: exception/panic";
+  case 1105: return "Boot: interrupt watchdog";
+  case 1106: return "Boot: task watchdog";
+  case 1107: return "Boot: other watchdog";
+  case 1108: return "Boot: wake from deep sleep";
+  case 1109: return "Boot: brownout (supply voltage dropped)";
+  case 1110: return "Boot: SDIO reset";
+  case 1111: return "Boot: USB reset";
+  case 1112: return "Boot: JTAG reset";
+  case 1120: return "Self-recovery restart: main loop hung for 10 min";
+  case 1121: return "Self-recovery restart: meter upload hung for 10 min";
+  case 1122: return "Self-recovery restart: log upload hung for 10 min";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
@@ -110,7 +127,7 @@ String Log_StatusCodeToString(int statusCode)
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
-  case 7000: return "Stopping Wifi, Backendcall unsuccessful";
+  case 7000: return "WiFi reconnect: no acknowledged backend call for 30 min (or 2 backend intervals)";
   case 7001: return "Restarting Wifi";
   case 7002: return "WiFi-Setup: connection attempt failed";
   case 7003: return "WiFi-Setup: connected to previously-saved network instead of requested SSID";
@@ -146,6 +163,7 @@ String Log_StatusCodeToString(int statusCode)
   case 6023: return "OTA pull: download — connection failed";
   case 6024: return "OTA pull: download — server returned non-200 (release missing?)";
   case 6025: return "OTA pull: offered version was rolled back before — not installed automatically";
+  case 6026: return "OTA pull: download took longer than 4 min — aborted";
   case 6101: return "Manual update: Update.begin() failed";
   case 6102: return "Manual update: write error during upload";
   case 6103: return "Manual update: Update.end() failed";

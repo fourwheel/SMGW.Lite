@@ -18,6 +18,8 @@ static const int      FW_MAX_RESPONSE_BYTES    = 512;
 static const int      FW_MAX_BINARY_CHUNK      = 1024;
 static const uint32_t FW_ROLLBACK_COOLDOWN_MS  = 15UL * 60 * 1000;
 static const uint32_t FW_RETRY_BACKOFF_MS      = 60UL * 60 * 1000;
+static const uint32_t FW_HANDSHAKE_TIMEOUT_S   = 30;               // TLS default is 120 s
+static const uint32_t FW_DOWNLOAD_MAX_MS       = 4UL * 60 * 1000;  // ~1.2 MB need < 30 s normally
 
 // Update offered by the backend: the fw_update object of the last confirmed
 // response (meter values or backend_test). Empty version = nothing assigned.
@@ -64,6 +66,7 @@ static WiFiClientSecure* fw_open_client()
     WiFiClientSecure* client = new WiFiClientSecure();
     if (!client) return nullptr;
     client->setTimeout(FW_READ_TIMEOUT_MS / 1000);
+    client->setHandshakeTimeout(FW_HANDSHAKE_TIMEOUT_S);
     if (UseSslCert_object.isChecked())
         client->setCACert(FullCert);
     else
@@ -196,8 +199,16 @@ static bool fw_download_and_flash(const String& version,
 
     uint8_t  chunk[FW_MAX_BINARY_CHUNK];
     unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
+    // The deadline only catches a stalled download; the overall cap also ends
+    // one that trickles in, since this runs in loop() (see supervisorTask()).
+    const unsigned long download_started = millis();
 
     while (millis() < deadline) {
+        if (millis() - download_started > FW_DOWNLOAD_MAX_MS) {
+            Log_AddEntry(6026);
+            Update.abort();
+            goto cleanup;
+        }
         int available = client->available();
         if (available > 0) {
             deadline = millis() + FW_READ_TIMEOUT_MS; // reset on data

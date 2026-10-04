@@ -327,12 +327,19 @@ try {
 
         $rejection = null;
 
+        // Timestamps in the future come from a device clock that is not set
+        // correctly (e.g. garbage system time after a software reset). Stored,
+        // such an entry would become $prev and every later, correct entry
+        // would be rejected as older_than_db_prev. 10 min tolerance for clock drift.
+        if ($item["timestamp"] > $current_time + 600) {
+            $rejection = "future_timestamp";
+        }
         // Entries older than the last known DB entry arrived out of order —
         // typically a TAF14 reading buffered before a TAF7 entry that was already
         // inserted in a previous backend call (e.g. connection dropped after the
         // server responded 200 but before the ESP received it).
         // Skip without advancing $prev so the next newer entry validates correctly.
-        if ($item["timestamp"] < $prev["timestamp"]) {
+        elseif ($item["timestamp"] < $prev["timestamp"]) {
             $rejection = "older_than_db_prev";
         }
         // Skip duplicate timestamps — the client may retry a failed send
