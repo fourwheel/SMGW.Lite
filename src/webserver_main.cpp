@@ -275,13 +275,13 @@ poll();
       ota_active = true;
       if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
         Log_AddEntry(6021);
-        fetched = OtaPull_fetchManifestVersion(version);
+        fetched = OtaPull_query(version); // version = firmware assigned in the backend, empty if none
         xSemaphoreGive(Sema_Backend);
       }
       ota_active            = false;
       g_ota_check_requested = false; // don't auto-install while user is deciding
     }
-    if (fetched && version == FIRMWARE_VERSION) Log_AddEntry(6002);
+    if (fetched && (version.isEmpty() || version == FIRMWARE_VERSION)) Log_AddEntry(6002);
 
     String page;
     page.reserve(900);
@@ -300,15 +300,18 @@ poll();
 <div class="card-title">Remote Firmware Update</div>)rawliteral";
 
     if (!fetched) {
-      page += R"rawliteral(<p>Kein Firmware-Update f&uuml;r dieses Ger&auml;t verf&uuml;gbar.</p>
+      page += R"rawliteral(<p>Backend nicht erreichbar oder Antwort ung&uuml;ltig.</p>
 <div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
-    } else if (version == FIRMWARE_VERSION) {
+    } else if (version.isEmpty() || version == FIRMWARE_VERSION) {
       page += "<p>Firmware ist aktuell (v" + String(FIRMWARE_VERSION) + ").</p>\n"
               R"rawliteral(<div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
     } else {
       page += "<p>Version <strong>" + version + "</strong> verf&uuml;gbar"
-              " (aktuell: v" + String(FIRMWARE_VERSION) + "). Jetzt installieren?</p>\n"
-              R"rawliteral(<div class="btns">
+              " (aktuell: v" + String(FIRMWARE_VERSION) + "). Jetzt installieren?</p>\n";
+      if (OtaPull_isRolledBack(version))
+        page += "<p>Diese Version wurde nach einem fehlgeschlagenen Start zur&uuml;ckgerollt"
+                " und wird nicht automatisch installiert.</p>\n";
+      page += R"rawliteral(<div class="btns">
 <a class="btn" href="/installRemoteFw">Installieren</a>
 <a class="btn btn-s" href="/sysinfo">Abbrechen</a>
 </div>)rawliteral";

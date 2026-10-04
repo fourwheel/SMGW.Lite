@@ -1,0 +1,20 @@
+<?php
+// ---------------------------------------------------------------------------
+// Firmware assignment for devices with firmware >= 1.4.0 (see FW_UPDATE.md).
+// Copy to fw_targets.php next to config.php (outside the web root).
+//
+// 'default' applies to every device without its own entry; null = no update.
+// 'devices' maps a device ID to its firmware version. An entry set to null
+// exempts that device from 'default'.
+//
+// A device updates whenever its running version differs from the assigned
+// one, so assigning an older version downgrades it. Every assigned version
+// needs a release in fw_releases/v<version>/<build target>/.
+// ---------------------------------------------------------------------------
+return [
+    'default' => null,
+    'devices' => [
+        // 'BF1' => '1.4.0',
+        // 'ABC' => '1.4.1',
+    ],
+];

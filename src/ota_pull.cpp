@@ -5,7 +5,6 @@
 #include "debug_log.h"
 #include <WiFiClientSecure.h>
 #include <Update.h>
-#include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 #include <mbedtls/md.h>
 #include <Preferences.h>
@@ -15,9 +14,50 @@ extern void Webclient_send_log_to_backend();
 
 static const uint32_t FW_CONNECT_TIMEOUT_MS    = 15000;
 static const uint32_t FW_READ_TIMEOUT_MS       = 30000;
-static const int      FW_MAX_MANIFEST_BYTES    = 512;
+static const int      FW_MAX_RESPONSE_BYTES    = 512;
 static const int      FW_MAX_BINARY_CHUNK      = 1024;
 static const uint32_t FW_ROLLBACK_COOLDOWN_MS  = 15UL * 60 * 1000;
+static const uint32_t FW_RETRY_BACKOFF_MS      = 60UL * 60 * 1000;
+
+// Update offered by the backend: the fw_update object of the last confirmed
+// response (meter values or backend_test). Empty version = nothing assigned.
+// Written and read only while Sema_Backend is held.
+static String offer_version;
+static String offer_sha256;
+static size_t offer_size = 0;
+
+// Last version whose download or flash failed — not retried automatically
+// within FW_RETRY_BACKOFF_MS, so a broken release is not fetched on every call.
+static String   failed_version;
+static uint32_t failed_at = 0;
+
+// Version that failed post-update validation and was rolled back (NVS
+// "ota"/"bad_ver"). It is never installed automatically again, only via the
+// Remote FW Update page, otherwise the device would loop flash -> rollback.
+static String bad_version;
+static bool   bad_version_loaded = false;
+
+static const String& fw_bad_version()
+{
+    if (!bad_version_loaded) {
+        Preferences prefs;
+        prefs.begin("ota", true);
+        bad_version = prefs.getString("bad_ver", "");
+        prefs.end();
+        bad_version_loaded = true;
+    }
+    return bad_version;
+}
+
+// Version strings end up in a URL — accept only what release names contain.
+static bool fw_version_valid(const char* v)
+{
+    size_t len = strlen(v);
+    if (len == 0 || len > 32) return false;
+    for (size_t i = 0; i < len; i++)
+        if (!isalnum((unsigned char)v[i]) && v[i] != '.' && v[i] != '-' && v[i] != '_') return false;
+    return true;
+}
 
 static WiFiClientSecure* fw_open_client()
 {
@@ -37,6 +77,7 @@ static bool fw_send_get(WiFiClientSecure& client, const String& path)
     // which would corrupt the body reader.
     client.print(String("GET ") + path + " HTTP/1.0\r\n"
                  "Host: " + backend_host + "\r\n"
+                 "X-Auth-Token: " + String(backend_token) + "\r\n"
                  "Connection: close\r\n\r\n");
 
     unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
@@ -72,78 +113,69 @@ static void fw_skip_headers(WiFiClientSecure& client)
     }
 }
 
-static bool fw_fetch_manifest(String& version_out, String& filename_out,
-                               String& sha256_out, size_t& size_out)
+// Calls backend_test with fw/hw and checks the confirmation in the body
+// ({"ok":true,"id":<backend_ID>}): a plain HTTP 200 from a misconfigured
+// server does not count as a working backend. With take_offer the fw_update
+// object of the response becomes the current offer (caller holds Sema_Backend).
+static bool fw_backend_test(bool take_offer)
 {
-    String base = backend_path.substring(0, backend_path.lastIndexOf('/') + 1);
-    String path = base + "fwupdate/" + String(backend_ID) + "/manifest.json";
-
     WiFiClientSecure* client = fw_open_client();
     if (!client) return false;
 
-    if (!client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
-        Log_AddEntry(6001);
-        client->stop(); delete client;
-        return false;
-    }
-    if (!fw_send_get(*client, path)) {
-        Log_AddEntry(6012);
-        client->stop(); delete client;
-        return false;
-    }
-    fw_skip_headers(*client);
-
-    char body[FW_MAX_MANIFEST_BYTES + 1];
-    int  bodyLen = 0;
-    unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
-    while (bodyLen < FW_MAX_MANIFEST_BYTES && millis() < deadline) {
-        if (client->available()) {
-            body[bodyLen++] = (char)client->read();
-        } else if (!client->connected()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            if (!client->available()) break;
-        }
-    }
-    body[bodyLen] = '\0';
-    client->stop(); delete client;
-
     bool ok = false;
-    JsonDocument doc;
-    if (deserializeJson(doc, body) == DeserializationError::Ok) {
-        const char* v  = doc["version"]  | "";
-        const char* f  = doc["filename"] | "";
-        const char* s  = doc["sha256"]   | "";
-        size_out       = doc["size"]      | (size_t)UPDATE_SIZE_UNKNOWN;
+    String path = backend_path + "?ID=" + String(backend_ID) + "&backend_test=true"
+                + "&fw=" FIRMWARE_VERSION "&hw=" FIRMWARE_TARGET;
+    if (client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS) &&
+        fw_send_get(*client, path))
+    {
+        fw_skip_headers(*client);
 
-        if (strlen(v) > 0 && strlen(f) > 0 && strlen(s) == 64) {
-            version_out  = String(v);
-            filename_out = String(f);
-            sha256_out   = String(s);
-            sha256_out.toLowerCase();
+        char body[FW_MAX_RESPONSE_BYTES + 1];
+        int  bodyLen = 0;
+        unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
+        while (bodyLen < FW_MAX_RESPONSE_BYTES && millis() < deadline) {
+            if (client->available()) {
+                body[bodyLen++] = (char)client->read();
+            } else if (!client->connected()) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                if (!client->available()) break;
+            }
+        }
+        body[bodyLen] = '\0';
+
+        JsonDocument doc;
+        if (deserializeJson(doc, body) == DeserializationError::Ok &&
+            (doc["ok"] | false) && strcmp(doc["id"] | "", backend_ID) == 0)
+        {
             ok = true;
+            if (take_offer) OtaPull_setOffer(doc["fw_update"]);
         }
     }
-    if (!ok) Log_AddEntry(6013);
+    client->stop();
+    delete client;
     return ok;
 }
 
-static bool fw_download_and_flash(const String& filename,
+static bool fw_download_and_flash(const String& version,
                                    const String& expected_sha256,
                                    size_t        expected_size)
 {
     String base = backend_path.substring(0, backend_path.lastIndexOf('/') + 1);
-    String path = base + "fwupdate/" + String(backend_ID) + "/" + filename;
+    String path = base + "fw_download.php?ID=" + String(backend_ID)
+                + "&version=" + version + "&hw=" FIRMWARE_TARGET;
 
     WiFiClientSecure* client = fw_open_client();
     if (!client) return false;
 
     bool ok = false;
     if (!client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
+        Log_AddEntry(6023);
         client->stop();
         delete client;
         return false;
     }
     if (!fw_send_get(*client, path)) {
+        Log_AddEntry(6024);
         client->stop();
         delete client;
         return false;
@@ -219,11 +251,46 @@ cleanup:
 }
 
 
-bool OtaPull_fetchManifestVersion(String& version_out)
+void OtaPull_setOffer(JsonVariantConst fw_update)
 {
-    String filename, sha256;
-    size_t size;
-    return fw_fetch_manifest(version_out, filename, sha256, size);
+    const char* v    = fw_update["version"] | "";
+    const char* s    = fw_update["sha256"]  | "";
+    size_t      size = fw_update["size"]    | (size_t)0;
+
+    if (fw_update.isNull() || !fw_version_valid(v) || strlen(s) != 64 || size == 0) {
+        if (!fw_update.isNull()) Log_AddEntry(6013);
+        offer_version = "";
+        offer_sha256  = "";
+        offer_size    = 0;
+        return;
+    }
+
+    String version = String(v);
+    bool   is_new  = version != offer_version;
+    offer_version  = version;
+    offer_sha256   = String(s);
+    offer_sha256.toLowerCase();
+    offer_size     = size;
+
+    if (version == FIRMWARE_VERSION) return;
+    if (version == fw_bad_version()) {
+        if (is_new) Log_AddEntry(6025); // log once per offer, not on every backend call
+        return;
+    }
+    if (version == failed_version && millis() - failed_at < FW_RETRY_BACKOFF_MS) return;
+    g_ota_check_requested = true;
+}
+
+bool OtaPull_query(String& version_out)
+{
+    bool ok = fw_backend_test(true);
+    version_out = offer_version;
+    return ok;
+}
+
+bool OtaPull_isRolledBack(const String& version)
+{
+    return !version.isEmpty() && version == fw_bad_version();
 }
 
 void OtaPull_init()
@@ -237,27 +304,7 @@ void OtaPull_init()
     Log_AddEntry(6009);
     DLOGLN("OTA: post-update boot — validating firmware");
 
-    WiFiClientSecure* client = fw_open_client();
-    bool reached = false;
-
-    if (client && client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
-        String path = backend_path + "?ID=" + String(backend_ID) + "&backend_test=true";
-        client->print(String("GET ") + path + " HTTP/1.0\r\n"
-                      "Host: " + backend_host + "\r\n"
-                      "X-Auth-Token: " + String(backend_token) + "\r\n"
-                      "Connection: close\r\n\r\n");
-        unsigned long deadline = millis() + FW_READ_TIMEOUT_MS;
-        while (millis() < deadline) {
-            if (client->available()) {
-                String line = client->readStringUntil('\n');
-                if (line.indexOf(" 200 ") >= 0) { reached = true; break; }
-                if (line.startsWith("HTTP/"))    { break; }
-            } else if (!client->connected()) {
-                break;
-            }
-        }
-    }
-    if (client) { client->stop(); delete client; }
+    bool reached = fw_backend_test(false);
 
     prefs.begin("ota", false);
     prefs.remove("pending");
@@ -266,11 +313,19 @@ void OtaPull_init()
     if (reached) {
         Log_AddEntry(6010);
         DLOGLN("OTA: firmware validated");
+        // A rolled-back version that was installed manually and now works is no longer bad.
+        if (fw_bad_version() == FIRMWARE_VERSION) {
+            prefs.begin("ota", false);
+            prefs.remove("bad_ver");
+            prefs.end();
+            bad_version = "";
+        }
     } else {
         Log_AddEntry(6011);
         DLOGLN("OTA: validation failed — rolling back");
         prefs.begin("ota", false);
         prefs.putBool("rollback", true);
+        prefs.putString("bad_ver", FIRMWARE_VERSION);
         prefs.end();
         Webclient_send_log_to_backend();
         const esp_partition_t* prev = esp_ota_get_next_update_partition(NULL);
@@ -280,7 +335,7 @@ void OtaPull_init()
     }
 }
 
-void OtaPull_check()
+void OtaPull_check(bool manual)
 {
     if (!wifi_connected)       { Log_AddEntry(6016); return; }
     if (ota_active)            { Log_AddEntry(6017); return; }
@@ -311,19 +366,22 @@ void OtaPull_check()
         return;
     }
 
-    String version, filename, sha256;
-    size_t size;
+    String version = offer_version;
+    String sha256  = offer_sha256;
+    size_t size    = offer_size;
 
-    if (!fw_fetch_manifest(version, filename, sha256, size)) {
+    DLOGF("OTA: offered=%s current=%s\n", version.c_str(), FIRMWARE_VERSION);
+
+    if (version.isEmpty() || version == FIRMWARE_VERSION) {
+        Log_AddEntry(6002);
         xSemaphoreGive(Sema_Backend);
         ota_active = false;
         return;
     }
-
-    DLOGF("OTA: server=%s current=%s\n", version.c_str(), FIRMWARE_VERSION);
-
-    if (version == String(FIRMWARE_VERSION)) {
-        Log_AddEntry(6002);
+    // Automatic checks only start for allowed offers (OtaPull_setOffer); the
+    // offer may have changed since, so check again unless the user confirmed.
+    if (!manual && (version == fw_bad_version() ||
+                    (version == failed_version && millis() - failed_at < FW_RETRY_BACKOFF_MS))) {
         xSemaphoreGive(Sema_Backend);
         ota_active = false;
         return;
@@ -331,10 +389,12 @@ void OtaPull_check()
 
     Log_AddEntry(6003);
 
-    bool flashed = fw_download_and_flash(filename, sha256, size);
+    bool flashed = fw_download_and_flash(version, sha256, size);
     xSemaphoreGive(Sema_Backend);
 
     if (!flashed) {
+        failed_version = version;
+        failed_at      = millis();
         ota_active = false;
         return;
     }

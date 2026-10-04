@@ -1,5 +1,9 @@
 # Firmware Deployment — Device ID: ABC
 
+> Only for devices running firmware up to 1.3.12. From 1.4.0 on, firmware is
+> assigned centrally in `fw_targets.php` — see `backend/FW_UPDATE.md`. Use this
+> folder once to bring an old device to 1.4.0 or later.
+
 ## Folder structure
 
 ```

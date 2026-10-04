@@ -105,6 +105,8 @@ String Log_StatusCodeToString(int statusCode)
   case 4001: return "Error transmitting Buffer Chunk";
   case 4002: return "Meter values send failed (no HTTP 200)";
   case 4003: return "Log send failed (no HTTP 200)";
+  case 4004: return "Meter values: HTTP 200 without valid acknowledgement (bytes/crc32) — buffer kept";
+  case 4005: return "Log: HTTP 200 without valid acknowledgement (bytes/crc32)";
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
@@ -119,7 +121,7 @@ String Log_StatusCodeToString(int statusCode)
   case 8003: return "Error reading cert file";
   case 8004: return "No Cert received";
   case 6000: return "OTA pull: check started";
-  case 6001: return "OTA pull: manifest — connection failed";
+  case 6001: return "OTA pull: manifest — connection failed (until 1.3.12)";
   case 6002: return "OTA pull: firmware is up to date";
   case 6003: return "OTA pull: update available, starting download";
   case 6004: return "OTA pull: Update.begin() failed (check partition table)";
@@ -130,10 +132,10 @@ String Log_StatusCodeToString(int statusCode)
   case 6009: return "OTA pull: post-OTA validation — contacting backend";
   case 6010: return "OTA pull: validation successful — firmware confirmed";
   case 6011: return "OTA pull: validation failed — rolling back";
-  case 6012: return "OTA pull: manifest — server returned non-200 (file missing?)";
-  case 6013: return "OTA pull: manifest — invalid JSON or missing fields";
-  case 6014: return "OTA pull: check triggered by backend hint";
-  case 6015: return "OTA pull: check triggered by 24 h fallback";
+  case 6012: return "OTA pull: manifest — server returned non-200 (until 1.3.12)";
+  case 6013: return "OTA pull: fw_update / manifest — invalid or missing fields";
+  case 6014: return "OTA pull: check triggered by backend (fw_update offer / ota_check hint)";
+  case 6015: return "OTA pull: check triggered by 24 h fallback (until 1.3.12)";
   case 6016: return "OTA pull: skipped — WiFi not connected";
   case 6017: return "OTA pull: skipped — ota_active flag set";
   case 6018: return "OTA pull: skipped — backend ID empty";
@@ -141,6 +143,9 @@ String Log_StatusCodeToString(int statusCode)
   case 6020: return "OTA pull: cooldown after rollback — skipping for 15 min";
   case 6021: return "OTA pull: check triggered manually";
   case 6022: return "OTA pull: check triggered by manual install confirmation";
+  case 6023: return "OTA pull: download — connection failed";
+  case 6024: return "OTA pull: download — server returned non-200 (release missing?)";
+  case 6025: return "OTA pull: offered version was rolled back before — not installed automatically";
   case 6101: return "Manual update: Update.begin() failed";
   case 6102: return "Manual update: write error during upload";
   case 6103: return "Manual update: Update.end() failed";

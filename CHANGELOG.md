@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-02
+
+### Added
+- Central firmware assignment: the backend reads the version each device should run from `fw_targets.php` (a `default` for all devices plus per-device entries, `null` exempts a device) next to `config.php`, outside the web root. Every meter value call now reports `fw` and `hw` (build target `esp32c3` / `esp32-nodemcu`, from the IDF target); if the assigned version differs &ndash; newer or older &ndash; the response contains `fw_update` (version, sha256, size) from `fw_releases/v<version>/<hw>/manifest.json`. The device downloads the binary from the new authenticated `fw_download.php` (X-Auth-Token) and flashes it as before (SHA-256 check, post-update validation, rollback). See `backend/FW_UPDATE.md`.
+- A version that fails its post-update validation and is rolled back is stored in NVS (`ota`/`bad_ver`) and never installed automatically again (new log code `6025`), so the device can't loop flash &rarr; rollback. It can still be installed from the "Check Remote FW Update" page, which now shows the version assigned in the backend. A failed download is retried after 1 h at the earliest.
+- New log codes `4004`/`4005` (HTTP 200 without valid acknowledgement), `6023`/`6024` (download connection failed / non-200).
+
+### Changed
+- Uploads only count as successful if the backend acknowledges exactly the sent payload: `index.php` and `log.php` answer with `bytes` and `crc32` (PHP `hash('crc32b')`) of the received body, and the device compares both with what it sent. Before, any HTTP 200 cleared the meter value buffer &ndash; a misconfigured server answering 200 without running the backend made devices drop their data. The response body is now read up to `Content-Length` instead of line by line, and the buffer is cleared only after the body was checked.
+- `index.php` stores each batch in one transaction; on a database error it rolls back and answers 500 without acknowledgement, so the device resends. `log.php` also answers 500 if an insert fails. Before, database errors were ignored and still answered with 200.
+- `backend_test` answers `{"ok":true,"id":...}` (plus `fw_update`); the "Test Backend Connection" page and the post-update validation require this body instead of just HTTP 200 (the connection test even accepted any response containing "200").
+- The backend is now called in every interval even without stored values (empty payload), so a device that receives no telegrams still gets firmware updates and shows up in `clients.last_reading`.
+
+### Removed
+- Per-device manifest `fwupdate/<ID>/manifest.json`, the `ota_check` hint and the 24 h fallback check are no longer used by the firmware. The backend keeps serving them for devices up to 1.3.12 (log codes `6001`, `6012`, `6015` only occur there).
+
 ## [1.3.12] - 2026-10-01
 
 ### Fixed
