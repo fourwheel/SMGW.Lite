@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-10-04
+
+### Added
+- Self-recovery restart: a new supervisor task (priority above `loop()`, so a busy-looping `loop()` can't starve it on the single-core ESP32-C3) restarts the device if `loop()` has not started a new pass for 10 min (`1120`) or a meter value / log upload task has been running for 10 min (`1121`/`1122`). A hung upload task holds `Sema_Backend`, so the device would never call the backend again. K12 went silent like this after a normal, acknowledged call without restarting (cause unknown); such a device now recovers by itself. The cause is kept in NVS across the restart and logged on boot (not in RTC_NOINIT memory, see Fixed).
+- The reset reason is logged at every boot as `1100` + `esp_reset_reason()` (e.g. `1101` power on, `1104` panic, `1106` task watchdog, `1109` brownout), so it reaches the backend with the first log upload instead of only being shown on `/sysinfo`.
+- If no backend call has been acknowledged for 30 min while WiFi reports connected, WiFi is disconnected and IotWebConf reconnects (log `7000`, repeated every 30 min). Unlike a restart this keeps the RAM buffer, so a backend outage costs no data.
+
+### Fixed
+- `index.php` rejects entries with a timestamp more than 10 min in the future (`future_timestamp`). A device with a wrong clock (e.g. garbage system time after a software reset) would otherwise store an entry far in the future, which then becomes the reference for all later entries &ndash; every correct value afterwards was rejected as `older_than_db_prev`. Seen during development of this version: a first draft kept the restart cause in two `RTC_NOINIT_ATTR` variables, which shifted the IDF's own RTC_NOINIT variables that carry the system time across a software reset (`s_esp_rtc_time_us`, `s_rtc_last_ticks`). After an OTA update to a firmware with a different RTC_NOINIT layout the clock read 2055 and the boot snapshot was uploaded with that timestamp. The restart cause is therefore kept in NVS; firmware must not add `RTC_NOINIT_ATTR` variables.
+
 ## [1.4.0] - 2026-10-02
 
 ### Added
