@@ -70,8 +70,8 @@ SELECT
   WHEN status_code = 1111 THEN 'Boot: USB reset'
   WHEN status_code = 1112 THEN 'Boot: JTAG reset'
   WHEN status_code = 1120 THEN 'Self-recovery restart: main loop hung 10 min'
-  WHEN status_code = 1121 THEN 'Self-recovery restart: meter upload task 10 min'
-  WHEN status_code = 1122 THEN 'Self-recovery restart: log upload task 10 min'
+  WHEN status_code = 1121 THEN 'Self-recovery restart: meter upload hung 10 min'
+  WHEN status_code = 1122 THEN 'Self-recovery restart: log upload hung 10 min'
 
   WHEN status_code = 4000 THEN 'Connection to server failed (certificate?)'
   WHEN status_code = 4001 THEN 'Error transmitting buffer chunk'
@@ -106,6 +106,7 @@ SELECT
   WHEN status_code = 6023 THEN 'OTA: download connection failed'
   WHEN status_code = 6024 THEN 'OTA: download HTTP error (release missing?)'
   WHEN status_code = 6025 THEN 'OTA: offered version was rolled back before — not auto-installed'
+  WHEN status_code = 6026 THEN 'OTA: download took longer than 4 min — aborted'
 
   WHEN status_code = 6101 THEN 'Manual update: Update.begin() failed'
   WHEN status_code = 6102 THEN 'Manual update: write error during upload'
@@ -116,7 +117,7 @@ SELECT
   WHEN status_code = 5001 THEN 'myStrom: connect() failed'
   WHEN status_code = 5002 THEN 'myStrom: deserializeJson() failed'
 
-  WHEN status_code = 7000 THEN 'WiFi reconnect: no acknowledged backend call for 30 min'
+  WHEN status_code = 7000 THEN 'WiFi reconnect: no acknowledged backend call for 30 min (or 2 intervals)'
   WHEN status_code = 7001 THEN 'Restarting WiFi'
   WHEN status_code = 7002 THEN 'WiFi setup: connection attempt failed'
   WHEN status_code = 7003 THEN 'WiFi setup: connected to previously-saved network instead of requested SSID'

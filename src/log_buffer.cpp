@@ -97,8 +97,8 @@ String Log_StatusCodeToString(int statusCode)
   case 1111: return "Boot: USB reset";
   case 1112: return "Boot: JTAG reset";
   case 1120: return "Self-recovery restart: main loop hung for 10 min";
-  case 1121: return "Self-recovery restart: meter upload task running for 10 min";
-  case 1122: return "Self-recovery restart: log upload task running for 10 min";
+  case 1121: return "Self-recovery restart: meter upload hung for 10 min";
+  case 1122: return "Self-recovery restart: log upload hung for 10 min";
   case 1200: return "meter value <= 0";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
@@ -127,7 +127,7 @@ String Log_StatusCodeToString(int statusCode)
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
-  case 7000: return "WiFi reconnect: no acknowledged backend call for 30 min";
+  case 7000: return "WiFi reconnect: no acknowledged backend call for 30 min (or 2 backend intervals)";
   case 7001: return "Restarting Wifi";
   case 7002: return "WiFi-Setup: connection attempt failed";
   case 7003: return "WiFi-Setup: connected to previously-saved network instead of requested SSID";
@@ -163,6 +163,7 @@ String Log_StatusCodeToString(int statusCode)
   case 6023: return "OTA pull: download — connection failed";
   case 6024: return "OTA pull: download — server returned non-200 (release missing?)";
   case 6025: return "OTA pull: offered version was rolled back before — not installed automatically";
+  case 6026: return "OTA pull: download took longer than 4 min — aborted";
   case 6101: return "Manual update: Update.begin() failed";
   case 6102: return "Manual update: write error during upload";
   case 6103: return "Manual update: Update.end() failed";

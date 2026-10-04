@@ -120,11 +120,14 @@ static TaskHandle_t h_log_task   = NULL;
 unsigned long last_call_backend = 0; // 0 = never called; set to millis() on first attempt
 unsigned long last_backend_success = 0; // millis() of the last acknowledged upload, see handle_backend_recovery()
 
-// Self-recovery, see supervisorTask(): loop() heartbeat and the start time of
-// the running upload tasks (0 = no task running).
+// Self-recovery, see supervisorTask(): loop() heartbeat and the time the
+// running upload task got Sema_Backend (0 = no upload in progress).
 volatile unsigned long g_loop_heartbeat     = 0;
 volatile unsigned long g_meter_task_started = 0;
 volatile unsigned long g_log_task_started   = 0;
+#ifdef TEST_SELF_RECOVERY
+volatile bool g_test_hang_upload = false; // set by /testTaskHang
+#endif
 // The cause of a supervisorTask() restart (log code 1120-1122) is kept in NVS
 // ("recovery"/"cause"), not in RTC_NOINIT memory: the IDF keeps the system
 // time across a software reset in RTC_NOINIT variables, and adding our own
@@ -442,6 +445,7 @@ void Webserver_TestBackendConnectionRun()
   bool auth_ok = false;
 
   WiFiClientSecure client;
+  client.setHandshakeTimeout(10); // seconds; the default of 120 s would block loop() for minutes
   client.setCACert(FullCert);
 
   if (client.connect(backend_host.c_str(), 443, 5000))
@@ -544,9 +548,16 @@ void Webclient_loadCertToChar()
 
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 {
-  if (ota_active) { g_meter_task_started = 0; h_meter_task = NULL; vTaskDelete(NULL); return; }
+  if (ota_active) { h_meter_task = NULL; vTaskDelete(NULL); return; }
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
+    // Timed from here, not from the spawn: waiting for another holder of
+    // Sema_Backend is not this task's hang, and every holder is watched
+    // itself (the other upload task, or loop() for OTA and web pages).
+    g_meter_task_started = millis();
+#ifdef TEST_SELF_RECOVERY
+    if (g_test_hang_upload) for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+#endif
     if (!ota_active) Webclient_send_meter_values_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
@@ -559,9 +570,10 @@ void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
 void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 {
   b_send_log_to_backend = false;
-  if (ota_active) { g_log_task_started = 0; h_log_task = NULL; vTaskDelete(NULL); return; }
+  if (ota_active) { h_log_task = NULL; vTaskDelete(NULL); return; }
   if (xSemaphoreTake(Sema_Backend, portMAX_DELAY))
   {
+    g_log_task_started = millis(); // see Webclient_Send_Meter_Values_to_backend_Task()
     if (!ota_active) Webclient_send_log_to_backend();
     xSemaphoreGive(Sema_Backend);
   }
@@ -683,6 +695,28 @@ void setup()
   cached_backend_call_minute  = max(1, atoi(backend_call_minute));
   Led_update_Blink();
   Webserver_UrlConfig();
+#ifdef TEST_SELF_RECOVERY
+  // Test only: simulate the failures handled by supervisorTask() and
+  // handle_backend_recovery(); the supervisor limit is 1 min in this build.
+  //   PowerShell: $env:PLATFORMIO_BUILD_FLAGS="-DTEST_SELF_RECOVERY"; pio run -e esp32-nodemcu -t upload
+  //               Remove-Item Env:PLATFORMIO_BUILD_FLAGS
+  // /testLoopHang        loop() blocks forever            -> restart, log 1120
+  // /testTaskHang        the next meter upload task hangs while holding
+  //                      Sema_Backend                      -> restart, log 1121
+  // /testBackendRecovery last acknowledged call backdated   -> WiFi reconnect, log 7000
+  server.on("/testLoopHang", [] {
+    server.send(200, "text/plain", "loop() blocks now");
+    for (;;) delay(1000);
+  });
+  server.on("/testTaskHang", [] {
+    g_test_hang_upload = true;
+    server.send(200, "text/plain", "the next meter upload task hangs");
+  });
+  server.on("/testBackendRecovery", [] {
+    last_backend_success = millis() - 3UL * 3600 * 1000;
+    server.send(200, "text/plain", "last acknowledged backend call backdated by 3 h");
+  });
+#endif
   OTA_setup();
 
   if (!SPIFFS.begin(true)) Log_AddEntry(8000);
@@ -762,17 +796,13 @@ void OTA_setup()
 void Webclient_Send_Meter_Values_to_backend_wrapper()
 {
   if (h_meter_task != NULL) { DLOGLN("Meter task still running, skipping spawn"); return; }
-  g_meter_task_started = millis();
-  if (xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, &h_meter_task) != pdPASS)
-    g_meter_task_started = 0;
+  xTaskCreate(Webclient_Send_Meter_Values_to_backend_Task, "Send_Meter task", 8192, NULL, 2, &h_meter_task);
 }
 
 void Webclient_Send_Log_to_backend_wrapper()
 {
   if (h_log_task != NULL) { DLOGLN("Log task still running, skipping spawn"); return; }
-  g_log_task_started = millis();
-  if (xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, &h_log_task) != pdPASS)
-    g_log_task_started = 0;
+  xTaskCreate(Webclient_Send_Log_to_backend_Task, "send log task", 8192, NULL, 2, &h_log_task);
 }
 
 // Finds an OBIS code in an SML buffer and returns the raw integer value
@@ -1063,7 +1093,9 @@ void myStrom_get_Meter_value()
 
   DLOGLN(F("myStrom_get_Meter_value Connecting..."));
   WiFiClient client;
-  client.setTimeout(1000);
+  // WiFiClient::setTimeout() takes seconds (connect and every read). This runs
+  // in loop() on every store, so an unreachable myStrom must not block long.
+  client.setTimeout(3);
   if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = 0; return; }
 
   DLOGLN(F("myStrom_get_Meter_value Connected!"));
@@ -1092,7 +1124,7 @@ int32_t MeterValue_get_from_remote()
 {
   DLOGLN("MeterValue_get_from_remote Connecting...");
   WiFiClient client;
-  client.setTimeout(2000);
+  client.setTimeout(2); // seconds, see myStrom_get_Meter_value()
   if (!client.connect(DebugMeterValueFromOtherClientIP, 80)) { DLOGLN(F("Connection failed")); return -1; }
 
   DLOGLN(F("Connected!"));
@@ -1389,7 +1421,9 @@ void Webclient_send_meter_values_to_backend()
   // alive in the backend, even if it receives no telegrams.
 
   WiFiClientSecure client;
-  client.setTimeout(10000); // 10 s read timeout
+  // connect(..., 10000) below sets the 10 s socket timeout (each TLS write);
+  // the TLS handshake has its own limit, 120 s by default.
+  client.setHandshakeTimeout(30); // seconds
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
@@ -1838,20 +1872,25 @@ void handle_telegram_watchdog()
 // WiFi reports connected — covers a link that is up but passes no traffic.
 // IotWebConf notices the disconnect and connects again. Unlike a restart this
 // keeps the RAM buffer, so a backend outage costs no data: the reconnect just
-// repeats every 30 min until the backend answers again (log 7000).
+// repeats until the backend answers again (log 7000).
+// With a long backend interval the limit grows to two intervals + 5 min, so a
+// regular gap between two calls never counts as "no success". The calls run
+// at minutes divisible by the interval, so the longest gap is 60 min.
 // ---------------------------------------------------------------------------
 void handle_backend_recovery()
 {
-  static const unsigned long NO_SUCCESS_MS = 30UL * 60 * 1000;
   static unsigned long last_reconnect = 0;
 
-  if (!wifi_connected || g_wifiSetupPending) return;
-  if (millis() - last_backend_success < NO_SUCCESS_MS) return;
-  if (last_reconnect != 0 && millis() - last_reconnect < NO_SUCCESS_MS) return;
+  if (!wifi_connected || g_wifiSetupPending || backend_host.isEmpty()) return;
+
+  unsigned long interval_min = (unsigned long)min(cached_backend_call_minute, 60);
+  unsigned long limit_ms     = max(30UL, 2 * interval_min + 5) * 60UL * 1000UL;
+  if (millis() - last_backend_success < limit_ms) return;
+  if (last_reconnect != 0 && millis() - last_reconnect < limit_ms) return;
 
   last_reconnect = millis();
   Log_AddEntry(7000);
-  DLOGLN("No acknowledged backend call for 30 min - reconnecting WiFi");
+  DLOGLN("No acknowledged backend call within the limit - reconnecting WiFi");
   WiFi.disconnect();
 }
 
@@ -1859,10 +1898,19 @@ void handle_backend_recovery()
 // supervisorTask
 // Restarts the device if it is stuck without rebooting by itself:
 //  - loop() has not started a new pass for 10 min (hung main loop), or
-//  - a meter value or log upload task has been running for 10 min. Normally
-//    it ends after ~2.5 min at most (connect, TLS handshake up to 120 s,
-//    response 15 s), even if the backend is down; while it hangs it holds
-//    Sema_Backend, so no backend call gets through anymore.
+//  - a meter value or log upload task has held Sema_Backend for 10 min; while
+//    it hangs, no backend call gets through anymore.
+// Longest regular durations (all limits set in code), well below 10 min:
+//  - meter upload: DNS 15 s + connect 10 s + TLS handshake 30 s + payload in
+//    1 KB writes of max. 10 s each (16 KB: 160 s, only on a nearly dead link)
+//    + response 15 s = ~4 min worst case, normally a few seconds
+//  - log upload: ~1 min (handshake 10 s, one write)
+//  - loop(): OTA pull up to ~7 min (Sema_Backend 30 s, DNS 15 s, connect
+//    15 s, handshake 30 s, request/headers 75 s, download capped at 4 min);
+//    meter upload after a config change or espota update (Sema_Backend 15 s
+//    + upload as above) ~4.5 min; Check Remote FW Update page and post-update
+//    validation ~3.5 min; connection test page ~1 min; myStrom fetch a few
+//    seconds; optical flash test 20 s
 // The cause is kept in NVS across the restart and logged on boot (1120-1122).
 // Values still in the RAM buffer are lost, but a stuck device would not
 // deliver them either.
@@ -1887,7 +1935,11 @@ static void Supervisor_restart(int cause)
 
 void supervisorTask(void *pvParameters)
 {
+#ifdef TEST_SELF_RECOVERY
+  static const unsigned long LIMIT_MS = 60UL * 1000; // test build: 1 min instead of 10
+#else
   static const unsigned long LIMIT_MS = 10UL * 60 * 1000;
+#endif
   for (;;)
   {
     vTaskDelay(pdMS_TO_TICKS(10000));
