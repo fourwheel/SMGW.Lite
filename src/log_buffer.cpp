@@ -17,34 +17,8 @@ static int logIndex = -1;
 static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 1026, 1027, 1029, 3006, 6000, 6002};
 static int last_logged_statusCode = -1; // last code actually written to the buffer
 
-// ---------------------------------------------------------------------------
-// Log upload trigger
-// Every code that is NOT listed here as routine marks the log for upload
-// (b_send_log_to_backend); it then goes out with the next backend call, i.e.
-// within one backend interval (usually 2 min) — long before the ring buffer
-// (~1 h of normal operation) overwrites it. Routine codes occur in every
-// backend/TAF cycle and would otherwise cause an upload on every call. New
-// codes are reported by default, so nothing important is missed by forgetting
-// to add it somewhere.
-// ---------------------------------------------------------------------------
+// Set by Log_Add(); the next backend call then uploads the log (main.cpp).
 extern bool b_send_log_to_backend;
-
-static const int LOG_ROUTINE_IDS[] = {
-  1005, 1006, 1010, 1011, 1012, 1013, 1014, 1017, 1019, 1020, 1021, // backend call, TAF triggers, store, log upload
-  1023,                                                             // no backend configured (logged on every call)
-  1024, 1025, 1026, 1028, 1029, 1201,                               // boot snapshot, TAF7 cleanup, deferred store, time sync, unchanged value
-  3000, 3003, 3004,                                                 // telegram received, protocol detected
-  6000, 6002, 6014, 6021, 6022,                                     // OTA check started / up to date / triggered
-  8001,                                                             // bundled certificate in use
-};
-
-static bool Log_isRoutine(int statusCode)
-{
-  if (statusCode >= LOG_VALUE_COUNT_BASE) return true; // number of values to transmit
-  for (size_t i = 0; i < sizeof(LOG_ROUTINE_IDS) / sizeof(LOG_ROUTINE_IDS[0]); i++)
-    if (statusCode == LOG_ROUTINE_IDS[i]) return true;
-  return false;
-}
 
 void LogBuffer_reset()
 {
@@ -57,7 +31,7 @@ void LogBuffer_reset()
   last_logged_statusCode = -1;
 }
 
-void Log_AddEntry(int statusCode)
+bool Log_AddWithoutTransmit(int statusCode)
 {
   // Suppress consecutive duplicates for known noisy status codes.
   // Check if this code is in the suppression list.
@@ -65,7 +39,7 @@ void Log_AddEntry(int statusCode)
   for (size_t i = 0; i < sizeof(LOG_SUPPRESS_IDS) / sizeof(LOG_SUPPRESS_IDS[0]); i++) {
     if (statusCode == LOG_SUPPRESS_IDS[i]) { suppressable = true; break; }
   }
-  if (suppressable && statusCode == last_logged_statusCode) return;
+  if (suppressable && statusCode == last_logged_statusCode) return false;
   last_logged_statusCode = statusCode;
 
   // Advance ring-buffer write pointer, overwriting oldest entry on wrap.
@@ -74,8 +48,15 @@ void Log_AddEntry(int statusCode)
   logBuffer[logIndex].timestamp  = Time_getEpochTime();
   logBuffer[logIndex].uptime     = millis(); // ms since boot — monotonic tiebreaker for same-second entries
   logBuffer[logIndex].statusCode = statusCode;
+  return true;
+}
 
-  if (!Log_isRoutine(statusCode)) b_send_log_to_backend = true;
+void Log_Add(int statusCode)
+{
+  // Flag set after writing: the upload task clears it right before copying the
+  // buffer, so the entry is either already in the copy or sets it again.
+  // Not set for a suppressed duplicate — nothing new to upload.
+  if (Log_AddWithoutTransmit(statusCode)) b_send_log_to_backend = true;
 }
 
 const LogEntry* Log_getRawBuffer() { return logBuffer; }

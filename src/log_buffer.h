@@ -15,7 +15,15 @@ struct LogEntry {
 };
 
 void   LogBuffer_reset();
-void   Log_AddEntry(int statusCode);
+// Log_Add() is the normal call: it writes the entry and marks the log for
+// upload with the next backend call (usually within 2 min), long before the
+// ring buffer (~1 h of normal operation) overwrites it. Use it for every
+// error, warning or event worth seeing in the backend.
+// Log_AddWithoutTransmit() only writes the entry; use it for routine entries
+// that occur in every backend/TAF cycle and would otherwise cause an upload on
+// every call. Returns false if the entry was dropped as a consecutive duplicate.
+void   Log_Add(int statusCode);
+bool   Log_AddWithoutTransmit(int statusCode);
 String Log_StatusCodeToString(int statusCode);
 extern const char LOG_TABLE_HEADER_HTML[];
 String Log_EntryRowByAge(int n);            // HTML row of the n-th newest entry, "" if unused

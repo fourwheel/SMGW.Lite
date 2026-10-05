@@ -501,7 +501,7 @@ void Webserver_HandleCertUpload()
     {
       // Empty submission — remove SPIFFS file so the bundled fallback cert is used.
       SPIFFS.remove("/cert.pem");
-      Log_AddEntry(8002);
+      Log_Add(8002);
       Webserver_LocationHrefsysinfo();
       return;
     }
@@ -511,19 +511,19 @@ void Webserver_HandleCertUpload()
     {
       file.println(cert);
       file.close();
-      Log_AddEntry(8002);
+      Log_Add(8002);
       Webserver_LocationHrefsysinfo();
     }
     else
     {
-      Log_AddEntry(8003);
+      Log_Add(8003);
       Webserver_LocationHrefsysinfo();
       server.send(500, "text/plain", "Cannot Open File!");
     }
   }
   else
   {
-    Log_AddEntry(8004);
+    Log_Add(8004);
     Webserver_LocationHrefsysinfo();
   }
 }
@@ -542,7 +542,7 @@ void Webclient_loadCertToChar()
   // No cert in SPIFFS — fall back to bundled ISRG Root X1
   strncpy(FullCert, ISRG_ROOT_X1, sizeof(FullCert) - 1);
   FullCert[sizeof(FullCert) - 1] = '\0';
-  Log_AddEntry(8001);
+  Log_AddWithoutTransmit(8001);
 }
 
 void Webclient_Send_Meter_Values_to_backend_Task(void *pvParameters)
@@ -575,7 +575,7 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
     if (!ota_active)
     {
       // Cleared right before the buffer is copied: entries logged from now on
-      // set it again (Log_AddEntry) and go out with the next upload. Not
+      // set it again (Log_Add) and go out with the next upload. Not
       // cleared when skipped for OTA, so the pending log isn't lost.
       b_send_log_to_backend = false;
       Webclient_send_log_to_backend();
@@ -607,11 +607,11 @@ void setup()
   Sema_MeterBuffer = xSemaphoreCreateMutex();
   LogBuffer_reset();
   last_telegram_parsed = millis(); // start watchdog timer from boot
-  Log_AddEntry(1001);
+  Log_Add(1001);
   // Why did the device start? 1100 + esp_reset_reason() (power on, panic,
   // watchdog, brownout, software...), plus the cause if supervisorTask()
   // restarted it. Both reach the backend with the first log upload.
-  Log_AddEntry(1100 + (int)esp_reset_reason());
+  Log_Add(1100 + (int)esp_reset_reason());
   {
     // Read-only first: the namespace is only opened for writing (and thereby
     // created) by Supervisor_restart(), not on every boot.
@@ -620,7 +620,7 @@ void setup()
     if (prefs.begin("recovery", true)) { cause = prefs.getInt("cause", 0); prefs.end(); }
     if (cause != 0)
     {
-      Log_AddEntry(cause);
+      Log_Add(cause);
       prefs.begin("recovery", false);
       prefs.remove("cause");
       prefs.end();
@@ -724,7 +724,7 @@ void setup()
 #endif
   OTA_setup();
 
-  if (!SPIFFS.begin(true)) Log_AddEntry(8000);
+  if (!SPIFFS.begin(true)) Log_Add(8000);
   Webclient_loadCertToChar();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
 
@@ -974,9 +974,9 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
   // was visible to the other core — causing the REST API to occasionally return 0.
   if (found180 && temp180 > 0) {
     if (PrevMeterValue.meter_value_180 > 0 && temp180 < PrevMeterValue.meter_value_180)
-      Log_AddEntry(1208);
+      Log_Add(1208);
     if (found280 && PrevMeterValue.meter_value_280 > 0 && temp280 < PrevMeterValue.meter_value_280)
-      Log_AddEntry(1208);
+      Log_Add(1208);
     MeterValue newVal = {};
     // Preserve solar if MyStrom is active (mirrors resetMeterValue logic)
     if (mystrom_PV_object.isChecked()) newVal.solar = LastMeterValue.solar;
@@ -1061,13 +1061,13 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
 
   uint32_t new180 = (uint32_t)(kWh180 * 10000.0f);
   if (PrevMeterValue.meter_value_180 > 0 && new180 < PrevMeterValue.meter_value_180)
-    Log_AddEntry(1208);
+    Log_Add(1208);
 
   float v280_raw = 0.0f;
   bool has280 = parseIecObis("1-0:2.8.0", &v280_raw);
   uint32_t new280 = has280 ? (uint32_t)(v280_raw * 10000.0f) : 0;
   if (has280 && PrevMeterValue.meter_value_280 > 0 && new280 < PrevMeterValue.meter_value_280)
-    Log_AddEntry(1208);
+    Log_Add(1208);
 
   float v170 = 0.0f, v270 = 0.0f, v167 = 0.0f;
   parseIecObis("1-0:1.7.0",  &v170);
@@ -1101,13 +1101,13 @@ void myStrom_get_Meter_value()
   // WiFiClient::setTimeout() takes seconds (connect and every read). This runs
   // in loop() on every store, so an unreachable myStrom must not block long.
   client.setTimeout(3);
-  if (!client.connect(mystrom_PV_IP, 80)) { Log_AddEntry(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = 0; return; }
+  if (!client.connect(mystrom_PV_IP, 80)) { Log_Add(5000); DLOGLN(F("myStrom_get_Meter_value Connection failed")); LastMeterValue.solar = 0; return; }
 
   DLOGLN(F("myStrom_get_Meter_value Connected!"));
   client.println(F("GET /report HTTP/1.0"));
   client.print(F("Host: ")); client.println(mystrom_PV_IP);
   client.println(F("Connection: close"));
-  if (client.println() == 0) { Log_AddEntry(5001); client.stop(); LastMeterValue.solar = 0; return; }
+  if (client.println() == 0) { Log_Add(5001); client.stop(); LastMeterValue.solar = 0; return; }
 
   char status[32] = {0};
   client.readBytesUntil('\r', status, sizeof(status));
@@ -1118,7 +1118,7 @@ void myStrom_get_Meter_value()
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, client);
-  if (error) { Log_AddEntry(5002); client.stop(); LastMeterValue.solar = 0; return; }
+  if (error) { Log_Add(5002); client.stop(); LastMeterValue.solar = 0; return; }
 
   LastMeterValue.temperature = doc["temperature"].as<float>() * 100;
   LastMeterValue.solar       = doc["energy_since_boot"].as<int>();
@@ -1202,7 +1202,7 @@ void handle_Telegram_receive()
       telegram_receive_buffer[telegram_receive_bufferIndex++] = incomingByte;
     else
     {
-      Log_AddEntry(3001);
+      Log_Add(3001);
       Telegram_ResetReceiveBuffer();
       continue;
     }
@@ -1225,7 +1225,7 @@ void handle_Telegram_receive()
     }
     if (!parsed)
     {
-      Log_AddEntry(3006);
+      Log_Add(3006);
     }
     if (parsed)
     {
@@ -1246,8 +1246,8 @@ void handle_Telegram_receive()
       }
     }
     if(last_detected_protocol != prev_detected_protocol){
-      if(last_detected_protocol == TelegramProtocol::SML) Log_AddEntry(3003);
-      else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddEntry(3004);
+      if(last_detected_protocol == TelegramProtocol::SML) Log_AddWithoutTransmit(3003);
+      else if(last_detected_protocol == TelegramProtocol::IEC) Log_AddWithoutTransmit(3004);
 
       prev_detected_protocol = last_detected_protocol;
     }
@@ -1339,19 +1339,19 @@ static bool Webclient_ack_valid(JsonDocument &doc, size_t bytes, uint32_t crc)
 
 void Webclient_send_log_to_backend()
 {
-  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); return; }
+  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddWithoutTransmit(1023); return; }
   DLOGLN("Send Log to Backend");
-  Log_AddEntry(1019);
+  Log_AddWithoutTransmit(1019);
   WiFiClientSecure client;
   client.setHandshakeTimeout(10); // 10 s SSL handshake timeout
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_Add(4000); call_backend_successfull = false; return; }
 
   size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
   uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
-  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); Log_AddEntry(1002); call_backend_successfull = false; return; }
+  if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); Log_Add(1002); call_backend_successfull = false; return; }
   memcpy(logDataBuffer, Log_getRawBuffer(), logBufferSize);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
@@ -1385,13 +1385,13 @@ void Webclient_send_log_to_backend()
     JsonDocument doc;
     logOk = deserializeJson(doc, body) == DeserializationError::Ok &&
             Webclient_ack_valid(doc, logBufferSize, logCrc);
-    if (!logOk) Log_AddEntry(4005);
+    if (!logOk) Log_Add(4005);
   }
-  else Log_AddEntry(4003);
+  else Log_Add(4003);
 
   // No b_send_log_to_backend = false here: the task cleared it before the
   // buffer was copied; an entry logged since then must keep it set.
-  if (logOk) { DLOGLN("Log successfully sent"); Log_AddEntry(1020); last_backend_success = millis(); }
+  if (logOk) { DLOGLN("Log successfully sent"); Log_AddWithoutTransmit(1020); last_backend_success = millis(); }
   else b_send_log_to_backend = true;
   call_backend_successfull = logOk;
   client.stop();
@@ -1417,12 +1417,12 @@ void Webclient_send_log_to_backend()
 // ---------------------------------------------------------------------------
 void Webclient_send_meter_values_to_backend()
 {
-  Log_AddEntry(1005);
-  Log_AddEntry(LOG_VALUE_COUNT_BASE + MeterValue_Num());
+  Log_AddWithoutTransmit(1005);
+  Log_AddWithoutTransmit(LOG_VALUE_COUNT_BASE + MeterValue_Num());
   DLOGLN("call_backend_V2");
   last_call_backend = millis();
 
-  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddEntry(1023); call_backend_successfull = true; last_backend_success = millis(); return; }
+  if (backend_host.isEmpty()) { DLOGLN("No backend host configured, skipping"); Log_AddWithoutTransmit(1023); call_backend_successfull = true; last_backend_success = millis(); return; }
   // No early return without values: the call (with an empty payload) is also
   // how the device learns about an assigned firmware update and shows up as
   // alive in the backend, even if it receives no telegrams.
@@ -1434,7 +1434,7 @@ void Webclient_send_meter_values_to_backend()
   if (UseSslCert_object.isChecked()) client.setCACert(FullCert);
   else client.setInsecure();
 
-  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_AddEntry(4000); call_backend_successfull = false; return; }
+  if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_Add(4000); call_backend_successfull = false; return; }
 
   // Hold the buffer lock from computing the ranges until the buffer is cleared
   // (or the send failed). handle_MeterValue_store() defers new stores meanwhile.
@@ -1500,7 +1500,7 @@ void Webclient_send_meter_values_to_backend()
     {
       size_t toSend = min(CHUNK, len - offset);
       size_t sent   = client.write(data + offset, toSend);
-      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_AddEntry(4001); return false; }
+      if (sent == 0) { DLOGLN("write() returned 0 — aborting"); Log_Add(4001); return false; }
       crc = Webclient_crc32(crc, data + offset, sent);
       offset += sent;
     }
@@ -1529,9 +1529,9 @@ void Webclient_send_meter_values_to_backend()
   {
     ok = deserializeJson(doc, body) == DeserializationError::Ok &&
          Webclient_ack_valid(doc, totalPayload, crc);
-    if (!ok) Log_AddEntry(4004);
+    if (!ok) Log_Add(4004);
   }
-  else Log_AddEntry(4002);
+  else Log_Add(4002);
 
   if (ok)
   {
@@ -1539,7 +1539,7 @@ void Webclient_send_meter_values_to_backend()
     MeterValues_clear_Buffer();
     last_call_backend    = millis();
     last_backend_success = millis();
-    Log_AddEntry(1021);
+    Log_AddWithoutTransmit(1021);
   }
   xSemaphoreGive(Sema_MeterBuffer);
 
@@ -1578,7 +1578,7 @@ bool MeterValue_unchangedSincePrev(const MeterValue &v)
 // ---------------------------------------------------------------------------
 bool MeterValue_store(bool override)
 {
-  if (ESP.getFreeHeap() < 1000) { Log_AddEntry(1015); DLOGLN("Not enough free heap to store another value"); return false; }
+  if (ESP.getFreeHeap() < 1000) { Log_Add(1015); DLOGLN("Not enough free heap to store another value"); return false; }
 
   if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
 
@@ -1589,12 +1589,12 @@ bool MeterValue_store(bool override)
   // struct from the other core.
   MeterValue snap = LastMeterValue;
 
-  if (snap.meter_value_180 <= 0) { Log_AddEntry(1200); return false; }
+  if (snap.meter_value_180 <= 0) { Log_Add(1200); return false; }
 
   // The telegram may have been parsed before the time sync even if the store
   // runs after it. Refuse it; the trigger stays set and the next telegram
   // (seconds later) carries a valid timestamp.
-  if (!Time_isPlausible(snap.timestamp)) { Log_AddEntry(1027); return false; }
+  if (!Time_isPlausible(snap.timestamp)) { Log_Add(1027); return false; }
 
   // Skip storing if the value has not changed since the last successful store.
   if (MeterValue_unchangedSincePrev(snap))
@@ -1605,7 +1605,7 @@ bool MeterValue_store(bool override)
     // backend acknowledges it and the buffer is cleared.
     if (snap.timestamp == PrevMeterValue.timestamp)
     {
-      Log_AddEntry(1201);
+      Log_AddWithoutTransmit(1201);
       return false;
     }
     // New telegram received but counter value unchanged. Override stores (TAF7,
@@ -1614,7 +1614,7 @@ bool MeterValue_store(bool override)
     // "alive" heartbeat.
     if (override == false && millis() - last_meter_value_successful < 900000)
     {
-      Log_AddEntry(1201);
+      Log_AddWithoutTransmit(1201);
       return false;
     }
   }
@@ -1683,7 +1683,7 @@ bool MeterValue_store(bool override)
   }
   else
   {
-    Log_AddEntry(1016);
+    Log_Add(1016);
     MeterValue_trigger_non_override = false; // prevent immediate re-trigger
     DLOGLN("Buffer full, no space to write new value!");
     return false;
@@ -1748,7 +1748,7 @@ void handle_wifi_setup_lifecycle()
   g_wifiSetupPending = false;
   g_wifiSetupFailed  = true;
   WiFi.disconnect();
-  Log_AddEntry(7002);
+  Log_Add(7002);
   DLOGLN("WiFi-Setup: connection attempt failed, freeing radio for AP.");
   Webserver_ClearPendingWifiCredentials();
 }
@@ -1768,7 +1768,7 @@ void handle_check_wifi_connection()
     }
     else if (current_wifi_status == WL_CONNECTED && !wifi_connected)
     {
-      Log_AddEntry(1008);
+      Log_Add(1008);
       DLOGLN("Connection has returned: Resetting Backend Timer, starting OTA");
       ArduinoOTA.begin();
       wifi_connected         = true;
@@ -1782,7 +1782,7 @@ void handle_check_wifi_connection()
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
-      Log_AddEntry(1009);
+      Log_Add(1009);
       wifi_connected = false;
     }
     else
@@ -1855,7 +1855,7 @@ void handle_telegram_watchdog()
     // No bytes at all on the serial interface — optical reader likely disconnected.
     if (alertDue)
     {
-      Log_AddEntry(3007);
+      Log_Add(3007);
       last_silence_log = millis();
     }
     return; // 3005 (parse failure) would be redundant — suppress it
@@ -1866,7 +1866,7 @@ void handle_telegram_watchdog()
     // Bytes arriving but no valid telegram parsed for 5 min (baud/parity mismatch?).
     if (alertDue)
     {
-      Log_AddEntry(3005);
+      Log_Add(3005);
       last_silence_log = millis();
     }
   }
@@ -1895,7 +1895,7 @@ void handle_backend_recovery()
   if (last_reconnect != 0 && millis() - last_reconnect < limit_ms) return;
 
   last_reconnect = millis();
-  Log_AddEntry(7000);
+  Log_Add(7000);
   DLOGLN("No acknowledged backend call within the limit - reconnecting WiFi");
   WiFi.disconnect();
 }
@@ -1993,7 +1993,7 @@ void handle_remote_ota()
 
   g_ota_manual_install_requested = false;
   g_ota_check_requested          = false;
-  Log_AddEntry(manual ? 6022 : 6014);
+  Log_AddWithoutTransmit(manual ? 6022 : 6014);
   OtaPull_check(manual);
 }
 
@@ -2030,7 +2030,7 @@ static const uint32_t DYNTAF_FULL_THRESHOLD_MS = 5000; // ms after which base th
 void handle_dynTaf()
 {
   if (LastMeterValue.timestamp == 0) return;
-  if (meter_value_buffer_full) { Log_AddEntry(1022); return; }
+  if (meter_value_buffer_full) { Log_Add(1022); return; }
 
   // Scale thresholds based on time since any successful store.
   uint32_t elapsed = millis() - last_meter_value_successful;
@@ -2078,7 +2078,7 @@ void handle_dynTaf()
 
   if (triggerAbs || triggerMulti)
   {
-    Log_AddEntry(1018);
+    Log_Add(1018);
     MeterValue_trigger_non_override = true;
     last_dyntaf_store = millis();
   }
@@ -2093,7 +2093,7 @@ void handle_MeterValue_store()
 
   // Upload in flight: defer instead of writing into a buffer that is about to
   // be cleared. The trigger stays set, so the store is retried in ~1 s.
-  if (xSemaphoreTake(Sema_MeterBuffer, 0) != pdTRUE) { Log_AddEntry(1026); return; }
+  if (xSemaphoreTake(Sema_MeterBuffer, 0) != pdTRUE) { Log_AddWithoutTransmit(1026); return; }
 
   bool retVal = false;
   if (MeterValue_trigger_override == true)
@@ -2128,7 +2128,7 @@ void handle_MeterValue_store()
         {
           MeterValue_ClearSlot(lastTaf14_i);
           meter_value_NON_override_i = lastTaf14_i;
-          Log_AddEntry(1025);
+          Log_AddWithoutTransmit(1025);
         }
       }
     }
@@ -2148,7 +2148,7 @@ void handle_MeterValue_store()
 
   if (retVal == true)
   {
-    Log_AddEntry(1017);
+    Log_AddWithoutTransmit(1017);
     last_taf14_meter_value      = millis();
     last_meter_value_successful = millis();
     MeterValue_trigger_override     = false;
@@ -2170,7 +2170,7 @@ void handle_MeterValue_trigger()
   if (!boot_snapshot_done && startup_print_done)
   {
     boot_snapshot_done              = true;
-    Log_AddEntry(1024);
+    Log_AddWithoutTransmit(1024);
     MeterValue_trigger_override     = true;
     MeterValue_trigger_non_override = false;
     MeterValue_trigger_is_taf7      = false;
@@ -2191,7 +2191,7 @@ void handle_MeterValue_trigger()
     // TAF7 always stores its own value at the mark. A TAF14 reading
     // stored less than 10 s before it is removed after the TAF7 store succeeded
     // (see handle_MeterValue_store()).
-    Log_AddEntry(1010);
+    Log_AddWithoutTransmit(1010);
     last_taf7_meter_value = millis(); // one TAF7 trigger per TAF7 mark
     MeterValue_trigger_override     = true;
     MeterValue_trigger_non_override = false;
@@ -2204,8 +2204,8 @@ void handle_MeterValue_trigger()
            millis() - last_meter_value_successful >= 1000UL * (unsigned long)cached_taf14_param &&
            millis() - last_taf14_meter_value      >= 1000UL * (unsigned long)cached_taf14_param)
   {
-    if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_AddEntry(1206); }
-    else { Log_AddEntry(1011); MeterValue_trigger_non_override = true; }
+    if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_Add(1206); }
+    else { Log_AddWithoutTransmit(1011); MeterValue_trigger_non_override = true; }
   }
   // else if (MeterValue_trigger_override == false && MeterValue_trigger_non_override == false)
   // {
@@ -2880,7 +2880,7 @@ void Param_configSaved()
   redirect_to_sysinfo = true;
   Led_update_Blink();
   Webclient_splitHostAndPath(String(backend_endpoint), backend_host, backend_path);
-  Log_AddEntry(1003);
+  Log_Add(1003);
 
   cached_taf7_param           = max(1, atoi(taf7_param));
   cached_taf14_param          = max(1, atoi(taf14_param));
@@ -2908,7 +2908,7 @@ void Param_configSaved()
       Webclient_send_meter_values_to_backend();
       xSemaphoreGive(Sema_Backend);
     }
-    Log_AddEntry(1004);
+    Log_Add(1004);
     MeterValue_init_Buffer();
   }
 }
