@@ -18,7 +18,7 @@ static const int LOG_SUPPRESS_IDS[] = {1200, 1201, 1206, 1022, 1026, 1027, 1029,
 static int last_logged_statusCode = -1; // last code actually written to the buffer
 
 // Set by Log_Add(); the next backend call then uploads the log (main.cpp).
-extern bool b_send_log_to_backend;
+extern volatile bool b_send_log_to_backend;
 
 // Entries written since boot and how many of them the backend has acknowledged,
 // so a regular upload only carries the new ones (see Log_CopyForUpload()). RAM
@@ -107,7 +107,10 @@ size_t Log_CopyForUpload(uint8_t *out, bool full, uint32_t &upto)
 void Log_MarkSent(uint32_t upto)
 {
   portENTER_CRITICAL(&log_mux);
-  if ((int32_t)(upto - log_sent) > 0) log_sent = upto; // never move back (a full upload may run after a newer one)
+  // Never move back (a full upload may be acknowledged after a newer one), and
+  // never past log_written (the ring may have been reset during the upload).
+  if ((int32_t)(upto - log_sent) > 0) log_sent = upto;
+  if ((int32_t)(log_written - log_sent) < 0) log_sent = log_written;
   portEXIT_CRITICAL(&log_mux);
 }
 

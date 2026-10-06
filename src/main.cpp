@@ -310,7 +310,7 @@ IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParame
 
 
 
-bool b_send_log_to_backend = false;
+volatile bool b_send_log_to_backend = false;
 volatile bool g_log_upload_full = false; // next log upload sends the whole ring (manual upload pages)
 
 

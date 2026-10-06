@@ -85,7 +85,7 @@ extern char config_280_char[];
 // Backend runtime state
 extern String         backend_host;
 extern String         backend_path;
-extern bool           b_send_log_to_backend;
+extern volatile bool  b_send_log_to_backend;
 extern volatile bool  g_log_upload_full;
 extern bool           call_backend_successfull;
 
