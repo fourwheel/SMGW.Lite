@@ -175,7 +175,7 @@ bool SerialConfig_setByIndex(int idx)
     mySerial.end();
     mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
     SerialConfig_save(idx);
-    Log_AddEntry(3012);
+    Log_Add(3012);
     return true;
 }
 
@@ -255,7 +255,7 @@ void SerialScan_run()
         mySerial.end();
         mySerial.begin(saved_baud, saved_config, RX_PIN, TX_PIN);
     }
-    Log_AddEntry(scan_found >= 0 ? 3010 : 3011);
+    Log_Add(scan_found >= 0 ? 3010 : 3011);
 
     scan_state   = ScanState::DONE;
     scan_current = -1;

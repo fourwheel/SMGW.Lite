@@ -18,7 +18,7 @@ static volatile bool s_ntp_synced = false;
 
 static void Time_onNtpSync(struct timeval *tv)
 {
-  if (!s_ntp_synced) Log_AddEntry(1028); // log the first sync only, not every 3 h resync
+  if (!s_ntp_synced) Log_AddWithoutTransmit(1028); // log the first sync only, not every 3 h resync
   s_ntp_synced = true;
 }
 
@@ -80,7 +80,7 @@ bool Time_setFromHttpDate(const String &line)
 
   struct timeval tv = { (time_t)epoch, 0 };
   settimeofday(&tv, nullptr);
-  Log_AddEntry(1029);
+  Log_AddWithoutTransmit(1029);
   return true;
 }
 

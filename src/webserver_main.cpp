@@ -274,14 +274,14 @@ poll();
     if (wifi_connected && strlen(backend_ID) > 0 && !backend_host.isEmpty()) {
       ota_active = true;
       if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
-        Log_AddEntry(6021);
+        Log_AddWithoutTransmit(6021);
         fetched = OtaPull_query(version); // version = firmware assigned in the backend, empty if none
         xSemaphoreGive(Sema_Backend);
       }
       ota_active            = false;
       g_ota_check_requested = false; // don't auto-install while user is deciding
     }
-    if (fetched && (version.isEmpty() || version == FIRMWARE_VERSION)) Log_AddEntry(6002);
+    if (fetched && (version.isEmpty() || version == FIRMWARE_VERSION)) Log_AddWithoutTransmit(6002);
 
     String page;
     page.reserve(900);
@@ -326,10 +326,10 @@ poll();
   server.on("/installRemoteFw", []() { g_ota_manual_install_requested = true; Webserver_LocationHrefsysinfo(15); });
   server.on("/restart", [] { Webserver_LocationHrefsysinfo(5); delay(100); ESP.restart(); });
   server.on("/resetLogBuffer", [] { Webserver_LocationHrefsysinfo(); LogBuffer_reset(); });
-  server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddEntry(1006); MeterValue_trigger_override = true; });
+  server.on("/StoreMeterValue", [] { Webserver_LocationHrefsysinfo(); Log_AddWithoutTransmit(1006); MeterValue_trigger_override = true; });
   server.on("/MeterValue_init_Buffer", [] { MeterValue_init_Buffer(); Webserver_LocationHrefsysinfo(); });
-  server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); Webclient_Send_Log_to_backend_wrapper(); });
-  server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
+  server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
   server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefsysinfo(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
@@ -455,12 +455,12 @@ function fwPollReboot(){
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       Serial.printf("Update Start: %s\n", upload.filename.c_str());
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { Update.printError(Serial); Log_AddEntry(6101); }
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { Update.printError(Serial); Log_Add(6101); }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { Update.printError(Serial); Log_AddEntry(6102); }
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { Update.printError(Serial); Log_Add(6102); }
     } else if (upload.status == UPLOAD_FILE_END) {
-      if (Update.end(true)) { Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); Log_AddEntry(6104); }
-      else { Update.printError(Serial); Log_AddEntry(6103); }
+      if (Update.end(true)) { Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); Log_Add(6104); }
+      else { Update.printError(Serial); Log_Add(6103); }
     }
   });
 }
@@ -631,7 +631,7 @@ void Webserver_ConfirmWifiSetupSuccess()
   iotWebConf.saveConfig();
   g_pendingWifiPassword = "";
 
-  Log_AddEntry(7004);
+  Log_Add(7004);
   DLOGLN("WiFi-Setup: connected, credentials saved, stopping AP in 2 s.");
 }
 
@@ -677,7 +677,7 @@ void Webserver_HandleWifiStatus()
     {
       g_wifiSetupPending = false;
       g_wifiSetupFailed  = true;
-      Log_AddEntry(7003);
+      Log_Add(7003);
       DLOGLN("WiFi-Setup: connected to a different network than requested (previously-saved config) - treating as failed.");
       Webserver_ClearPendingWifiCredentials();
       server.send(200, "application/json", "{\"connected\":false,\"failed\":true}");
@@ -734,7 +734,7 @@ void Webserver_CheckWifiSetupFallback()
     // one - nothing new to persist, just stop blocking the pending state forever.
     g_wifiSetupPending = false;
     g_wifiSetupFailed  = true;
-    Log_AddEntry(7003);
+    Log_Add(7003);
     DLOGLN("WiFi-Setup: connected to previously-saved network, client never confirmed - marking failed.");
     Webserver_ClearPendingWifiCredentials();
   }

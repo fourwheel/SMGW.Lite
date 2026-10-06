@@ -172,13 +172,13 @@ static bool fw_download_and_flash(const String& version,
 
     bool ok = false;
     if (!client->connect(backend_host.c_str(), 443, FW_CONNECT_TIMEOUT_MS)) {
-        Log_AddEntry(6023);
+        Log_Add(6023);
         client->stop();
         delete client;
         return false;
     }
     if (!fw_send_get(*client, path)) {
-        Log_AddEntry(6024);
+        Log_Add(6024);
         client->stop();
         delete client;
         return false;
@@ -186,7 +186,7 @@ static bool fw_download_and_flash(const String& version,
     fw_skip_headers(*client);
 
     if (!Update.begin(expected_size, U_FLASH)) {
-        Log_AddEntry(6004);
+        Log_Add(6004);
         client->stop();
         delete client;
         return false;
@@ -205,7 +205,7 @@ static bool fw_download_and_flash(const String& version,
 
     while (millis() < deadline) {
         if (millis() - download_started > FW_DOWNLOAD_MAX_MS) {
-            Log_AddEntry(6026);
+            Log_Add(6026);
             Update.abort();
             goto cleanup;
         }
@@ -217,7 +217,7 @@ static bool fw_download_and_flash(const String& version,
             if (bytes > 0) {
                 mbedtls_md_update(&ctx, chunk, bytes);
                 if (Update.write(chunk, bytes) != (size_t)bytes) {
-                    Log_AddEntry(6005);
+                    Log_Add(6005);
                     Update.abort();
                     goto cleanup;
                 }
@@ -240,17 +240,17 @@ static bool fw_download_and_flash(const String& version,
 
         if (expected_sha256 != String(computed)) {
             DLOGLN("OTA: SHA256 mismatch");
-            Log_AddEntry(6006);
+            Log_Add(6006);
             Update.abort();
             goto cleanup;
         }
 
         if (!Update.end(true)) {
-            Log_AddEntry(6007);
+            Log_Add(6007);
             goto cleanup;
         }
 
-        Log_AddEntry(6008);
+        Log_Add(6008);
         ok = true;
     }
 
@@ -269,7 +269,7 @@ void OtaPull_setOffer(JsonVariantConst fw_update)
     size_t      size = fw_update["size"]    | (size_t)0;
 
     if (fw_update.isNull() || !fw_version_valid(v) || strlen(s) != 64 || size == 0) {
-        if (!fw_update.isNull()) Log_AddEntry(6013);
+        if (!fw_update.isNull()) Log_Add(6013);
         offer_version = "";
         offer_sha256  = "";
         offer_size    = 0;
@@ -285,7 +285,7 @@ void OtaPull_setOffer(JsonVariantConst fw_update)
 
     if (version == FIRMWARE_VERSION) return;
     if (version == fw_bad_version()) {
-        if (is_new) Log_AddEntry(6025); // log once per offer, not on every backend call
+        if (is_new) Log_Add(6025); // log once per offer, not on every backend call
         return;
     }
     if (version == failed_version && millis() - failed_at < FW_RETRY_BACKOFF_MS) return;
@@ -312,7 +312,7 @@ void OtaPull_init()
     prefs.end();
     if (!pending) return;
 
-    Log_AddEntry(6009);
+    Log_Add(6009);
     DLOGLN("OTA: post-update boot — validating firmware");
 
     bool reached = fw_backend_test(false);
@@ -322,7 +322,7 @@ void OtaPull_init()
     prefs.end();
 
     if (reached) {
-        Log_AddEntry(6010);
+        Log_Add(6010);
         DLOGLN("OTA: firmware validated");
         // A rolled-back version that was installed manually and now works is no longer bad.
         if (fw_bad_version() == FIRMWARE_VERSION) {
@@ -332,7 +332,7 @@ void OtaPull_init()
             bad_version = "";
         }
     } else {
-        Log_AddEntry(6011);
+        Log_Add(6011);
         DLOGLN("OTA: validation failed — rolling back");
         prefs.begin("ota", false);
         prefs.putBool("rollback", true);
@@ -348,10 +348,10 @@ void OtaPull_init()
 
 void OtaPull_check(bool manual)
 {
-    if (!wifi_connected)       { Log_AddEntry(6016); return; }
-    if (ota_active)            { Log_AddEntry(6017); return; }
-    if (strlen(backend_ID)==0) { Log_AddEntry(6018); return; }
-    if (backend_host.isEmpty()) { Log_AddEntry(6019); return; }
+    if (!wifi_connected)       { Log_Add(6016); return; }
+    if (ota_active)            { Log_Add(6017); return; }
+    if (strlen(backend_ID)==0) { Log_Add(6018); return; }
+    if (backend_host.isEmpty()) { Log_Add(6019); return; }
 
     static bool     rollback_checked  = false;
     static uint32_t ota_blocked_until = 0;
@@ -364,12 +364,12 @@ void OtaPull_check(bool manual)
         prefs.end();
         if (was_rollback) {
             ota_blocked_until = millis() + FW_ROLLBACK_COOLDOWN_MS;
-            Log_AddEntry(6020);
+            Log_Add(6020);
         }
     }
     if (millis() < ota_blocked_until) return;
 
-    Log_AddEntry(6000);
+    Log_AddWithoutTransmit(6000);
     ota_active = true;
 
     if (!xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
@@ -384,7 +384,7 @@ void OtaPull_check(bool manual)
     DLOGF("OTA: offered=%s current=%s\n", version.c_str(), FIRMWARE_VERSION);
 
     if (version.isEmpty() || version == FIRMWARE_VERSION) {
-        Log_AddEntry(6002);
+        Log_AddWithoutTransmit(6002);
         xSemaphoreGive(Sema_Backend);
         ota_active = false;
         return;
@@ -398,7 +398,7 @@ void OtaPull_check(bool manual)
         return;
     }
 
-    Log_AddEntry(6003);
+    Log_Add(6003);
 
     bool flashed = fw_download_and_flash(version, sha256, size);
     xSemaphoreGive(Sema_Backend);

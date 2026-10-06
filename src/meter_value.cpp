@@ -159,7 +159,7 @@ void MeterValue_init_Buffer()
   MeterValueBuffer = new uint8_t[total];
   if (!MeterValueBuffer) {
     DLOGLN("MeterValue buffer allocation failed!");
-    Log_AddEntry(1002);
+    Log_Add(1002);
     return;
   }
 

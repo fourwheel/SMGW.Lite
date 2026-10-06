@@ -85,8 +85,8 @@ extern char config_280_char[];
 // Backend runtime state
 extern String         backend_host;
 extern String         backend_path;
-extern bool           b_send_log_to_backend;
-extern bool           b_send_log_urgent;
+extern volatile bool  b_send_log_to_backend;
+extern volatile bool  g_log_upload_full;
 extern bool           call_backend_successfull;
 
 // TAF cached params
@@ -115,6 +115,7 @@ void Webclient_send_meter_values_to_backend();
 void Webclient_Send_Meter_Values_to_backend_wrapper();
 void Webclient_Send_Log_to_backend_wrapper();
 void Webserver_LocationHrefsysinfo(int delay = 0);
-void Log_AddEntry(int code);
+void Log_Add(int code);
+bool Log_AddWithoutTransmit(int code);
 void OtaPull_init();
 void OtaPull_check(bool manual);
