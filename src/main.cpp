@@ -311,6 +311,7 @@ IotWebConfCheckboxParameter config_280_object         = IotWebConfCheckboxParame
 
 
 bool b_send_log_to_backend = false;
+volatile bool g_log_upload_full = false; // next log upload sends the whole ring (manual upload pages)
 
 
 void Webserver_LocationHrefsysinfo(int delay)
@@ -1349,10 +1350,14 @@ void Webclient_send_log_to_backend()
 
   if (!client.connect(backend_host.c_str(), 443, 10000)) { DLOGLN("Connection to server failed"); Log_Add(4000); call_backend_successfull = false; return; }
 
-  size_t logBufferSize = LOG_BUFFER_SIZE * sizeof(LogEntry);
-  uint8_t *logDataBuffer = (uint8_t *)malloc(logBufferSize);
+  uint8_t *logDataBuffer = (uint8_t *)malloc(LOG_BUFFER_SIZE * sizeof(LogEntry));
   if (!logDataBuffer) { DLOGLN("Log buffer allocation failed"); Log_Add(1002); call_backend_successfull = false; return; }
-  memcpy(logDataBuffer, Log_getRawBuffer(), logBufferSize);
+  // Regular uploads carry only the entries since the last acknowledged upload;
+  // /sendLog_Task and /sendboth_Task request the whole ring (g_log_upload_full).
+  bool full = g_log_upload_full;
+  g_log_upload_full = false;
+  uint32_t logUpto;
+  size_t logBufferSize = Log_CopyForUpload(logDataBuffer, full, logUpto);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
   logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
@@ -1391,7 +1396,7 @@ void Webclient_send_log_to_backend()
 
   // No b_send_log_to_backend = false here: the task cleared it before the
   // buffer was copied; an entry logged since then must keep it set.
-  if (logOk) { DLOGLN("Log successfully sent"); Log_AddWithoutTransmit(1020); last_backend_success = millis(); }
+  if (logOk) { DLOGLN("Log successfully sent"); Log_MarkSent(logUpto); Log_AddWithoutTransmit(1020); last_backend_success = millis(); }
   else b_send_log_to_backend = true;
   call_backend_successfull = logOk;
   client.stop();

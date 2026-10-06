@@ -20,6 +20,16 @@ static int last_logged_statusCode = -1; // last code actually written to the buf
 // Set by Log_Add(); the next backend call then uploads the log (main.cpp).
 extern bool b_send_log_to_backend;
 
+// Entries written since boot and how many of them the backend has acknowledged,
+// so a regular upload only carries the new ones (see Log_CopyForUpload()). RAM
+// only, like the ring itself: both restart at 0 after a reboot. The ring is
+// never cleared by an upload, so the device keeps showing all entries.
+static uint32_t log_written = 0;
+static uint32_t log_sent    = 0;
+// Writers run on several tasks; the copy for an upload must see the ring
+// position and log_written consistently.
+static portMUX_TYPE log_mux = portMUX_INITIALIZER_UNLOCKED;
+
 void LogBuffer_reset()
 {
   for (int i = 0; i < LOG_BUFFER_SIZE; ++i) {
@@ -29,6 +39,8 @@ void LogBuffer_reset()
   }
   logIndex = -1;
   last_logged_statusCode = -1;
+  log_written = 0;
+  log_sent    = 0;
 }
 
 bool Log_AddWithoutTransmit(int statusCode)
@@ -42,12 +54,17 @@ bool Log_AddWithoutTransmit(int statusCode)
   if (suppressable && statusCode == last_logged_statusCode) return false;
   last_logged_statusCode = statusCode;
 
+  unsigned long timestamp = Time_getEpochTime();
+  unsigned long uptime    = millis(); // ms since boot — monotonic tiebreaker for same-second entries
+
+  portENTER_CRITICAL(&log_mux);
   // Advance ring-buffer write pointer, overwriting oldest entry on wrap.
   logIndex = (logIndex + 1) % LOG_BUFFER_SIZE;
-
-  logBuffer[logIndex].timestamp  = Time_getEpochTime();
-  logBuffer[logIndex].uptime     = millis(); // ms since boot — monotonic tiebreaker for same-second entries
+  logBuffer[logIndex].timestamp  = timestamp;
+  logBuffer[logIndex].uptime     = uptime;
   logBuffer[logIndex].statusCode = statusCode;
+  log_written++;
+  portEXIT_CRITICAL(&log_mux);
   return true;
 }
 
@@ -57,6 +74,41 @@ void Log_Add(int statusCode)
   // buffer, so the entry is either already in the copy or sets it again.
   // Not set for a suppressed duplicate — nothing new to upload.
   if (Log_AddWithoutTransmit(statusCode)) b_send_log_to_backend = true;
+}
+
+size_t Log_CopyForUpload(uint8_t *out, bool full, uint32_t &upto)
+{
+  portENTER_CRITICAL(&log_mux);
+  upto = log_written;
+  size_t bytes;
+  if (full)
+  {
+    // Whole ring in storage order, as before 1.4.2; log.php restores the order.
+    bytes = sizeof(logBuffer);
+    memcpy(out, logBuffer, bytes);
+  }
+  else
+  {
+    // Entries since the last acknowledged upload, oldest first. More than the
+    // ring holds means it has overflowed: the oldest of them are gone.
+    uint32_t n = upto - log_sent;
+    if (n > (uint32_t)LOG_BUFFER_SIZE) n = LOG_BUFFER_SIZE;
+    for (uint32_t k = 0; k < n; k++)
+    {
+      int src = (logIndex - (int)(n - 1 - k) + LOG_BUFFER_SIZE) % LOG_BUFFER_SIZE;
+      memcpy(out + k * sizeof(LogEntry), &logBuffer[src], sizeof(LogEntry));
+    }
+    bytes = n * sizeof(LogEntry);
+  }
+  portEXIT_CRITICAL(&log_mux);
+  return bytes;
+}
+
+void Log_MarkSent(uint32_t upto)
+{
+  portENTER_CRITICAL(&log_mux);
+  if ((int32_t)(upto - log_sent) > 0) log_sent = upto; // never move back (a full upload may run after a newer one)
+  portEXIT_CRITICAL(&log_mux);
 }
 
 const LogEntry* Log_getRawBuffer() { return logBuffer; }
