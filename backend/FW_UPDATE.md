@@ -59,6 +59,10 @@ return [
   target of the device. If it is missing or inconsistent (version, sha256 or
   size do not match the file), no update is offered and the backend writes a
   line to the PHP error log.
+- After the update the device checks the backend (`backend_test`) once per
+  minute (`6027` on failure). If it hasn't succeeded within 15 min after boot
+  (`6011`), or the new firmware restarts before that, e.g. a crash (`6028`,
+  firmware >= 1.4.3), the device boots the previous firmware again.
 - A version that fails its post-update check on the device is rolled back and
   never installed automatically again on that device (log `6025`); it can
   still be installed from the "Check Remote FW Update" page.

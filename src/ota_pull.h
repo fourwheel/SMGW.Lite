@@ -2,10 +2,16 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-// Called once on first WiFi connect. Checks NVS for a pending-validation flag
-// set by the previous OTA flash; contacts the backend to confirm the firmware
-// works, or rolls back to the previous OTA slot via esp_ota_set_boot_partition.
-void OtaPull_init();
+// Called once early in setup(). If the previous OTA pull flashed this image
+// (NVS pending flag) and it is not confirmed yet, starts the post-update
+// validation; otherwise confirms the running image. Logs 6028 if the pulled
+// update was rolled back by the bootloader (restart before validation).
+void OtaPull_boot();
+
+// Called from loop(). While a validation is in progress: tries backend_test
+// once per minute when WiFi is up; on success confirms the image, after 15 min
+// since boot without success rolls back to the previous firmware.
+void OtaPull_validate();
 
 // Stores the fw_update object of a confirmed backend response as the current
 // offer (a null variant clears it) and requests an install check if the

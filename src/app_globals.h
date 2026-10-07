@@ -117,5 +117,6 @@ void Webclient_Send_Log_to_backend_wrapper();
 void Webserver_LocationHrefsysinfo(int delay = 0);
 void Log_Add(int code);
 bool Log_AddWithoutTransmit(int code);
-void OtaPull_init();
+void OtaPull_boot();
+void OtaPull_validate();
 void OtaPull_check(bool manual);
