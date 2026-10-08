@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-10-08
+
+### Changed
+- `1200` (store refused: meter value `<= 0`) is logged at most every 30 min, like `3005`/`3007`. Without a 1.8.0 value the store is retried with every trigger, so a device without a valid meter value (e.g. no meter connected) logged it several times a minute: the log ring filled with it and, since 1.4.2 uploads the log after every non-routine entry, the log went out with every backend call. It still reaches the backend; a valid value restarts the 30-min cycle, so a new occurrence is logged right away.
+- Backend: `fw_fetch.php` reports why writing a release failed (e.g. `cannot write smartmeterlite_v1.4.3_esp32c3.bin.tmp: Failed to open stream: Permission denied`) instead of only `writing v1.4.3/esp32c3 failed`.
+
 ## [1.4.3] - 2026-10-08
 
 ### Added

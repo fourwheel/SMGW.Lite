@@ -166,7 +166,7 @@ String Log_StatusCodeToString(int statusCode)
   case 1120: return "Self-recovery restart: main loop hung for 10 min";
   case 1121: return "Self-recovery restart: meter upload hung for 10 min";
   case 1122: return "Self-recovery restart: log upload hung for 10 min";
-  case 1200: return "meter value <= 0";
+  case 1200: return "Store refused: meter value <= 0 (logged every 30 min)";
   case 1201: return "current Meter value = previous meter value";
   case 1203: return "Suffix Must not be 0";
   case 1204: return "prefix suffix not correct";

@@ -60,14 +60,28 @@ function fw_fetch_url(string $url, int $max): ?string {
     return (is_string($body) && $status === 200 && strlen($body) <= $max) ? $body : null;
 }
 
+// Text of the last PHP error (e.g. "Permission denied"), for the report.
+function fw_fetch_error(): string {
+    $e = error_get_last();
+    return $e ? preg_replace('/^.*?: /', '', $e['message']) : 'unknown error';
+}
+
 // Writes via a temporary file and rename, so no reader sees a partial file.
-function fw_fetch_write(string $path, string $data): bool {
+// Returns null on success, otherwise what failed and why.
+function fw_fetch_write(string $path, string $data): ?string {
     $tmp = "$path.tmp";
-    if (file_put_contents($tmp, $data) !== strlen($data)) {
+    error_clear_last();
+    if (@file_put_contents($tmp, $data) !== strlen($data)) {
+        $err = fw_fetch_error();
         @unlink($tmp);
-        return false;
+        return "cannot write " . basename($tmp) . ": $err";
     }
-    return rename($tmp, $path);
+    if (!@rename($tmp, $path)) {
+        $err = fw_fetch_error();
+        @unlink($tmp);
+        return "cannot replace " . basename($path) . ": $err";
+    }
+    return null;
 }
 
 // Fetches one build target. Returns [ok, message].
@@ -100,13 +114,13 @@ function fw_fetch_target(string $version, string $hw, bool $replace): array {
         return [false, "$file does not match the manifest (size/sha256)"];
     }
 
-    if (!is_dir($dir) && !mkdir($dir, 0755, true)) return [false, "cannot create $tag/$hw"];
-    // Binary first, manifest last: fw_release_manifest() only accepts a
-    // manifest that matches the binary, so devices are never offered a
-    // half-written release.
-    if (!fw_fetch_write("$dir/$file", $bin) || !fw_fetch_write("$dir/manifest.json", $json)) {
-        return [false, "writing $tag/$hw failed"];
-    }
+    error_clear_last();
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) return [false, "cannot create $tag/$hw: " . fw_fetch_error()];
+    // Binary first, manifest only once that succeeded (null = success):
+    // fw_release_manifest() only accepts a manifest that matches the binary,
+    // so devices are never offered a half-written release.
+    $err = fw_fetch_write("$dir/$file", $bin) ?? fw_fetch_write("$dir/manifest.json", $json);
+    if ($err !== null) return [false, $err];
     return [true, ($existed ? "replaced" : "fetched") . ", sha256 $sha256, $size bytes"];
 }
 

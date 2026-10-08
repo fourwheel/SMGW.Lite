@@ -1,7 +1,7 @@
 #pragma once
 #include <sdkconfig.h>
 
-#define FIRMWARE_VERSION "1.4.3"
+#define FIRMWARE_VERSION "1.4.4"
 #define CONFIG_VERSION   "2906"
 
 // Build target, sent to the backend as "hw" so it picks the matching binary
