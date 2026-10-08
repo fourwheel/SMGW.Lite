@@ -388,6 +388,8 @@ static void fw_rollback()
     esp_restart();
 }
 
+bool OtaPull_isValidating() { return validating; }
+
 void OtaPull_validate()
 {
     if (!validating) return;

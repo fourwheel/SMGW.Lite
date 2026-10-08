@@ -13,6 +13,10 @@ void OtaPull_boot();
 // since boot without success rolls back to the previous firmware.
 void OtaPull_validate();
 
+// True while the post-update validation is in progress; no other update is
+// installed until it is done.
+bool OtaPull_isValidating();
+
 // Stores the fw_update object of a confirmed backend response as the current
 // offer (a null variant clears it) and requests an install check if the
 // offered version differs from the running one. Caller holds Sema_Backend.
