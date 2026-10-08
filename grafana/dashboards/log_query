@@ -36,7 +36,7 @@ SELECT
   WHEN status_code = 1029 THEN 'Time set from backend HTTP Date header (NTP not synced)'
   WHEN status_code = 1030 THEN 'TAF7 fulfilled by TAF14 value at TAF7 mark (1.3.10-1.3.11)'
 
-  WHEN status_code = 1200 THEN 'Meter value <= 0'
+  WHEN status_code = 1200 THEN 'Store refused: meter value <= 0 (every 30 min)'
   WHEN status_code = 1201 THEN 'Current meter value = previous meter value'
   WHEN status_code = 1203 THEN 'Suffix must not be 0'
   WHEN status_code = 1204 THEN 'Prefix/suffix not correct'

@@ -1597,7 +1597,23 @@ bool MeterValue_store(bool override)
   // struct from the other core.
   MeterValue snap = LastMeterValue;
 
-  if (snap.meter_value_180 <= 0) { Log_Add(1200); return false; }
+  // Without a 1.8.0 value the trigger stays set and the store is retried on
+  // every pass, so 1200 was logged several times a minute (repeats are only
+  // suppressed while no other entry comes in between). Log it at most every
+  // 30 min (like 3005/3007), so it still reaches the backend without filling
+  // the log ring and uploading the log with every backend call. A valid value
+  // restarts the cycle.
+  static unsigned long last_zero_log = 0;
+  if (snap.meter_value_180 <= 0)
+  {
+    if (last_zero_log == 0 || millis() - last_zero_log >= 1800000UL)
+    {
+      Log_Add(1200);
+      last_zero_log = millis();
+    }
+    return false;
+  }
+  last_zero_log = 0;
 
   // The telegram may have been parsed before the time sync even if the store
   // runs after it. Refuse it; the trigger stays set and the next telegram
