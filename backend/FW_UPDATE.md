@@ -32,12 +32,43 @@ fw_releases/
 <web root>/
 ├── index.php
 ├── log.php
-└── fw_download.php                 # authenticated download (X-Auth-Token)
+├── fw_download.php                 # authenticated download (X-Auth-Token)
+└── fw_fetch.php                    # fetches a release from GitHub (key)
 ```
 
-`fw_releases/` has the same layout as `manifests/` in the firmware repo, so a
-release folder can be uploaded as is (the `.bin` files are not in git; they are
-attached to the GitHub release).
+`fw_releases/` has the same layout as `manifests/` in the firmware repo (the
+`.bin` files are not in git; they are attached to the GitHub release).
+
+## Adding a release
+
+Once the release is published on GitHub (tag `v<version>` with
+`manifests/v<version>/<hw>/manifest.json`, the `.bin` files attached to the
+release), open:
+
+```
+https://<backend>/v4/fw_fetch.php?version=1.4.3&key=<key>
+```
+
+`<key>` is `$_fw_fetch_key` in `credentials.php` (at least 16 characters;
+empty disables the script). For each build target it downloads the manifest
+from the tag and the binary from the release, checks size and SHA-256 and only
+then writes the binary and `manifest.json` to `fw_releases/v<version>/<hw>/`.
+It writes nothing else and fetches only from the firmware repo. The answer
+lists the result per build target:
+
+```
+v1.4.3/esp32c3: OK - fetched, sha256 ..., 1249248 bytes
+v1.4.3/esp32-nodemcu: OK - fetched, sha256 ..., 1215952 bytes
+```
+
+Calling it again for a release that is already present changes nothing. If a
+different release with that version is present (e.g. a test build), it is
+only replaced with `&replace=1`. The key is part of the URL and therefore
+appears in the web server's access log. The script needs the PHP curl
+extension and outgoing HTTPS to `github.com`, `raw.githubusercontent.com` and
+GitHub's download CDN.
+
+Alternatively the release folder can still be uploaded by hand.
 
 ## Assigning a version
 

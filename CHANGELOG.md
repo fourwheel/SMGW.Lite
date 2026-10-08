@@ -4,7 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.3] - 2026-10-07
+## [1.4.3] - 2026-10-08
+
+### Added
+- Backend: `fw_fetch.php?version=<version>&key=<key>` fetches a release from GitHub into `fw_releases/` &ndash; the manifests from the tag `v<version>`, the binaries from the release &ndash; and writes the binary and `manifest.json` per build target only if size and SHA-256 match. Nothing is fetched until the script is called; it is disabled unless `credentials.php` sets `$_fw_fetch_key` (new in `credentials.php.TEMPLATE`). An existing, different release is only replaced with `&replace=1`. See `backend/FW_UPDATE.md`.
 
 ### Fixed
 - A firmware pulled from the backend that crashed or hung before its post-update validation was never rolled back: the Arduino core confirmed every new image before `setup()`, and the validation only ran after the first WiFi connect, so such a firmware ended in a restart loop that needed a serial flash. The image now stays unconfirmed (`PENDING_VERIFY`, `verifyRollbackLater()`) until the validation succeeds; if the device restarts before that (crash, watchdog, self-recovery restart, power loss), the bootloader boots the previous firmware, which logs `6028`. Images uploaded via espota or `/update` are confirmed at boot as before. Tested on an ESP32-C3 with a build that aborts in `setup()`: one crash, then the previous firmware ran again.
