@@ -215,7 +215,7 @@ String Log_StatusCodeToString(int statusCode)
   case 6008: return "OTA pull: flash successful — rebooting";
   case 6009: return "OTA pull: post-OTA validation — contacting backend";
   case 6010: return "OTA pull: validation successful — firmware confirmed";
-  case 6011: return "OTA pull: validation failed — rolling back";
+  case 6011: return "OTA pull: validation failed for 15 min — rolling back";
   case 6012: return "OTA pull: manifest — server returned non-200 (until 1.3.12)";
   case 6013: return "OTA pull: fw_update / manifest — invalid or missing fields";
   case 6014: return "OTA pull: check triggered by backend (fw_update offer / ota_check hint)";
@@ -231,6 +231,9 @@ String Log_StatusCodeToString(int statusCode)
   case 6024: return "OTA pull: download — server returned non-200 (release missing?)";
   case 6025: return "OTA pull: offered version was rolled back before — not installed automatically";
   case 6026: return "OTA pull: download took longer than 4 min — aborted";
+  case 6027: return "OTA pull: validation attempt failed — retrying (up to 15 min after boot)";
+  case 6028: return "OTA pull: update restarted before validation — bootloader rolled back";
+  case 6029: return "OTA pull: skipped — post-update validation in progress";
   case 6101: return "Manual update: Update.begin() failed";
   case 6102: return "Manual update: write error during upload";
   case 6103: return "Manual update: Update.end() failed";

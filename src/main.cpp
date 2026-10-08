@@ -627,6 +627,9 @@ void setup()
       prefs.end();
     }
   }
+  // As early as possible: confirms the running image unless it is a pulled
+  // update awaiting validation (until then a restart rolls it back).
+  OtaPull_boot();
   Serial.begin(115200);
 #ifdef SERIAL_DEBUG
   // USB-CDC needs time to enumerate before the host monitor connects.
@@ -1782,8 +1785,6 @@ void handle_check_wifi_connection()
       b_send_log_to_backend  = true; // send after the 60 s reconnect delay, not immediately
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
-      static bool fw_init_done = false;
-      if (!fw_init_done) { fw_init_done = true; OtaPull_init(); }
     }
     else if (current_wifi_status != WL_CONNECTED && wifi_connected)
     {
@@ -1919,10 +1920,12 @@ void handle_backend_recovery()
 //  - loop(): OTA pull up to ~7 min (Sema_Backend 30 s, DNS 15 s, connect
 //    15 s, handshake 30 s, request/headers 75 s, download capped at 4 min);
 //    meter upload after a config change or espota update (Sema_Backend 15 s
-//    + upload as above) ~4.5 min; Check Remote FW Update page and post-update
-//    validation ~3.5 min; connection test page ~1 min; myStrom fetch a few
-//    seconds; optical flash test 20 s
+//    + upload as above) ~4.5 min; Check Remote FW Update page and each
+//    post-update validation attempt ~3.5 min; connection test page ~1 min;
+//    myStrom fetch a few seconds; optical flash test 20 s
 // The cause is kept in NVS across the restart and logged on boot (1120-1122).
+// During a post-update validation (OtaPull_validate()) any restart makes the
+// bootloader boot the previous firmware (6028).
 // Values still in the RAM buffer are lost, but a stuck device would not
 // deliver them either.
 // ---------------------------------------------------------------------------
@@ -2233,6 +2236,7 @@ void loop()
   handle_telegram_watchdog();
   handle_call_backend();
   handle_backend_recovery();
+  OtaPull_validate();
   handle_remote_ota();
 }
 

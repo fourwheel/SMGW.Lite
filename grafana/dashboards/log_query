@@ -108,6 +108,9 @@ SELECT
   WHEN status_code = 6024 THEN 'OTA: download HTTP error (release missing?)'
   WHEN status_code = 6025 THEN 'OTA: offered version was rolled back before — not auto-installed'
   WHEN status_code = 6026 THEN 'OTA: download took longer than 4 min — aborted'
+  WHEN status_code = 6027 THEN 'OTA: validation attempt failed — retrying'
+  WHEN status_code = 6028 THEN 'OTA: restarted before validation — bootloader rolled back'
+  WHEN status_code = 6029 THEN 'OTA: skipped — validation in progress'
 
   WHEN status_code = 6101 THEN 'Manual update: Update.begin() failed'
   WHEN status_code = 6102 THEN 'Manual update: write error during upload'

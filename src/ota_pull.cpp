@@ -20,6 +20,21 @@ static const uint32_t FW_ROLLBACK_COOLDOWN_MS  = 15UL * 60 * 1000;
 static const uint32_t FW_RETRY_BACKOFF_MS      = 60UL * 60 * 1000;
 static const uint32_t FW_HANDSHAKE_TIMEOUT_S   = 30;               // TLS default is 120 s
 static const uint32_t FW_DOWNLOAD_MAX_MS       = 4UL * 60 * 1000;  // ~1.2 MB need < 30 s normally
+static const uint32_t FW_VALIDATE_RETRY_MS     = 60UL * 1000;      // between post-update validation attempts
+static const uint32_t FW_VALIDATE_DEADLINE_MS  = 15UL * 60 * 1000; // since boot; then roll back
+
+// Keep a freshly pulled image in PENDING_VERIFY instead of letting the Arduino
+// core confirm it before setup() (initArduino()). The bootloader then boots
+// the previous image if the device restarts before OtaPull_validate() has
+// confirmed it, so an update that crashes or hangs before or during the
+// validation rolls back by itself. Images that are not awaiting validation are
+// confirmed in OtaPull_boot().
+extern "C" bool verifyRollbackLater() { return true; }
+
+// Post-update validation in progress (set by OtaPull_boot()).
+static bool     validating        = false;
+static bool     validate_tried    = false;
+static uint32_t validate_last_try = 0;
 
 // Update offered by the backend: the fw_update object of the last confirmed
 // response (meter values or backend_test). Empty version = nothing assigned.
@@ -36,6 +51,10 @@ static uint32_t failed_at = 0;
 // Version that failed post-update validation and was rolled back (NVS
 // "ota"/"bad_ver"). It is never installed automatically again, only via the
 // Remote FW Update page, otherwise the device would loop flash -> rollback.
+// A freshly flashed version is written here before the restart and removed
+// once it is validated, so it is also blocked if the bootloader rolls it back:
+// the previous firmware, which wrote it, then finds it already marked. This
+// replaces an older bad version; that one may be installed once more.
 static String bad_version;
 static bool   bad_version_loaded = false;
 
@@ -304,46 +323,112 @@ bool OtaPull_isRolledBack(const String& version)
     return !version.isEmpty() && version == fw_bad_version();
 }
 
-void OtaPull_init()
+void OtaPull_boot()
 {
     Preferences prefs;
     prefs.begin("ota", true);
     bool pending = prefs.getBool("pending", false);
     prefs.end();
+
+    // PENDING_VERIFY: first boot of an OTA image, not confirmed yet (NEW only
+    // with a bootloader without rollback support, which keeps that state).
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    bool have_state = esp_ota_get_state_partition(running, &state) == ESP_OK;
+    bool unconfirmed = have_state &&
+        (state == ESP_OTA_IMG_PENDING_VERIFY || state == ESP_OTA_IMG_NEW);
+
+    if (pending && unconfirmed) {
+        validating = true;
+        Log_Add(6009);
+        DLOGLN("OTA: post-update boot — validating firmware");
+        return;
+    }
+
+    // Not a pulled update awaiting validation (normal boot, espota or /update
+    // upload): confirm the running image, as the Arduino core did before.
+    esp_ota_mark_app_valid_cancel_rollback();
     if (!pending) return;
 
-    Log_Add(6009);
-    DLOGLN("OTA: post-update boot — validating firmware");
-
-    bool reached = fw_backend_test(false);
-
+    // pending, but the running image is a confirmed one: the pulled update
+    // restarted before it was validated and the bootloader booted this
+    // (previous) firmware again. Its version is already in bad_ver.
     prefs.begin("ota", false);
     prefs.remove("pending");
+    if (have_state) prefs.putBool("rollback", true); // 15 min cooldown in OtaPull_check()
     prefs.end();
-
-    if (reached) {
-        Log_Add(6010);
-        DLOGLN("OTA: firmware validated");
-        // A rolled-back version that was installed manually and now works is no longer bad.
-        if (fw_bad_version() == FIRMWARE_VERSION) {
-            prefs.begin("ota", false);
-            prefs.remove("bad_ver");
-            prefs.end();
-            bad_version = "";
-        }
-    } else {
-        Log_Add(6011);
-        DLOGLN("OTA: validation failed — rolling back");
-        prefs.begin("ota", false);
-        prefs.putBool("rollback", true);
-        prefs.putString("bad_ver", FIRMWARE_VERSION);
-        prefs.end();
-        Webclient_send_log_to_backend();
-        const esp_partition_t* prev = esp_ota_get_next_update_partition(NULL);
-        if (prev) esp_ota_set_boot_partition(prev);
-        delay(200);
-        esp_restart();
+    if (have_state) {
+        Log_Add(6028);
+        DLOGLN("OTA: new firmware did not get validated — bootloader rolled back");
     }
+}
+
+// Validation failed for good: mark this image invalid and boot the previous
+// one. bad_ver already holds this version (written before the update restart).
+static void fw_rollback()
+{
+    Log_Add(6011);
+    DLOGLN("OTA: validation failed — rolling back");
+    Preferences prefs;
+    prefs.begin("ota", false);
+    prefs.remove("pending");
+    prefs.putBool("rollback", true);
+    prefs.putString("bad_ver", FIRMWARE_VERSION);
+    prefs.end();
+    if (wifi_connected && xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
+        Webclient_send_log_to_backend();
+        xSemaphoreGive(Sema_Backend);
+    }
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+    // Only returns if that failed (no PENDING_VERIFY state, e.g. a bootloader
+    // without rollback support): switch the boot partition directly.
+    const esp_partition_t* prev = esp_ota_get_next_update_partition(NULL);
+    if (prev) esp_ota_set_boot_partition(prev);
+    delay(200);
+    esp_restart();
+}
+
+bool OtaPull_isValidating() { return validating; }
+
+void OtaPull_validate()
+{
+    if (!validating) return;
+
+    // One attempt per minute while WiFi is up. The backend or the network can
+    // be briefly unavailable right after the restart; a single failed attempt
+    // must not roll back (and block) a working firmware.
+    bool due = !validate_tried || millis() - validate_last_try >= FW_VALIDATE_RETRY_MS;
+    if (wifi_connected && due && xSemaphoreTake(Sema_Backend, 0) == pdTRUE) {
+        validate_tried    = true;
+        validate_last_try = millis();
+        bool reached = fw_backend_test(false);
+        xSemaphoreGive(Sema_Backend);
+
+        if (reached) {
+            validating = false;
+            // Clear the NVS flags before confirming the image: a restart in
+            // between then rolls back to the previous firmware, which simply
+            // gets this version offered again.
+            Preferences prefs;
+            prefs.begin("ota", false);
+            prefs.remove("pending");
+            if (fw_bad_version() == FIRMWARE_VERSION) {
+                prefs.remove("bad_ver");
+                bad_version = "";
+            }
+            prefs.end();
+            esp_ota_mark_app_valid_cancel_rollback();
+            Log_Add(6010);
+            DLOGLN("OTA: firmware validated");
+            return;
+        }
+        Log_Add(6027);
+        DLOGLN("OTA: validation attempt failed — retrying");
+    }
+
+    // Also without WiFi: a firmware that never gets a connection is not
+    // working either. millis() is the time since boot.
+    if (millis() >= FW_VALIDATE_DEADLINE_MS) fw_rollback();
 }
 
 void OtaPull_check(bool manual)
@@ -352,6 +437,7 @@ void OtaPull_check(bool manual)
     if (ota_active)            { Log_Add(6017); return; }
     if (strlen(backend_ID)==0) { Log_Add(6018); return; }
     if (backend_host.isEmpty()) { Log_Add(6019); return; }
+    if (validating)            { Log_AddWithoutTransmit(6029); return; } // confirm the running update first
 
     static bool     rollback_checked  = false;
     static uint32_t ota_blocked_until = 0;
@@ -410,12 +496,17 @@ void OtaPull_check(bool manual)
         return;
     }
 
-    Webclient_send_log_to_backend();
-
+    // The new image boots next (Update.end() switched the boot partition), so
+    // set the flags before anything else can restart the device. bad_ver: see
+    // bad_version above.
     Preferences prefs;
     prefs.begin("ota", false);
     prefs.putBool("pending", true);
+    prefs.putString("bad_ver", version);
     prefs.end();
+    bad_version = version;
+
+    Webclient_send_log_to_backend();
 
     delay(500);
     esp_restart();

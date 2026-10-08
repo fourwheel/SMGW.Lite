@@ -7,3 +7,4 @@ backend/fw_releases/
 src/wifi_credentials.h
 src/build_info.h
 manifests/**/*.bin
+ftp_credentials.ini

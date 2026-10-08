@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-10-08
+
+### Added
+- Backend: `fw_fetch.php?version=<version>&key=<key>` fetches a release from GitHub into `fw_releases/` &ndash; the manifests from the tag `v<version>`, the binaries from the release &ndash; and writes the binary and `manifest.json` per build target only if size and SHA-256 match. Nothing is fetched until the script is called; it is disabled unless `credentials.php` sets `$_fw_fetch_key` (new in `credentials.php.TEMPLATE`). An existing, different release is only replaced with `&replace=1`. See `backend/FW_UPDATE.md`.
+
+### Fixed
+- A firmware pulled from the backend that crashed or hung before its post-update validation was never rolled back: the Arduino core confirmed every new image before `setup()`, and the validation only ran after the first WiFi connect, so such a firmware ended in a restart loop that needed a serial flash. The image now stays unconfirmed (`PENDING_VERIFY`, `verifyRollbackLater()`) until the validation succeeds; if the device restarts before that (crash, watchdog, self-recovery restart, power loss), the bootloader boots the previous firmware, which logs `6028`. Images uploaded via espota or `/update` are confirmed at boot as before. Tested on an ESP32-C3 with a build that aborts in `setup()`: one crash, then the previous firmware ran again.
+- A single failed validation attempt rolled back a working firmware and blocked its version for good, e.g. if the router or the backend was briefly unavailable right after the restart. The validation is now retried once per minute (`6027`) and the firmware is only rolled back (`6011`) if it hasn't succeeded within 15 min after boot &ndash; also if WiFi never connects in that time. Meter value and log uploads keep running meanwhile; no other update is started until the validation is done (`6029`), and the "Check Remote FW Update" page says so instead of offering an install.
+- The version of a pulled update is now written to `bad_ver` before the restart and removed once it is validated, so a version rolled back by the bootloader is blocked as well (`6025` when it is offered again); a higher version is installed normally. No new NVS keys. An older blocked version is replaced by this and may be installed automatically once more. This is done by the firmware that installs the update, so for the update from 1.4.2 or older to 1.4.3 the rollback works, but 1.4.3 is not blocked afterwards and would be installed again.
+- The NVS flags for the validation are now written right after flashing, before the log upload; a restart during that upload booted the new firmware without validation.
+
 ## [1.4.2] - 2026-10-04
 
 ### Changed

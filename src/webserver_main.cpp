@@ -270,8 +270,9 @@ poll();
   });
   server.on("/checkRemoteFwUpdate", []() {
     String version;
-    bool   fetched = false;
-    if (wifi_connected && strlen(backend_ID) > 0 && !backend_host.isEmpty()) {
+    bool   fetched    = false;
+    bool   validating = OtaPull_isValidating(); // no other update until the running one is confirmed
+    if (!validating && wifi_connected && strlen(backend_ID) > 0 && !backend_host.isEmpty()) {
       ota_active = true;
       if (xSemaphoreTake(Sema_Backend, pdMS_TO_TICKS(30000))) {
         Log_AddWithoutTransmit(6021);
@@ -299,7 +300,11 @@ poll();
 <div class="card">
 <div class="card-title">Remote Firmware Update</div>)rawliteral";
 
-    if (!fetched) {
+    if (validating) {
+      page += "<p>Firmware v" + String(FIRMWARE_VERSION) + " wurde gerade installiert und wird noch gepr&uuml;ft"
+              " (bis zu 15 Minuten nach dem Neustart). Bitte sp&auml;ter erneut versuchen.</p>\n"
+              R"rawliteral(<div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
+    } else if (!fetched) {
       page += R"rawliteral(<p>Backend nicht erreichbar oder Antwort ung&uuml;ltig.</p>
 <div class="btns"><a class="btn btn-s" href="/sysinfo">Zur&uuml;ck</a></div>)rawliteral";
     } else if (version.isEmpty() || version == FIRMWARE_VERSION) {
