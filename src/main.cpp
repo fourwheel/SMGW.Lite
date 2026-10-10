@@ -98,8 +98,6 @@ int staticDelay = 0;
 int   cached_taf7_param             = 15;
 int   cached_taf14_param            = 60;
 int   cached_backend_call_minute    = 2;
-// int   cached_tafdyn_absolute        = 100;    // used by handle_dynTaf (#if 0)
-// float cached_tafdyn_multiplicator   = 3.0f;
 // Backend vars
 bool call_backend_successfull = true;
 bool redirect_to_sysinfo = false;
@@ -221,7 +219,6 @@ unsigned long last_taf14_meter_value      = 0;
 unsigned long last_reconnect_attempt      = 0;
 unsigned long last_telegram_parsed      = 0; // millis() of last successfully parsed telegram; initialised in setup()
 unsigned long last_silence_log            = 0; // millis() 3005/3007 were last logged, see handle_telegram_watchdog()
-// unsigned long last_dyntaf_store           = 0; // used by handle_dynTaf (#if 0)
 
 // Params, which you can set via webserver
 char backend_endpoint[STRING_LEN];
@@ -238,13 +235,9 @@ char b_taf7[STRING_LEN];
 char taf7_param[NUMBER_LEN];
 char b_taf14[STRING_LEN];
 char taf14_param[NUMBER_LEN];
-char b_tafdyn[STRING_LEN];
-char tafdyn_absolute[NUMBER_LEN];
-char tafdyn_multiplicator[NUMBER_LEN];
 char backend_call_minute[NUMBER_LEN];
 char backend_ID[ID_LEN];
 char activate_IEC_Parser[STRING_LEN];
-// char dynTaf_enabled[STRING_LEN]; // used by dynTaf_enabled_object (#if 0)
 char Meter_Value_Buffer_Size_Char[NUMBER_LEN] = "0";    // 0 = auto (16 KB reference budget), >0 = manual KB
 
 // ---------------------------------------------------------------------------
@@ -268,7 +261,6 @@ IotWebConfParameterGroup groupSys           = IotWebConfParameterGroup("groupSys
 IotWebConfParameterGroup groupDebug         = IotWebConfParameterGroup("groupDebug",         "Debug Helpers");
 
 IotWebConfCheckboxParameter activate_IEC_Parser_object = IotWebConfCheckboxParameter("- NOT USED -", "activate_IEC_Parser", activate_IEC_Parser, STRING_LEN, false);
-// IotWebConfCheckboxParameter dynTaf_enabled_object = IotWebConfCheckboxParameter("Dyn. Tarif (experimental)", "activate_IEC_Parser", dynTaf_enabled, STRING_LEN, false);
 
 IotWebConfTextParameter     backend_endpoint_object     = IotWebConfTextParameter("backend endpoint", "backend_endpoint", backend_endpoint, STRING_LEN);
 IotWebConfCheckboxParameter led_blink_object            = IotWebConfCheckboxParameter("LED Blink", "led_blink", led_blink, STRING_LEN, DNS_FALLBACK_SERVER_INDEX);
@@ -279,9 +271,6 @@ IotWebConfCheckboxParameter taf7_b_object               = IotWebConfCheckboxPara
 IotWebConfNumberParameter   taf7_param_object           = IotWebConfNumberParameter("Taf 7 minute", "taf7_param", taf7_param, NUMBER_LEN, "15", "60...1", "min='1' max='60' step='1'");
 IotWebConfCheckboxParameter taf14_b_object              = IotWebConfCheckboxParameter("Taf 14 activated", "b_taf14", b_taf14, STRING_LEN, true);
 IotWebConfNumberParameter   taf14_param_object          = IotWebConfNumberParameter("Taf 14 Meter Interval (s)", "taf14_param", taf14_param, NUMBER_LEN, "60", "1..100 s", "min='1' max='100' step='1'");
-IotWebConfCheckboxParameter tafdyn_b_object             = IotWebConfCheckboxParameter("Dyn Taf activated", "b_tafdyn", b_tafdyn, STRING_LEN, true);
-IotWebConfNumberParameter   tafdyn_absolute_object      = IotWebConfNumberParameter("Dyn Taf absolute Delta", "tafdyn_absolute", tafdyn_absolute, NUMBER_LEN, "100", "Power Delta in Watts", "min='10' max='10000' step='1'");
-IotWebConfNumberParameter   tafdyn_multiplicator_object = IotWebConfNumberParameter("Dyn Taf multiplicator", "tafdyn_multiplicator", tafdyn_multiplicator, NUMBER_LEN, "2", "Power n bigger or 1/n smaller", "min='1' max='10' step='0.1'");
 IotWebConfNumberParameter   backend_call_minute_object  = IotWebConfNumberParameter("backend Call Minute", "backend_call_minute", backend_call_minute, NUMBER_LEN, "2", "", "");
 
 IotWebConfCheckboxParameter mystrom_PV_object       = IotWebConfCheckboxParameter("MyStrom PV", "mystrom_PV", mystrom_PV, STRING_LEN, false);
@@ -2035,91 +2024,6 @@ void handle_remote_ota()
 unsigned long last_meter_value_store   = 0;
 unsigned long last_meter_value_trigger = 0;
 
-// ---------------------------------------------------------------------------
-// handle_dynTaf — commented out, feature temporarily disabled
-// Triggers a non-override buffer store whenever instantaneous net power
-// changes significantly since the last stored reading.
-//
-// Signal:  net power = power_import - power_export (from OBIS 1.7.0 / 2.7.0),
-//          falling back to net_power (OBIS 16.7.0).
-//          Returns without triggering if the meter does not transmit any
-//          instantaneous power value.
-//
-// Reference: PrevMeterValue — the reading that was last successfully stored.
-//            Updated automatically by MeterValue_store() on every successful
-//            store (TAF7, TAF14, or DynTaf), so the baseline always reflects
-//            what is already in the backend.
-//
-// Trigger conditions (OR-linked, both configurable):
-//   Absolute: |currentPower - lastPower| >= effectiveAbsolute (W)
-//   Ratio:    magnitude changed by factor >= effectiveMultiplicator
-//
-// Both thresholds scale with time since the last successful store (any kind).
-// At DYNTAF_FULL_THRESHOLD_MS the configured values apply unchanged.
-// Below that, thresholds scale up linearly so recent TAF7/TAF14 stores raise
-// the bar for an immediate DynTaf re-trigger.
-// ---------------------------------------------------------------------------
-#if 0
-static const uint32_t DYNTAF_FULL_THRESHOLD_MS = 5000; // ms after which base thresholds apply
-
-void handle_dynTaf()
-{
-  if (LastMeterValue.timestamp == 0) return;
-  if (meter_value_buffer_full) { Log_Add(1022); return; }
-
-  // Scale thresholds based on time since any successful store.
-  uint32_t elapsed = millis() - last_meter_value_successful;
-  float scale = (elapsed >= DYNTAF_FULL_THRESHOLD_MS)
-                  ? 1.0f
-                  : (float)DYNTAF_FULL_THRESHOLD_MS / (float)(elapsed + 1);
-
-  int32_t effectiveAbsolute      = (int32_t)((float)cached_tafdyn_absolute * scale);
-  float   effectiveMultiplicator = 1.0f + (cached_tafdyn_multiplicator - 1.0f) * scale;
-
-  // Derive current net power from instantaneous telegram values.
-  // Prefer explicit import/export (1.7.0 / 2.7.0) over signed net (16.7.0).
-  int32_t currentPower;
-  if (LastMeterValue.power_import > 0 || LastMeterValue.power_export > 0)
-    currentPower = (int32_t)LastMeterValue.power_import - (int32_t)LastMeterValue.power_export;
-  else if (LastMeterValue.net_power != 0)
-    currentPower = LastMeterValue.net_power;
-  else
-    return; // meter does not transmit instantaneous power — DynTaf not available
-
-  // Derive reference power from the last successfully stored reading.
-  int32_t lastPower;
-  if (PrevMeterValue.power_import > 0 || PrevMeterValue.power_export > 0)
-    lastPower = (int32_t)PrevMeterValue.power_import - (int32_t)PrevMeterValue.power_export;
-  else
-    lastPower = PrevMeterValue.net_power;
-
-  // Absolute delta trigger
-  int32_t delta = currentPower - lastPower;
-  if (delta < 0) delta = -delta;
-  bool triggerAbs = (delta >= effectiveAbsolute);
-
-  // Multiplicator trigger: fire when power magnitude changed by factor N
-  bool triggerMulti = false;
-  if (effectiveMultiplicator > 1.0f)
-  {
-    int32_t absLast = lastPower    < 0 ? -lastPower    : lastPower;
-    int32_t absCurr = currentPower < 0 ? -currentPower : currentPower;
-    if (absLast > 0)
-    {
-      float ratio = (float)absCurr / (float)absLast;
-      triggerMulti = (ratio >= effectiveMultiplicator || ratio <= 1.0f / effectiveMultiplicator);
-    }
-  }
-
-  if (triggerAbs || triggerMulti)
-  {
-    Log_Add(1018);
-    MeterValue_trigger_non_override = true;
-    last_dyntaf_store = millis();
-  }
-}
-#endif
-
 void handle_MeterValue_store()
 {
   if (!MeterValue_trigger_override && !MeterValue_trigger_non_override) return; // nothing to do
@@ -2242,10 +2146,6 @@ void handle_MeterValue_trigger()
     if (meter_value_buffer_full == true) { last_taf14_meter_value = millis(); Log_Add(1206); }
     else { Log_AddWithoutTransmit(1011); MeterValue_trigger_non_override = true; }
   }
-  // else if (MeterValue_trigger_override == false && MeterValue_trigger_non_override == false)
-  // {
-  //   if (dynTaf_enabled_object.isChecked()) handle_dynTaf();
-  // }
 }
 
 void loop()
@@ -2468,14 +2368,6 @@ void Webserver_HandleSysInfo()
 <div class="kv"><span class="kl e">TAF 14 Interval</span>)rawliteral";
   s += String(atoi(taf14_param)) + " s";
   s += R"rawliteral(</div>)rawliteral";
-  // Dyn TAF rows — commented out (feature disabled)
-  // s += R"rawliteral(<div class="kv"><span class="kl">Dyn TAF</span>)rawliteral";
-  // s += "activated (hardcoded)";
-  // s += R"rawliteral(</div><div class="kv"><span class="kl">Dyn TAF Absolute Delta</span>)rawliteral";
-  // s += String(cached_tafdyn_absolute) + " W";
-  // s += R"rawliteral(</div><div class="kv last"><span class="kl">Dyn TAF Multiplicator</span>)rawliteral";
-  // s += String(cached_tafdyn_multiplicator, 1) + " x";
-  // s += R"rawliteral(</div>)rawliteral";
   s += R"rawliteral(
 </div>
 <div class="card">
