@@ -444,7 +444,7 @@ void OTA_setup()
 
 void handle_call_backend()
 {
-  if (wifi_connected)// && millis() - wifi_reconnection_time > 60000)
+  if (wifi_connected)
   {
     if ((last_call_backend == 0 && Time_isSynced()) || // first boot: fire as soon as the time is valid
         (!call_backend_successfull && millis() - last_call_backend > 180000) ||

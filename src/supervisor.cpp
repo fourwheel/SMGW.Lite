@@ -8,8 +8,6 @@
 #include <Preferences.h>
 #include <ArduinoOTA.h>
 
-unsigned long wifi_reconnection_time = 0;
-unsigned long last_wifi_retry        = 0;
 unsigned long last_wifi_check;
 unsigned long last_reconnect_attempt      = 0;
 
@@ -92,9 +90,8 @@ void handle_check_wifi_connection()
       DLOGLN("Connection has returned: Resetting Backend Timer, starting OTA");
       ArduinoOTA.begin();
       wifi_connected         = true;
-      wifi_reconnection_time = millis();
       call_backend_successfull = false;
-      b_send_log_to_backend  = true; // send after the 60 s reconnect delay, not immediately
+      b_send_log_to_backend  = true; // sent with the next backend call
       IPAddress localIP = WiFi.localIP();
       IPlastOctet = localIP[3];
     }

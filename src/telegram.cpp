@@ -14,7 +14,6 @@
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
 size_t telegram_receive_bufferIndex = 0;          // position in serial data buffer
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
-unsigned long timestamp_telegram;                 // timestamp of telegram
 
 unsigned long last_remote_meter_value = 0;
 bool startup_print_done              = false; // one-time diagnostic after first telegram
@@ -357,7 +356,6 @@ int32_t MeterValue_get_from_remote()
   newVal.meter_value_280 = doc["meter_value_280"];
   MeterValue_setLast(newVal);
   client.stop();
-  timestamp_telegram = timestamp;
   return meter_value_180_i32;
 }
 

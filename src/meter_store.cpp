@@ -168,7 +168,6 @@ bool MeterValue_store(bool override)
 }
 
 unsigned long last_meter_value_store   = 0;
-unsigned long last_meter_value_trigger = 0;
 
 void handle_MeterValue_store()
 {
