@@ -19,6 +19,8 @@ extern HardwareSerial mySerial;
 #define LED_BUILTIN 2
 #endif
 #define STATUS_PIN LED_BUILTIN
+// When CONFIG_PIN is pulled to ground on startup, IotWebConf builds its AP with
+// the initial password (e.g. in case of a lost password).
 #define CONFIG_PIN 5
 
 // Telegram receive buffer

@@ -72,16 +72,6 @@ const char wifiInitialApPassword[] = "password";
 
 #include "version.h"
 
-// -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
-//      password to build an AP. (E.g. in case of lost password)
-#define CONFIG_PIN 5
-
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2
-#endif
-
-#define STATUS_PIN LED_BUILTIN
-
 // Telegram vars
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegram in ms
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
