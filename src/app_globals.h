@@ -77,6 +77,8 @@ extern char taf7_param[];
 extern char taf14_param[];
 extern char backend_call_minute[];
 extern char Meter_Value_Buffer_Size_Char[];
+extern char mystrom_PV_IP[];
+extern char DebugMeterValueFromOtherClientIP[];
 extern char config_temperature_char[];
 extern char config_solar_char[];
 extern char config_280_char[];
@@ -87,6 +89,14 @@ extern String         backend_path;
 extern volatile bool  b_send_log_to_backend;
 extern volatile bool  g_log_upload_full;
 extern bool           call_backend_successfull;
+
+// Misc state shown on /sysinfo
+extern int          staticDelay;
+extern int          watermark_meter_buffer;
+extern int          watermark_log_buffer;
+extern int          watermark_telegram;
+extern const String BUILD_TIMESTAMP;
+extern const String BUILD_BRANCH;
 
 // TAF cached params
 extern int cached_taf7_param;

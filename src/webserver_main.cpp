@@ -1,4 +1,5 @@
 #include "webserver_main.h"
+#include "webserver_pages.h"
 #include "app_globals.h"
 #include "serial_scan.h"
 #include "log_buffer.h"
@@ -14,8 +15,6 @@
 
 // Forward declarations for functions defined in main.cpp
 void Param_configSaved();
-void Webserver_HandleRoot();
-void Webserver_HandleSysInfo();
 void Webserver_SetCert();
 void Webserver_TestBackendConnection();
 void Webserver_TestBackendConnectionRun();
