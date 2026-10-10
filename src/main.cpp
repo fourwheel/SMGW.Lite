@@ -108,6 +108,9 @@ bool          g_wifiSetupFailed   = false; // set by handle_wifi_setup_lifecycle
 unsigned long g_wifiSetupStartedAt = 0;    // millis() timestamp WiFi.begin() was issued from /wifiSetup
 unsigned long g_apStopAt          = 0;    // millis() timestamp to stop AP, 0 = not scheduled
 SemaphoreHandle_t Sema_Backend;       // Mutex / Semaphore for backend call
+// Held by telegramTask while it reads mySerial and by the web handlers that
+// restart it (end()/begin()), so the UART driver is never removed mid-read.
+SemaphoreHandle_t Sema_Serial;
 // Guards MeterValueBuffer + write pointers while a meter-value upload is in
 // flight, so a store between "payload sent" and "acknowledged -> clear buffer"
 // cannot be wiped without ever having been transmitted.
@@ -592,11 +595,13 @@ void Webclient_Send_Log_to_backend_Task(void *pvParameters)
 
 void telegramTask(void * pvParameters) {
   for(;;) {
+    xSemaphoreTake(Sema_Serial, portMAX_DELAY);
     if (SerialScan_consumePending()) {
       SerialScan_run();
     } else if (!SerialScan_isRunning()) {
       handle_Telegram_receive();
     }
+    xSemaphoreGive(Sema_Serial);
     vTaskDelay(pdMS_TO_TICKS(10));
     watermark_telegram = uxTaskGetStackHighWaterMark(NULL);
   }
@@ -606,6 +611,7 @@ void setup()
 {
   Sema_Backend = xSemaphoreCreateMutex();
   Sema_MeterBuffer = xSemaphoreCreateMutex();
+  Sema_Serial = xSemaphoreCreateMutex();
   LogBuffer_reset();
   last_telegram_parsed = millis(); // start watchdog timer from boot
   Log_Add(1001);

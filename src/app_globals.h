@@ -96,6 +96,7 @@ extern int cached_backend_call_minute;
 
 // FreeRTOS
 extern SemaphoreHandle_t Sema_Backend;
+extern SemaphoreHandle_t Sema_Serial;
 
 // Trigger flags
 extern bool MeterValue_trigger_override;

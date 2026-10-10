@@ -33,12 +33,14 @@ void Webserver_FlashPulse()
   if (ms < OPTICAL_FLASH_MS_MIN) ms = OPTICAL_FLASH_MS_MIN;
   if (ms > OPTICAL_FLASH_MS_MAX) ms = OPTICAL_FLASH_MS_MAX;
 
+  xSemaphoreTake(Sema_Serial, portMAX_DELAY); // telegramTask must not read while the UART is off
   mySerial.end();
   pinMode(TX_PIN, OUTPUT);
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(ms);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
   mySerial.begin(SerialScan_getActiveBaud(), SerialScan_getActiveConfig(), RX_PIN, TX_PIN);
+  xSemaphoreGive(Sema_Serial);
   server.send(200, "text/plain", "ok");
 }
 
@@ -52,12 +54,14 @@ void Webserver_FlashLongPulse()
   if (ms < OPTICAL_FLASH_LONG_MS_MIN) ms = OPTICAL_FLASH_LONG_MS_MIN;
   if (ms > OPTICAL_FLASH_LONG_MS_MAX) ms = OPTICAL_FLASH_LONG_MS_MAX;
 
+  xSemaphoreTake(Sema_Serial, portMAX_DELAY); // telegramTask must not read while the UART is off
   mySerial.end();
   pinMode(TX_PIN, OUTPUT);
   digitalWrite(TX_PIN, OPTICAL_FLASH_LED_ON);
   delay(ms);
   digitalWrite(TX_PIN, !OPTICAL_FLASH_LED_ON);
   mySerial.begin(SerialScan_getActiveBaud(), SerialScan_getActiveConfig(), RX_PIN, TX_PIN);
+  xSemaphoreGive(Sema_Serial);
   server.send(200, "text/plain", "ok");
 }
 

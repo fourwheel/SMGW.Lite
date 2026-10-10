@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Get Meter Value from other SMGWLite Client" (debug mode) now also takes over the 2.8.0 value of the other device; before, it was always stored as `0`.
 - The meter model (`meter_model`, sent as `model=` with the log upload) was written by two tasks: the parsers in `telegramTask` and the telegram pages of the web server. Only the parsers set it now, and they build it locally and assign it once, so other tasks never read a string that is being built.
 - On the dual-core ESP32 (esp32-nodemcu) a stored value or `/showLastMeterValue` could mix fields of two consecutive telegrams (e.g. the new 1.8.0 with the previous timestamp): the parsers replace `LastMeterValue` with a struct copy that is not atomic across cores. Parsers and the remote debug mode now write it, and the store and `/showLastMeterValue` copy it, under a spinlock (`MeterValue_setLast()` / `MeterValue_getLast()`). The ESP32-C3 has one core and was not affected.
+- The web handlers that restart the meter UART (`/setSerialConfig`, `/flash`, `/flashlong`) called `mySerial.end()`/`begin()` while `telegramTask` might be reading from it. A new mutex `Sema_Serial` is held by `telegramTask` while it reads (or runs the serial scan) and by these handlers while the UART is off, so the driver is never removed mid-read. Tested on an esp32-nodemcu with a meter attached: 30 `/setSerialConfig` calls in a row, no restart, telegrams continued.
 
 ## [1.4.4] - 2026-10-08
 
