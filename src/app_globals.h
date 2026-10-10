@@ -89,6 +89,8 @@ extern String         backend_path;
 extern volatile bool  b_send_log_to_backend;
 extern volatile bool  g_log_upload_full;
 extern bool           call_backend_successfull;
+extern unsigned long  last_backend_success;
+extern int            IPlastOctet;
 
 // Misc state shown on /sysinfo
 extern int          staticDelay;
@@ -107,6 +109,15 @@ extern int cached_backend_call_minute;
 // FreeRTOS
 extern SemaphoreHandle_t Sema_Backend;
 extern SemaphoreHandle_t Sema_Serial;
+extern SemaphoreHandle_t Sema_MeterBuffer; // held by the meter upload from computing the ranges until the buffer is cleared
+
+// Self-recovery, see supervisorTask()
+extern volatile unsigned long g_loop_heartbeat;
+extern volatile unsigned long g_meter_task_started;
+extern volatile unsigned long g_log_task_started;
+#ifdef TEST_SELF_RECOVERY
+extern volatile bool g_test_hang_upload;
+#endif
 
 // Trigger flags
 extern bool MeterValue_trigger_override;

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.5] - 2026-10-10
 
 ### Code structure
-- `main.cpp` split into modules, code moved unchanged (no behaviour change): `webserver_pages.cpp` (`/`, `/sysinfo`), `telegram.cpp` (telegramTask, SML/IEC parsers, remote debug fetch, telegram watchdog).
+- `main.cpp` split into modules, code moved unchanged (no behaviour change): `webserver_pages.cpp` (`/`, `/sysinfo`), `telegram.cpp` (telegramTask, SML/IEC parsers, remote debug fetch, telegram watchdog), `backend_client.cpp` (meter value and log upload tasks).
 
 ### Removed
 - Dynamic TAF (`handle_dynTaf()`, disabled behind `#if 0`) and its three `tafdyn_*` parameters. They were never registered with IotWebConf, so the stored config layout is unchanged (`CONFIG_VERSION` stays `2906`). Log code `1018` keeps its text for old logs.
