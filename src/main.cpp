@@ -1176,6 +1176,7 @@ int32_t MeterValue_get_from_remote()
   LastMeterValue.timestamp       = doc["timestamp"];
   LastMeterValue.temperature     = doc["temperature"];
   LastMeterValue.solar           = doc["solar"];
+  LastMeterValue.meter_value_280 = doc["meter_value_280"];
   client.stop();
   timestamp_telegram = timestamp;
   return meter_value_180_i32;
