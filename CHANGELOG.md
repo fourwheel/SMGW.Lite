@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.5] - 2026-10-10
 
 ### Changed
+- The log upload no longer sends `token=header` in the URL. It was a switch from the move of the token into the `X-Auth-Token` header (March 2026); the backend reads only the header since then.
 - `telegramTask` stack raised from 2048 to 3072 bytes. On an esp32-nodemcu parsing SML telegrams only ~700 bytes were left (Xtensa needs more stack than the RISC-V ESP32-C3 for the same code). Costs 1 KB heap; the lowest free heap seen on an ESP32-C3 in the field was ~104 KB.
 
 ### Fixed

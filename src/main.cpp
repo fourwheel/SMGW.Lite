@@ -1376,7 +1376,7 @@ void Webclient_send_log_to_backend()
   size_t logBufferSize = Log_CopyForUpload(logDataBuffer, full, logUpto);
 
   String logHeader  = "POST " + String(backend_path) + "log.php";
-  logHeader += "?ID=" + String(backend_ID) + "&token=header&IP=" + String(IPlastOctet);
+  logHeader += "?ID=" + String(backend_ID) + "&IP=" + String(IPlastOctet);
   logHeader += "&serial=" + SerialScan_activeLabel();
   logHeader += "&fw=" + String(FIRMWARE_VERSION);
   logHeader += "&cfg=" + String(CONFIG_VERSION);
