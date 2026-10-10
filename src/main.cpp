@@ -919,6 +919,7 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
 
   // 3a. Extract meter serial (OBIS 0-0:96.1.0) for meter_model if not yet known
   if (meter_model.isEmpty()) {
+    String model; // built locally, assigned once - other tasks read meter_model
     uint8_t obis960[] = {0x01, 0x00, 0x60, 0x01, 0x00, 0xff};
     for (int i = px; i < sx - 12; i++) {
       if (memcmp(&buffer[i], obis960, 6) == 0) {
@@ -931,16 +932,16 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
             for (int k = 0; k < slen - 2; k++) {
               uint8_t a = buffer[j+1+k], b = buffer[j+2+k], c = buffer[j+3+k];
               if (a >= 'A' && a <= 'Z' && b >= 'A' && b <= 'Z' && c >= 'A' && c <= 'Z') {
-                meter_model = String((char)a) + String((char)b) + String((char)c);
+                model = String((char)a) + String((char)b) + String((char)c);
                 break;
               }
             }
-            if (meter_model.isEmpty()) {
+            if (model.isEmpty()) {
               char hex[3];
               for (int k = 0; k < slen; k++) {
                 sprintf(hex, "%02X", buffer[j+1+k]);
-                if (k) meter_model += ' ';
-                meter_model += hex;
+                if (k) model += ' ';
+                model += hex;
               }
             }
             break;
@@ -949,6 +950,7 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
         break;
       }
     }
+    meter_model = model;
   }
 
   // 3b. Extract OBIS Data
@@ -1013,18 +1015,20 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
 
   // Extract meter model from identification line (/<MFR><baud><ident>) if not yet known
   if (meter_model.isEmpty() && telegram_str[0] == '/') {
+    String model; // built locally, assigned once - other tasks read meter_model
     const char *eol = strstr(telegram_str, "\r\n");
     size_t lineLen = eol ? (size_t)(eol - telegram_str) : 0;
     if (lineLen >= 4) {
       char mfr[4]; strncpy(mfr, telegram_str + 1, 3); mfr[3] = '\0';
-      meter_model = mfr;
+      model = mfr;
       if (lineLen > 5) {
         char ident[64];
         size_t identLen = lineLen - 5 < sizeof(ident) - 1 ? lineLen - 5 : sizeof(ident) - 1;
         strncpy(ident, telegram_str + 5, identLen); ident[identLen] = '\0';
-        meter_model += ' '; meter_model += ident;
+        model += ' '; model += ident;
       }
     }
+    meter_model = model;
   }
 
   // Extract OBIS 1.8.0 (consumption) — required

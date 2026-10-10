@@ -93,7 +93,6 @@ static String buildCommonSection(uint8_t* buffer, size_t length)
         ident[identLen] = '\0';
       }
     }
-    if (meter_model.isEmpty()) meter_model = String(mfr) + " " + String(ident);
     s += "<tr><td>Protocol</td><td>IEC 62056-21</td></tr>";
     s += "<tr><td>Manufacturer Code</td><td><strong>" + String(mfr)   + "</strong></td></tr>";
     s += "<tr><td>Meter Identifier</td><td><strong>"  + String(ident) + "</strong></td></tr>";
@@ -139,7 +138,6 @@ static String buildCommonSection(uint8_t* buffer, size_t length)
         }
       }
     }
-    if (meter_model.isEmpty() && meterId != "n/a") meter_model = meterId;
     s += "<tr><td>Protocol</td><td>SML</td></tr>";
     s += "<tr><td>Meter Serial (96.1.0)</td><td><strong>" + meterId + "</strong></td></tr>";
     if (px != -1 && sx != -1) {

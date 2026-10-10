@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - "Get Meter Value from other SMGWLite Client" (debug mode) now also takes over the 2.8.0 value of the other device; before, it was always stored as `0`.
+- The meter model (`meter_model`, sent as `model=` with the log upload) was written by two tasks: the parsers in `telegramTask` and the telegram pages of the web server. Only the parsers set it now, and they build it locally and assign it once, so other tasks never read a string that is being built.
 
 ## [1.4.4] - 2026-10-08
 
