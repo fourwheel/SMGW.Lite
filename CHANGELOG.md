@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.5] - 2026-10-10
 
+### Changed
+- `telegramTask` stack raised from 2048 to 3072 bytes. On an esp32-nodemcu parsing SML telegrams only ~700 bytes were left (Xtensa needs more stack than the RISC-V ESP32-C3 for the same code). Costs 1 KB heap; the lowest free heap seen on an ESP32-C3 in the field was ~104 KB.
+
 ### Fixed
 - "Get Meter Value from other SMGWLite Client" (debug mode) now also takes over the 2.8.0 value of the other device; before, it was always stored as `0`.
 - The meter model (`meter_model`, sent as `model=` with the log upload) was written by two tasks: the parsers in `telegramTask` and the telegram pages of the web server. Only the parsers set it now, and they build it locally and assign it once, so other tasks never read a string that is being built.

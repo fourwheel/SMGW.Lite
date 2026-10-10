@@ -770,7 +770,7 @@ void setup()
   // staticDelay already set above (before Param_setup)
 
   vTaskPrioritySet(NULL, 3);
-  xTaskCreate(telegramTask, "TelegramBot", 2048, NULL, 0, NULL);
+  xTaskCreate(telegramTask, "TelegramBot", 3072, NULL, 0, NULL); // ~700 B left with 2048 on the esp32dev (Xtensa) while parsing SML
   // Priority above loop() (3): on the single-core ESP32-C3 a busy-looping
   // loop() must not be able to starve the supervisor.
   g_loop_heartbeat = millis();
