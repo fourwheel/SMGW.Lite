@@ -37,11 +37,6 @@ void Time_begin()
 #endif
 }
 
-bool Time_isNtpSynced()
-{
-  return s_ntp_synced;
-}
-
 // Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's algorithm).
 // Avoids timegm()/mktime(), whose result depends on the TZ setting.
 static long Time_daysFromCivil(int y, unsigned m, unsigned d)

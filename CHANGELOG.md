@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Duplicate `CONFIG_PIN` / `STATUS_PIN` / `LED_BUILTIN` defines in `main.cpp`; they are defined once in `app_globals.h` (same values).
 - Unused libraries `NTPClient`, `ESPAsyncWebServer` and `AsyncTCP` from `lib_deps` (time sync uses `configTime()`, the web server is the synchronous `WebServer`), and the `NTPClient.h` / `WiFiUdp.h` includes.
 - Unused global variables `last_wifi_retry`, `last_meter_value_trigger`, `timestamp_telegram` (only written) and `wifi_reconnection_time` (only read in a commented-out condition of `handle_call_backend()`, removed as well).
+- Unused function `Time_isNtpSynced()` (last caller removed in 1.4.0). No unused macros were found.
 
 ### Changed
 - The log upload no longer sends `token=header` in the URL. It was a switch from the move of the token into the `X-Auth-Token` header (March 2026); the backend reads only the header since then.
