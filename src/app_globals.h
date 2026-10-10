@@ -19,6 +19,8 @@ extern HardwareSerial mySerial;
 #define LED_BUILTIN 2
 #endif
 #define STATUS_PIN LED_BUILTIN
+// When CONFIG_PIN is pulled to ground on startup, IotWebConf builds its AP with
+// the initial password (e.g. in case of a lost password).
 #define CONFIG_PIN 5
 
 // Telegram receive buffer
@@ -54,9 +56,6 @@ extern IotWebConfCheckboxParameter taf7_b_object;
 extern IotWebConfNumberParameter   taf7_param_object;
 extern IotWebConfCheckboxParameter taf14_b_object;
 extern IotWebConfNumberParameter   taf14_param_object;
-extern IotWebConfCheckboxParameter tafdyn_b_object;
-extern IotWebConfNumberParameter   tafdyn_absolute_object;
-extern IotWebConfNumberParameter   tafdyn_multiplicator_object;
 extern IotWebConfNumberParameter   backend_call_minute_object;
 extern IotWebConfCheckboxParameter mystrom_PV_object;
 extern IotWebConfTextParameter     mystrom_PV_IP_object;
@@ -78,6 +77,8 @@ extern char taf7_param[];
 extern char taf14_param[];
 extern char backend_call_minute[];
 extern char Meter_Value_Buffer_Size_Char[];
+extern char mystrom_PV_IP[];
+extern char DebugMeterValueFromOtherClientIP[];
 extern char config_temperature_char[];
 extern char config_solar_char[];
 extern char config_280_char[];
@@ -88,6 +89,17 @@ extern String         backend_path;
 extern volatile bool  b_send_log_to_backend;
 extern volatile bool  g_log_upload_full;
 extern bool           call_backend_successfull;
+extern unsigned long  last_backend_success;
+extern int            IPlastOctet;
+
+// Misc state shown on /sysinfo
+extern int          staticDelay;
+extern int          current_temperature; // last DS18B20 reading, see handle_temperature()
+extern int          watermark_meter_buffer;
+extern int          watermark_log_buffer;
+extern int          watermark_telegram;
+extern const String BUILD_TIMESTAMP;
+extern const String BUILD_BRANCH;
 
 // TAF cached params
 extern int cached_taf7_param;
@@ -96,6 +108,16 @@ extern int cached_backend_call_minute;
 
 // FreeRTOS
 extern SemaphoreHandle_t Sema_Backend;
+extern SemaphoreHandle_t Sema_Serial;
+extern SemaphoreHandle_t Sema_MeterBuffer; // held by the meter upload from computing the ranges until the buffer is cleared
+
+// Self-recovery, see supervisorTask()
+extern volatile unsigned long g_loop_heartbeat;
+extern volatile unsigned long g_meter_task_started;
+extern volatile unsigned long g_log_task_started;
+#ifdef TEST_SELF_RECOVERY
+extern volatile bool g_test_hang_upload;
+#endif
 
 // Trigger flags
 extern bool MeterValue_trigger_override;

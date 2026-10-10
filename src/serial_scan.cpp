@@ -172,8 +172,10 @@ bool SerialConfig_setByIndex(int idx)
     const SerialScanEntry& e = SERIAL_SCAN_TABLE[idx];
     active_baud_rate   = e.baudRate;
     active_uart_config = e.uartConfig;
+    xSemaphoreTake(Sema_Serial, portMAX_DELAY); // called from a web handler, see Sema_Serial
     mySerial.end();
     mySerial.begin(e.baudRate, e.uartConfig, RX_PIN, TX_PIN);
+    xSemaphoreGive(Sema_Serial);
     SerialConfig_save(idx);
     Log_Add(3012);
     return true;

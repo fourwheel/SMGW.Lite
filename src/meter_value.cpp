@@ -31,6 +31,25 @@ int      meter_value_override_i      = 0;
 int      meter_value_NON_override_i  = 233; // Meter_Value_Buffer_Size - 1
 
 MeterValue LastMeterValue = {};
+// The parsers (telegramTask) replace LastMeterValue as a whole; a plain struct
+// copy is not atomic on the dual-core ESP32, so readers that need a consistent
+// set of fields (store, /showLastMeterValue) copy it under this lock.
+static portMUX_TYPE last_meter_value_mux = portMUX_INITIALIZER_UNLOCKED;
+
+void MeterValue_setLast(const MeterValue &v)
+{
+  portENTER_CRITICAL(&last_meter_value_mux);
+  LastMeterValue = v;
+  portEXIT_CRITICAL(&last_meter_value_mux);
+}
+
+MeterValue MeterValue_getLast()
+{
+  portENTER_CRITICAL(&last_meter_value_mux);
+  MeterValue v = LastMeterValue;
+  portEXIT_CRITICAL(&last_meter_value_mux);
+  return v;
+}
 MeterValue PrevMeterValue = {};
 
 int  last_init_buffer_kb = -1;

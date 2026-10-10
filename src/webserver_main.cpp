@@ -1,4 +1,6 @@
 #include "webserver_main.h"
+#include "webserver_pages.h"
+#include "webserver_backend.h"
 #include "app_globals.h"
 #include "serial_scan.h"
 #include "log_buffer.h"
@@ -14,18 +16,11 @@
 
 // Forward declarations for functions defined in main.cpp
 void Param_configSaved();
-void Webserver_HandleRoot();
-void Webserver_HandleSysInfo();
-void Webserver_SetCert();
-void Webserver_TestBackendConnection();
-void Webserver_TestBackendConnectionRun();
 // Optical handlers — defined in webserver_optical.cpp
 void Webserver_Flashlight();
 void Webserver_PinAssistantDeluxe();
 void Webserver_FlashPulse();
 void Webserver_FlashLongPulse();
-void Webserver_HandleCertUpload();
-void Webclient_loadCertToChar();
 
 // Credentials from an in-progress /wifiSetup attempt, held in RAM only until
 // the connection is confirmed to work — see Webserver_HandleWifiSetup().
@@ -96,7 +91,6 @@ static SmartMeterHtmlFormatProvider customHtmlFormatProvider;
 void Param_setup()
 {
   groupTelegram.addItem(&activate_IEC_Parser_object);
-  // groupTelegram.addItem(&dynTaf_enabled_object); // dynTaf disabled
   groupBackend.addItem(&backend_endpoint_object);
   groupBackend.addItem(&backend_ID_object);
   groupBackend.addItem(&backend_token_object);
@@ -104,8 +98,6 @@ void Param_setup()
   groupTaf.addItem(&taf7_param_object);
   groupTaf.addItem(&taf14_b_object);
   groupTaf.addItem(&taf14_param_object);
-  // tafdyn params intentionally NOT registered — adding them would shift the NVS
-  // layout and force re-configuration of deployed devices. Values are hardcoded.
   groupBackend.addItem(&backend_call_minute_object);
   groupTelegram.addItem(&Meter_Value_Buffer_Size_object);
   groupSys.addItem(&led_blink_object);
@@ -496,6 +488,13 @@ void Webserver_HandleWifiSetup()
   redirect_to_sysinfo = false;
   DLOGLN("WiFi-Setup: starting direct connection attempt (not yet saved).");
 
+  // The SSID can come from any network in range - escape it for the page.
+  String ssidHtml = ssid;
+  ssidHtml.replace("&", "&amp;");
+  ssidHtml.replace("<", "&lt;");
+  ssidHtml.replace(">", "&gt;");
+  ssidHtml.replace("\"", "&quot;");
+
   String page = R"rawliteral(<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -527,14 +526,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 <div class="card">
   <div id="connecting" style="display:flex;flex-direction:column;align-items:center;gap:1.1rem;">
     <div class="spinner"></div>
-    <p class="msg">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>&hellip;</p>
+    <p class="msg">Pr&uuml;fe Verbindungsdaten f&uuml;r <span class="ssid">)rawliteral" + ssidHtml + R"rawliteral(</span>&hellip;</p>
   </div>
   <div class="result" id="result">
     <p class="msg">&#10003;&nbsp; Verbunden! Deine IP-Adresse:</p>
     <div class="ip-box" id="ip-display"></div>
     <ol class="steps">
       <li>Notiere dir die IP-Adresse &ndash; besonders das letzte Byte (fett).</li>
-      <li>Wechsle jetzt mit deinem Ger&auml;t ins WLAN <span class="ssid">)rawliteral" + ssid + R"rawliteral(</span>.</li>
+      <li>Wechsle jetzt mit deinem Ger&auml;t ins WLAN <span class="ssid">)rawliteral" + ssidHtml + R"rawliteral(</span>.</li>
       <li>Klicke dann auf den Button unten.</li>
     </ol>
     <a class="open-btn" id="open-btn" href="#">SmartMeterLite &ouml;ffnen &rarr;</a>

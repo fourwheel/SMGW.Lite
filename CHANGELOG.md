@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-10-10
+
+### Code structure
+- `main.cpp` split into modules, code moved unchanged (no behaviour change): `webserver_pages.cpp` (`/`, `/sysinfo`), `telegram.cpp` (telegramTask, SML/IEC parsers, remote debug fetch, telegram watchdog), `backend_client.cpp` (meter value and log upload tasks), `meter_store.cpp` (storing values, TAF7/TAF14 triggers), `webserver_backend.cpp` (certificate upload, backend connection test), `supervisor.cpp` (WiFi supervision, backend recovery, supervisor task), `sensors.cpp` (DS18B20, myStrom). `main.cpp` keeps the globals, IotWebConf parameters (order unchanged), `setup()`, `loop()` and OTA.
+
+### Removed
+- Dynamic TAF (`handle_dynTaf()`, disabled behind `#if 0`) and its three `tafdyn_*` parameters. They were never registered with IotWebConf, so the stored config layout is unchanged (`CONFIG_VERSION` stays `2906`). Log code `1018` keeps its text for old logs.
+- The parked TAF7 timestamp flooring (`#if 0` in `MeterValue_store()`, since 1.3.5). Stored values keep the real telegram time, as before.
+- Duplicate `CONFIG_PIN` / `STATUS_PIN` / `LED_BUILTIN` defines in `main.cpp`; they are defined once in `app_globals.h` (same values).
+- Unused libraries `NTPClient`, `ESPAsyncWebServer` and `AsyncTCP` from `lib_deps` (time sync uses `configTime()`, the web server is the synchronous `WebServer`), and the `NTPClient.h` / `WiFiUdp.h` includes.
+- Unused global variables `last_wifi_retry`, `last_meter_value_trigger`, `timestamp_telegram` (only written) and `wifi_reconnection_time` (only read in a commented-out condition of `handle_call_backend()`, removed as well).
+- Unused function `Time_isNtpSynced()` (last caller removed in 1.4.0). No unused macros were found.
+
+### Changed
+- The log upload no longer sends `token=header` in the URL. It was a switch from the move of the token into the `X-Auth-Token` header (March 2026); the backend reads only the header since then.
+- `telegramTask` stack raised from 2048 to 3072 bytes. On an esp32-nodemcu parsing SML telegrams only ~700 bytes were left (Xtensa needs more stack than the RISC-V ESP32-C3 for the same code). Costs 1 KB heap; the lowest free heap seen on an ESP32-C3 in the field was ~104 KB.
+
+### Fixed
+- "Get Meter Value from other SMGWLite Client" (debug mode) now also takes over the 2.8.0 value of the other device; before, it was always stored as `0`.
+- The meter model (`meter_model`, sent as `model=` with the log upload) was written by two tasks: the parsers in `telegramTask` and the telegram pages of the web server. Only the parsers set it now, and they build it locally and assign it once, so other tasks never read a string that is being built.
+- On the dual-core ESP32 (esp32-nodemcu) a stored value or `/showLastMeterValue` could mix fields of two consecutive telegrams (e.g. the new 1.8.0 with the previous timestamp): the parsers replace `LastMeterValue` with a struct copy that is not atomic across cores. Parsers and the remote debug mode now write it, and the store and `/showLastMeterValue` copy it, under a spinlock (`MeterValue_setLast()` / `MeterValue_getLast()`). The ESP32-C3 has one core and was not affected.
+- The web handlers that restart the meter UART (`/setSerialConfig`, `/flash`, `/flashlong`) called `mySerial.end()`/`begin()` while `telegramTask` might be reading from it. A new mutex `Sema_Serial` is held by `telegramTask` while it reads (or runs the serial scan) and by these handlers while the UART is off, so the driver is never removed mid-read. Tested on an esp32-nodemcu with a meter attached: 30 `/setSerialConfig` calls in a row, no restart, telegrams continued.
+- The WiFi setup page (`POST /wifiSetup`) inserted the selected SSID into the HTML unescaped. A network in range named e.g. `<svg onload=fetch('/restart')>` ran its script in the browser once a user picked it. The SSID is now HTML-escaped there (the scan list already escaped it).
+- Backend: `credentials.php.TEMPLATE` reported a failed database connection with `mysqli_error()`, which needs a connection and is a fatal error on PHP 8.0; now `mysqli_connect_error()`. From PHP 8.1 on `mysqli_connect()` throws before that, so existing `credentials.php` files need no change.
+
 ## [1.4.4] - 2026-10-08
 
 ### Changed
