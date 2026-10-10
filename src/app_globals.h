@@ -92,6 +92,7 @@ extern bool           call_backend_successfull;
 
 // Misc state shown on /sysinfo
 extern int          staticDelay;
+extern int          current_temperature; // last DS18B20 reading, see handle_temperature()
 extern int          watermark_meter_buffer;
 extern int          watermark_log_buffer;
 extern int          watermark_telegram;
