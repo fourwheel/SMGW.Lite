@@ -994,9 +994,9 @@ bool Telegram_parse_SML(uint8_t* buffer, size_t length)
     newVal.power_export    = temp270;
     newVal.net_power       = (int32_t)temp167;
     newVal.timestamp       = Time_getEpochTime();
-    // Single struct assignment: meter_value_180 goes from old value to temp180,
-    // never through 0, eliminating the race window.
-    LastMeterValue = newVal;
+    // Single locked assignment: readers never see meter_value_180 at 0 or a
+    // mix of the old and the new telegram.
+    MeterValue_setLast(newVal);
     return true;
   }
   return false;
@@ -1094,7 +1094,7 @@ bool Telegram_parse_IEC(uint8_t* buffer, size_t length)
   newVal.power_import    = (uint32_t)(v170 * 1000.0f);
   newVal.power_export    = (uint32_t)(v270 * 1000.0f);
   newVal.net_power       = (int32_t)(v167 * 1000.0f);
-  LastMeterValue = newVal;
+  MeterValue_setLast(newVal);
 
   return true;
 }
@@ -1175,12 +1175,14 @@ int32_t MeterValue_get_from_remote()
   DLOG(F("Meter Value 180: ")); DLOGLN(meter_value_180_i32);
   DLOG(F("Timestamp: "));      DLOGLN(timestamp);
 
-  resetMeterValue(LastMeterValue);
-  LastMeterValue.meter_value_180 = doc["meter_value_180"];
-  LastMeterValue.timestamp       = doc["timestamp"];
-  LastMeterValue.temperature     = doc["temperature"];
-  LastMeterValue.solar           = doc["solar"];
-  LastMeterValue.meter_value_280 = doc["meter_value_280"];
+  MeterValue newVal = MeterValue_getLast();
+  resetMeterValue(newVal);
+  newVal.meter_value_180 = doc["meter_value_180"];
+  newVal.timestamp       = doc["timestamp"];
+  newVal.temperature     = doc["temperature"];
+  newVal.solar           = doc["solar"];
+  newVal.meter_value_280 = doc["meter_value_280"];
+  MeterValue_setLast(newVal);
   client.stop();
   timestamp_telegram = timestamp;
   return meter_value_180_i32;
@@ -1595,12 +1597,10 @@ bool MeterValue_store(bool override)
 
   if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
 
-  // Snapshot LastMeterValue once. myStrom_get_Meter_value() above is a blocking
-  // network call; while it is blocked, telegramTask (Core 0) may update
-  // LastMeterValue concurrently. Taking a snapshot after the blocking call and
-  // using it exclusively below prevents reading an inconsistent (partially-written)
-  // struct from the other core.
-  MeterValue snap = LastMeterValue;
+  // Snapshot LastMeterValue once, after the blocking myStrom call, and use only
+  // the snapshot below. Copied under the lock, so it never mixes two telegrams
+  // (telegramTask may replace LastMeterValue on the other core meanwhile).
+  MeterValue snap = MeterValue_getLast();
 
   // Without a 1.8.0 value the trigger stays set and the store is retried on
   // every pass, so 1200 was logged several times a minute (repeats are only

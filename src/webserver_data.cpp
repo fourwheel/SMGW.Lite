@@ -486,19 +486,20 @@ void Webserver_ShowTelegram()
 
 void Webserver_ShowLastMeterValue()
 {
+  MeterValue   v = MeterValue_getLast(); // consistent copy, see MeterValue_setLast()
   JsonDocument jsonDoc;
-  jsonDoc["meter_value_180"] = LastMeterValue.meter_value_180;
-  jsonDoc["timestamp"]       = LastMeterValue.timestamp;
+  jsonDoc["meter_value_180"] = v.meter_value_180;
+  jsonDoc["timestamp"]       = v.timestamp;
   // Age computed with the device clock — clients must not use their own clock,
   // it may differ (or the device may not be time-synced yet, still at 1970).
-  long ageS = (long)Time_getEpochTime() - (long)LastMeterValue.timestamp;
-  jsonDoc["age_s"]           = (LastMeterValue.timestamp > 0 && ageS > 0) ? ageS : 0;
-  jsonDoc["temperature"]     = LastMeterValue.temperature;
-  jsonDoc["solar"]           = LastMeterValue.solar;
-  jsonDoc["meter_value_280"] = LastMeterValue.meter_value_280;
-  jsonDoc["power_import"]    = LastMeterValue.power_import;
-  jsonDoc["power_export"]    = LastMeterValue.power_export;
-  jsonDoc["net_power"]       = LastMeterValue.net_power;
+  long ageS = (long)Time_getEpochTime() - (long)v.timestamp;
+  jsonDoc["age_s"]           = (v.timestamp > 0 && ageS > 0) ? ageS : 0;
+  jsonDoc["temperature"]     = v.temperature;
+  jsonDoc["solar"]           = v.solar;
+  jsonDoc["meter_value_280"] = v.meter_value_280;
+  jsonDoc["power_import"]    = v.power_import;
+  jsonDoc["power_export"]    = v.power_export;
+  jsonDoc["net_power"]       = v.net_power;
   jsonDoc["last_byte_age_s"]  = lastByteTime > 0 ? (unsigned long)(millis() - lastByteTime) / 1000 : 9999;
   jsonDoc["wifi_connected"]   = wifi_connected;
   jsonDoc["time_synced"]      = Time_isSynced();
