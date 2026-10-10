@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dynamic TAF (`handle_dynTaf()`, disabled behind `#if 0`) and its three `tafdyn_*` parameters. They were never registered with IotWebConf, so the stored config layout is unchanged (`CONFIG_VERSION` stays `2906`). Log code `1018` keeps its text for old logs.
 - The parked TAF7 timestamp flooring (`#if 0` in `MeterValue_store()`, since 1.3.5). Stored values keep the real telegram time, as before.
 - Duplicate `CONFIG_PIN` / `STATUS_PIN` / `LED_BUILTIN` defines in `main.cpp`; they are defined once in `app_globals.h` (same values).
+- Unused libraries `NTPClient`, `ESPAsyncWebServer` and `AsyncTCP` from `lib_deps` (time sync uses `configTime()`, the web server is the synchronous `WebServer`), and the `NTPClient.h` / `WiFiUdp.h` includes.
 
 ### Changed
 - The log upload no longer sends `token=header` in the URL. It was a switch from the move of the token into the `X-Auth-Token` header (March 2026); the backend reads only the header since then.

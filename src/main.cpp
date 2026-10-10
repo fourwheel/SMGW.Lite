@@ -28,9 +28,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <HardwareSerial.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-#include "NTPClient.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include "Arduino.h"
