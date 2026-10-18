@@ -331,7 +331,6 @@ poll();
   server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
-  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefsysinfo(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
 
   // OTA update handler
