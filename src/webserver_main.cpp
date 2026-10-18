@@ -272,7 +272,10 @@ poll();
         xSemaphoreGive(Sema_Backend);
       }
       ota_active            = false;
-      g_ota_check_requested = false; // don't auto-install while user is deciding
+      // The query itself may set it (OtaPull_setOffer); cleared so the page
+      // visit alone does not start an install. The next confirmed meter upload
+      // sets it again, so an assigned version is still installed automatically.
+      g_ota_check_requested = false;
     }
     if (fetched && (version.isEmpty() || version == FIRMWARE_VERSION)) Log_AddWithoutTransmit(6002);
 
