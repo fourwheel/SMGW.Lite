@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Devices whose stagger delay (`staticDelay`, derived from the MAC, shown as `SMGWLite-<n>` in the AP name) is 59 never started the regular backend call: the check required the second of the minute to be *greater* than the delay. They only called after boot and after failed calls, i.e. every ~30 min after `handle_backend_recovery()` had reconnected WiFi (log 7000). The check is now `>=`.
 - `fw_backend_test()` (post-update validation, "Check Remote FW Update") busy-looped without a delay while waiting for the response body. On the single-core ESP32-C3 `loop()` (priority 3) then starved `telegramTask` and the upload tasks until the body arrived. It now yields 10 ms per empty poll.
+- The WiFi setup (`/wifiSetup`) accepted passwords longer than 32 characters: the connection test used the full password and succeeded, but IotWebConf stores at most 32 characters, so the device saved a truncated password and could not reconnect after the next restart. Such passwords are now rejected with an error page before the connection attempt.
 
 ## [1.4.5] - 2026-10-10
 

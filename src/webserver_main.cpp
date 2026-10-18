@@ -479,6 +479,26 @@ void Webserver_HandleWifiSetup()
     return;
   }
 
+  // IotWebConf stores at most IOTWEBCONF_PASSWORD_LEN - 1 characters. A longer
+  // password (WPA allows 63) would connect now but be saved truncated, so the
+  // device could not reconnect after the next restart - reject it up front.
+  if (password.length() > IOTWEBCONF_PASSWORD_LEN - 1) {
+    String page = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; WLAN</title>)rawliteral";
+    page += HTML_STYLE_MODERN;
+    page += "</head><body><div class=\"logo\">&#9889; SmartMeterLite</div>"
+            "<div class=\"card\"><div class=\"card-title\">WLAN-Passwort zu lang</div>"
+            "<p>Das Passwort hat " + String(password.length()) + " Zeichen. Gespeichert werden k&ouml;nnen h&ouml;chstens " +
+            String(IOTWEBCONF_PASSWORD_LEN - 1) + " Zeichen.</p>"
+            "<div class=\"btns\"><a class=\"btn\" href=\"/\">Zur&uuml;ck</a></div></div></body></html>";
+    server.send(200, "text/html", page);
+    return;
+  }
+
   // Hold the credentials in RAM only for now — they're only written to flash
   // (see Webserver_HandleWifiStatus) once the connection is confirmed to
   // work, so a typo'd password can't overwrite a previously working config.
