@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-10-18
+
+### Fixed
+- Devices whose stagger delay (`staticDelay`, derived from the MAC, shown as `SMGWLite-<n>` in the AP name) is 59 never started the regular backend call: the check required the second of the minute to be *greater* than the delay. They only called after boot and after failed calls, i.e. every ~30 min after `handle_backend_recovery()` had reconnected WiFi (log 7000). The check is now `>=`.
+
 ## [1.4.5] - 2026-10-10
 
 ### Code structure

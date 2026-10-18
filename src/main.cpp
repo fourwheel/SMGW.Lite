@@ -449,7 +449,7 @@ void handle_call_backend()
     if ((last_call_backend == 0 && Time_isSynced()) || // first boot: fire as soon as the time is valid
         (!call_backend_successfull && millis() - last_call_backend > 180000) ||
         ((Time_getMinutes()) % cached_backend_call_minute == 0 &&
-          Time_getEpochTime() % 60 > staticDelay && // device-individual delay to stagger calls
+          Time_getEpochTime() % 60 >= staticDelay && // device-individual delay to stagger calls (0..59)
           millis() - last_call_backend > 60000))
     {
       last_call_backend = millis(); // prevent loop() from spawning another task before this one starts
