@@ -272,7 +272,10 @@ poll();
         xSemaphoreGive(Sema_Backend);
       }
       ota_active            = false;
-      g_ota_check_requested = false; // don't auto-install while user is deciding
+      // The query itself may set it (OtaPull_setOffer); cleared so the page
+      // visit alone does not start an install. The next confirmed meter upload
+      // sets it again, so an assigned version is still installed automatically.
+      g_ota_check_requested = false;
     }
     if (fetched && (version.isEmpty() || version == FIRMWARE_VERSION)) Log_AddWithoutTransmit(6002);
 
@@ -328,7 +331,6 @@ poll();
   server.on("/sendboth_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendLog_Task", [] { Webserver_LocationHrefsysinfo(2); g_log_upload_full = true; Webclient_Send_Log_to_backend_wrapper(); });
   server.on("/sendMeterValues_Task", [] { Webserver_LocationHrefsysinfo(2); Webclient_Send_Meter_Values_to_backend_wrapper(); });
-  server.on("/setOffline", [] { wifi_connected = false; Webserver_LocationHrefsysinfo(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
 
   // OTA update handler
@@ -476,6 +478,26 @@ void Webserver_HandleWifiSetup()
   if (ssid.length() == 0) {
     server.sendHeader("Location", "/");
     server.send(302, "text/plain", "");
+    return;
+  }
+
+  // IotWebConf stores at most IOTWEBCONF_PASSWORD_LEN - 1 characters. A longer
+  // password (WPA allows 63) would connect now but be saved truncated, so the
+  // device could not reconnect after the next restart - reject it up front.
+  if (password.length() > IOTWEBCONF_PASSWORD_LEN - 1) {
+    String page = R"rawliteral(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SmartMeterLite &ndash; WLAN</title>)rawliteral";
+    page += HTML_STYLE_MODERN;
+    page += "</head><body><div class=\"logo\">&#9889; SmartMeterLite</div>"
+            "<div class=\"card\"><div class=\"card-title\">WLAN-Passwort zu lang</div>"
+            "<p>Das Passwort hat " + String(password.length()) + " Zeichen. Gespeichert werden k&ouml;nnen h&ouml;chstens " +
+            String(IOTWEBCONF_PASSWORD_LEN - 1) + " Zeichen.</p>"
+            "<div class=\"btns\"><a class=\"btn\" href=\"/\">Zur&uuml;ck</a></div></div></body></html>";
+    server.send(200, "text/html", page);
     return;
   }
 

@@ -161,6 +161,8 @@ static bool fw_backend_test(bool take_offer)
             } else if (!client->connected()) {
                 vTaskDelay(pdMS_TO_TICKS(100));
                 if (!client->available()) break;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10)); // don't starve lower-priority tasks (single-core C3)
             }
         }
         body[bodyLen] = '\0';
