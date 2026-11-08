@@ -21,11 +21,16 @@ int current_temperature         = 0;
 // LastMeterValue, so an unreachable myStrom does not store 0.
 static const unsigned long MYSTROM_RETRY_MS = 5UL * 60 * 1000;
 static unsigned long mystrom_failed_at = 0; // millis() of the last failure, 0 = none
+static unsigned long mystrom_ok_at     = 0; // millis() of the last success, 0 = none
+static int           mystrom_power     = 0; // W, from the last successful request (display only)
 
 void myStrom_get_Meter_value()
 {
   if (!mystrom_PV_object.isChecked()) { LastMeterValue.solar = 0; return; }
   if (mystrom_failed_at != 0 && millis() - mystrom_failed_at < MYSTROM_RETRY_MS) return;
+  // No WiFi (e.g. the boot snapshot runs before the connection is up): skip
+  // without counting it as a failure, so it neither logs 5000 nor starts the pause.
+  if (!wifi_connected) return;
 
   DLOGLN(F("myStrom_get_Meter_value Connecting..."));
   WiFiClient client;
@@ -52,10 +57,30 @@ void myStrom_get_Meter_value()
   if (error) { Log_Add(5002); client.stop(); mystrom_failed_at = millis(); return; }
 
   LastMeterValue.temperature = doc["temperature"].as<float>() * 100;
-  LastMeterValue.solar       = doc["energy_since_boot"].as<int>();
+  // energy_since_boot is in Ws and can be negative (e.g. a battery that charges
+  // and discharges). Stored in 0.1 Wh (Ws / 360): as Ws, int32 would overflow at
+  // ~596 kWh (as<int>() then returns 0), in 0.1 Wh only at ~214 MWh.
+  LastMeterValue.solar       = (int32_t)lround(doc["energy_since_boot"].as<double>() / 360.0);
+  mystrom_power     = (int)lroundf(doc["power"].as<float>());
+  mystrom_ok_at     = millis();
   mystrom_failed_at = 0;
   client.stop();
 }
+
+int myStrom_state()
+{
+  if (mystrom_failed_at != 0) return 2;
+  if (mystrom_ok_at != 0)     return 1;
+  return 0;
+}
+
+uint32_t myStrom_ago_min()
+{
+  unsigned long at = mystrom_failed_at != 0 ? mystrom_failed_at : mystrom_ok_at;
+  return at != 0 ? (millis() - at) / 60000UL : 0;
+}
+
+int myStrom_power() { return mystrom_power; }
 
 void handle_temperature()
 {

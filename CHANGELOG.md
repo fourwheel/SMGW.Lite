@@ -6,9 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.7] - 2026-11-08
 
+### Added
+- myStrom tile on the start page (only with "myStrom PV" enabled): not requested yet / connected with the current power (`power` from `/report`, signed, display only) and the age of the last request / not reachable. It shows the result of the last request, which runs with the meter value stores; the page never triggers one. `/showLastMeterValue` gets `mystrom_state`, `mystrom_power` and `mystrom_ago_min` for it (only with myStrom enabled).
+
+### Changed
+- myStrom `energy_since_boot` is stored signed and in 0.1 Wh (Ws / 360) instead of Ws, and sent with the new field token `solar01` instead of `solar`. As Ws it overflowed `int` at ~596 kWh (ArduinoJson then returned 0); in 0.1 Wh the limit is ~214 MWh. The counter can run backwards (e.g. a battery that charges and discharges); negative values were stored as `uint32_t` and arrived as ~4.29 billion. The buffer layout is unchanged (4 bytes). `solar` in `/showLastMeterValue` and the myStrom column in `/showMeterValues` are now in 0.1 Wh too. **Backend:** `index.php` must be updated before this firmware is rolled out (it does not know `solar01` and would misread all fields after it). It converts `solar01` back to Ws, so `meter_value_PV` keeps its unit, and now also reads the old `solar` field signed; for older firmware nothing else changes.
+
 ### Fixed
 - An unreachable myStrom made the device hard to reach: every store attempt connected to the myStrom synchronously in `loop()` and blocked it, and with it the web interface, for up to the 3 s timeout. This happened once a minute, and on every pass while a refused store was retried, because the request ran before the checks that refuse a store (no 1.8.0 value `1200`, time not synced `1027`). After a failed request myStrom is now skipped for 5 min, and the request only runs once those checks have passed (still before the unchanged check, which compares solar too). An unreachable myStrom thus blocks for at most 3 s every 5 min, and `5000` is logged at most every 5 min instead of every minute.
 - A failed myStrom request stored `solar = 0`, so `energy_since_boot` dropped to 0 in the backend. Solar and temperature now keep the last values read; before the first successful request solar stays 0 as before.
+- A slow myStrom request shifted the TAF14 cycle: the interval was measured from the end of the store, so a request that ran into the 3 s timeout moved the next store from 60 s to 63 s. It is now measured from the start of the store attempt.
+- myStrom is no longer requested without WiFi. The boot snapshot is stored before the WiFi connection is up, so its request always failed, logged `5000` and paused myStrom for 5 min after every boot.
 
 ## [1.4.6] - 2026-10-18
 

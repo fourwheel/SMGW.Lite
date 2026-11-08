@@ -1,4 +1,5 @@
 #include "webserver_data.h"
+#include "sensors.h"
 #include "app_globals.h"
 #include "meter_value.h"
 #include "log_buffer.h"
@@ -320,7 +321,7 @@ void Webserver_ShowMeterValues()
   s += R"rawliteral(</p>
 <table><tr><th>Index</th><th>Count</th><th>Timestamp</th><th>Unix</th><th>Consumption (1.8.0)</th>)rawliteral";
   if (config_temperature_enabled) s += "<th>Temperature</th>";
-  if (config_solar_enabled)       s += "<th>myStrom (solar)</th>";
+  if (config_solar_enabled)       s += "<th>myStrom (0.1 Wh)</th>";
   if (config_obis280_enabled)     s += "<th>Infeed (2.8.0)</th>";
   s += "</tr>";
   server.sendContent(s);
@@ -340,7 +341,7 @@ void Webserver_ShowMeterValues()
     row += "<td>" + String(Time_formatTimestamp(ts)) + "</td><td>" + String(ts) + "</td>";
     row += "<td>" + String(m180) + "</td>";
     if (config_temperature_enabled) row += "<td>" + String(temp)  + "</td>";
-    if (config_solar_enabled)       row += "<td>" + String(solar) + "</td>";
+    if (config_solar_enabled)       row += "<td>" + String((int32_t)solar) + "</td>";
     if (config_obis280_enabled)     row += "<td>" + String(m280)  + "</td>";
     row += "</tr>";
     server.sendContent(row);
@@ -506,6 +507,12 @@ void Webserver_ShowLastMeterValue()
   jsonDoc["backend_called"]   = last_call_backend > 0;
   jsonDoc["backend_ok"]       = call_backend_successfull;
   jsonDoc["backend_ago_min"]  = (last_call_backend > 0) ? (millis() - last_call_backend) / 60000UL : 0UL;
+  if (mystrom_PV_object.isChecked())
+  {
+    jsonDoc["mystrom_state"]   = myStrom_state(); // 0 = not requested yet, 1 = ok, 2 = failed
+    jsonDoc["mystrom_power"]   = myStrom_power();
+    jsonDoc["mystrom_ago_min"] = myStrom_ago_min();
+  }
 
   String jsonResponse;
   serializeJson(jsonDoc, jsonResponse);

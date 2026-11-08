@@ -235,15 +235,17 @@ void handle_MeterValue_store()
   else if (MeterValue_trigger_non_override == true)
   {
     retVal = MeterValue_store(false);
-    if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
+    if (retVal == true) { last_taf14_meter_value = last_meter_value_store; last_store_was_override = false; }
   }
   xSemaphoreGive(Sema_MeterBuffer);
 
   if (retVal == true)
   {
     Log_AddWithoutTransmit(1017);
-    last_taf14_meter_value      = millis();
-    last_meter_value_successful = millis();
+    // Start of this attempt, not millis(): a slow myStrom request inside
+    // MeterValue_store() (up to the 3 s timeout) must not shift the TAF14 cycle.
+    last_taf14_meter_value      = last_meter_value_store;
+    last_meter_value_successful = last_meter_value_store;
     MeterValue_trigger_override     = false;
     MeterValue_trigger_non_override = false;
   }

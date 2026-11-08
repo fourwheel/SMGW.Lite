@@ -39,7 +39,7 @@ if (isset($_GET['backend_test']) && $_GET['backend_test'] === "true") {
 // New clients send a self-describing "fields=" URL parameter that lists every
 // field present in each binary entry in order:
 //
-//   fields=ts,m180[,temp][,solar][,m280]
+//   fields=ts,m180[,temp][,solar01|solar][,m280]
 //
 // This replaces the old PV_included / 280_included boolean flags and makes
 // the protocol forward-compatible: adding a new field only requires adding a
@@ -55,7 +55,8 @@ $known_fields = [
     'ts'    => 4,   // Unix timestamp (uint32_t)
     'm180'  => 4,   // OBIS 1.8.0 consumption counter (uint32_t, unit: 0.1 Wh)
     'temp'  => 4,   // temperature * 100 (int32_t, signed, e.g. 2150 = 21.50 degC, -523 = -5.23 degC)
-    'solar' => 4,   // PV / MyStrom energy counter (uint32_t)
+    'solar' => 4,   // myStrom energy counter, Ws (firmware < 1.4.7)
+    'solar01' => 4, // myStrom energy counter, 0.1 Wh, signed (firmware >= 1.4.7)
     'm280'  => 4,   // OBIS 2.8.0 feed-in counter (uint32_t, unit: 0.1 Wh)
 ];
 
@@ -155,7 +156,10 @@ for ($i = 0; $i < $dataCount; $i++) {
         // on machine byte order), so convert manually via two's complement.
         // This works for firmware sent before and after the int32_t struct
         // fix, since the wire bytes are identical either way.
-        if ($field_name === 'temp' && $raw >= 0x80000000) {
+        // myStrom counts both directions (e.g. a battery), so 'solar' and
+        // 'solar01' are signed as well; firmware < 1.4.7 sent negative values
+        // wrapped to uint32_t, which this undoes too.
+        if (in_array($field_name, ['temp', 'solar', 'solar01'], true) && $raw >= 0x80000000) {
             $raw -= 0x100000000;
         }
 
@@ -167,7 +171,9 @@ for ($i = 0; $i < $dataCount; $i++) {
     $timestamp   = $parsed['ts']    ?? 0;
     $meter       = $parsed['m180']  ?? 0;
     $temperature = $parsed['temp']  ?? 0;
-    $meter_solar = $parsed['solar'] ?? null;
+    // Always stored in Ws, as before: firmware >= 1.4.7 sends 0.1 Wh (no int32
+    // overflow at ~596 kWh), 1 * 0.1 Wh = 360 Ws.
+    $meter_solar = isset($parsed['solar01']) ? $parsed['solar01'] * 360 : ($parsed['solar'] ?? null);
     $obis280     = $parsed['m280']  ?? null;
 
     // TA0 sends raw kWh integers (scaler ignored by firmware SML parser).
@@ -180,11 +186,10 @@ for ($i = 0; $i < $dataCount; $i++) {
             if ($obis280 !== null) $obis280 *= 10000;
         }
 
-    // Values near UINT32_MAX are error sentinels from the firmware:
-    // the myStrom function returns -1…-5 on failure, which wrap to uint32_t
-    // as 0xFFFFFFFF…0xFFFFFFFB (4294967295…4294967291).
-    // Any value >= 0xFFFFFFF0 is treated as "no valid reading" → NULL.
-    if ($meter_solar !== null && $meter_solar >= 4294967280) $meter_solar = null;
+    // -16…-1 in the old 'solar' field are error sentinels from old firmware
+    // (the myStrom function returned -1…-5 on failure, sent as uint32_t
+    // 0xFFFFFFFF…0xFFFFFFFB) and are treated as "no valid reading" → NULL.
+    if (isset($parsed['solar']) && $meter_solar >= -16 && $meter_solar <= -1) $meter_solar = null;
 
     // Skip uninitialised / empty slots.
     // The ESP32 zeroes the entire buffer on init and after a successful send,

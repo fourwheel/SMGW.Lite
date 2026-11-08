@@ -9,7 +9,8 @@ struct MeterValue {
   uint32_t timestamp;        // Unix epoch, seconds
   uint32_t meter_value_180;  // OBIS 1.8.0 consumption counter, unit: 0.1 Wh
   int32_t  temperature;      // temperature * 100, signed (e.g. 2150 = 21.50 degC, -523 = -5.23 degC)
-  uint32_t solar;            // MyStrom / solar energy counter
+  int32_t  solar;            // myStrom energy_since_boot, unit: 0.1 Wh, signed (counts both directions,
+                             // e.g. a battery). Buffer and wire carry the same 4 bytes as uint32_t.
   uint32_t meter_value_280;  // OBIS 2.8.0 feed-in counter, unit: 0.1 Wh
   uint32_t power_import;     // OBIS 1.7.0 import power, unit: W
   uint32_t power_export;     // OBIS 2.7.0 export power, unit: W

@@ -80,7 +80,9 @@ String MeterValue_BuildFieldsParam()
 {
   String fields = "fields=ts,m180";
   if (config_temperature_enabled) fields += ",temp";
-  if (config_solar_enabled)       fields += ",solar";
+  // solar01 = signed, 0.1 Wh. The old token "solar" meant Ws (pre 1.4.7);
+  // the backend converts both to Ws.
+  if (config_solar_enabled)       fields += ",solar01";
   if (config_obis280_enabled)     fields += ",m280";
   return fields;
 }
@@ -194,7 +196,7 @@ void MeterValue_init_Buffer()
         meter_value_buffer_is_auto ? "auto" : "manual");
   DLOGF("  Fields: ts,m180%s%s%s\n",
         config_temperature_enabled ? ",temp"  : "",
-        config_solar_enabled       ? ",solar" : "",
+        config_solar_enabled       ? ",solar01" : "",
         config_obis280_enabled     ? ",m280"  : "");
 
   last_init_buffer_kb = atoi(Meter_Value_Buffer_Size_Char);

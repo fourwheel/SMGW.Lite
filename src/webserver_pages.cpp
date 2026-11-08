@@ -10,6 +10,7 @@
 #include "ota_pull.h"
 #include "version.h"
 #include "telegram.h"
+#include "sensors.h"
 
 void Webserver_HandleSysInfo()
 {
@@ -349,6 +350,7 @@ void Webserver_HandleRoot()
   uint32_t ageS        = hasReading ? (uint32_t)(Time_getEpochTime() - LastMeterValue.timestamp) : 0;
   const uint32_t kNoTelegramThresholdS = 30;
   uint32_t backAgoMin  = backendCalled ? (millis() - last_call_backend) / 60000UL : 0;
+  bool myStromOn       = mystrom_PV_object.isChecked();
 
   String s;
   s.reserve(4000);
@@ -574,6 +576,23 @@ footer a:hover{color:#1a3799;}
          "<div class='br'><a class='btn' href='/testBackendConnection'>Verbindung testen</a></div>";
   s += "</div>";
 
+  // myStrom status (only when enabled). Shows the result of the last request,
+  // which runs with the meter value stores; the page never triggers one itself.
+  if (myStromOn) {
+    s += "<div class='sc' id='sc-mystrom'>";
+    int msState = myStrom_state();
+    if (msState == 0)
+      s += "<div class='sc-top'><div class='dot do'></div><div class='st'><strong>myStrom noch nicht abgefragt</strong>"
+           "<small>Erste Abfrage beim n&#228;chsten Speichern eines Messwerts.</small></div></div>";
+    else if (msState == 1)
+      s += "<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit myStrom verbunden</strong>"
+           "<small>Leistung " + String(myStrom_power()) + " W, letzte Abfrage vor " + String(myStrom_ago_min()) + " min.</small></div></div>";
+    else
+      s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>myStrom nicht erreichbar</strong>"
+           "<small>Letzte Abfrage vor " + String(myStrom_ago_min()) + " min fehlgeschlagen. Neuer Versuch nach 5 min.</small></div></div>";
+    s += "</div>";
+  }
+
   s += R"rawliteral(<a class='grafana-btn' href='https://portal.smartmeterlite.de' target='_blank' rel='noopener'>&#128200; portal.smartmeterlite.de &rarr;</a>
 <a class='lc' href='/sysinfo'>&#9881;&#65039; Konfiguration &amp; Details</a>
 <footer>
@@ -638,6 +657,13 @@ function _live(d){
     else if(d.backend_ok)bh="<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit Backend verbunden</strong><small>Letzter Call vor "+d.backend_ago_min+" min.</small></div></div>";
     else bh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>Backend-Fehler</strong><small>Letzter Backend-Call fehlgeschlagen.</small></div></div><div class='br'><a class='btn' href='/testBackendConnection'>Verbindung testen</a></div>";
     be.innerHTML=bh;}
+  // myStrom status
+  var me=document.getElementById('sc-mystrom');
+  if(me&&d.mystrom_state!==undefined){var mh;
+    if(d.mystrom_state===0)mh="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>myStrom noch nicht abgefragt</strong><small>Erste Abfrage beim n&#228;chsten Speichern eines Messwerts.</small></div></div>";
+    else if(d.mystrom_state===1)mh="<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit myStrom verbunden</strong><small>Leistung "+d.mystrom_power+" W, letzte Abfrage vor "+d.mystrom_ago_min+" min.</small></div></div>";
+    else mh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>myStrom nicht erreichbar</strong><small>Letzte Abfrage vor "+d.mystrom_ago_min+" min fehlgeschlagen. Neuer Versuch nach 5 min.</small></div></div>";
+    me.innerHTML=mh;}
   if(d.wifi_connected&&document.getElementById('wifi-card'))location.reload();
 }
 setInterval(function(){fetch('/showLastMeterValue').then(function(r){return r.json();}).then(_live).catch(function(){});},2000);
