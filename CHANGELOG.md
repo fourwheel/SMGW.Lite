@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-11-08
+
+### Fixed
+- An unreachable myStrom made the device hard to reach: every store attempt connected to the myStrom synchronously in `loop()` and blocked it, and with it the web interface, for up to the 3 s timeout. This happened once a minute, and on every pass while a refused store was retried, because the request ran before the checks that refuse a store (no 1.8.0 value `1200`, time not synced `1027`). After a failed request myStrom is now skipped for 5 min, and the request only runs once those checks have passed (still before the unchanged check, which compares solar too). An unreachable myStrom thus blocks for at most 3 s every 5 min, and `5000` is logged at most every 5 min instead of every minute.
+- A failed myStrom request stored `solar = 0`, so `energy_since_boot` dropped to 0 in the backend. Solar and temperature now keep the last values read; before the first successful request solar stays 0 as before.
+
 ## [1.4.6] - 2026-10-18
 
 ### Removed
