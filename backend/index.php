@@ -159,7 +159,11 @@ for ($i = 0; $i < $dataCount; $i++) {
         // myStrom counts both directions (e.g. a battery), so 'solar' and
         // 'solar01' are signed as well; firmware < 1.4.7 sent negative values
         // wrapped to uint32_t, which this undoes too.
-        if (in_array($field_name, ['temp', 'solar', 'solar01'], true) && $raw >= 0x80000000) {
+        // 0x80000000 (INT32_MIN) in 'temp' / 'solar01' means "no value read"
+        // (firmware >= 1.4.7, METER_VALUE_NONE) and is stored as NULL.
+        if (in_array($field_name, ['temp', 'solar01'], true) && $raw === 0x80000000) {
+            $raw = null;
+        } elseif (in_array($field_name, ['temp', 'solar', 'solar01'], true) && $raw >= 0x80000000) {
             $raw -= 0x100000000;
         }
 
@@ -170,10 +174,12 @@ for ($i = 0; $i < $dataCount; $i++) {
     // Assign parsed fields to named variables with safe defaults
     $timestamp   = $parsed['ts']    ?? 0;
     $meter       = $parsed['m180']  ?? 0;
-    $temperature = $parsed['temp']  ?? 0;
+    $temperature = $parsed['temp']  ?? null; // NULL: not sent or no value read
     // Always stored in Ws, as before: firmware >= 1.4.7 sends 0.1 Wh (no int32
     // overflow at ~596 kWh), 1 * 0.1 Wh = 360 Ws.
-    $meter_solar = isset($parsed['solar01']) ? $parsed['solar01'] * 360 : ($parsed['solar'] ?? null);
+    $meter_solar = array_key_exists('solar01', $parsed)
+        ? ($parsed['solar01'] !== null ? $parsed['solar01'] * 360 : null)
+        : ($parsed['solar'] ?? null);
     $obis280     = $parsed['m280']  ?? null;
 
     // TA0 sends raw kWh integers (scaler ignored by firmware SML parser).
@@ -410,7 +416,8 @@ try {
         $meter_val = max(0, $item["meter"]);
 
         // Temperature is stored as integer * 100 on the ESP32 (e.g. 2150 = 21.50 degC)
-        $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : 0.0;
+        // NULL when no value was read or the field was not sent (vs. 0.0 = a real 0 degC)
+        $temp_val = isset($item["temperature"]) ? ($item["temperature"] / 100.0) : null;
 
         // Optional fields are NULL when not included in this payload (vs. 0 which is a valid reading)
         $solar_val   = $item["meter_solar"] ?? null;

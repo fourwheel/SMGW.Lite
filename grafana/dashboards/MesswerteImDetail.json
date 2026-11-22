@@ -1357,7 +1357,7 @@
           "hide": true,
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT \n  timestamp_client as 'time', \n  (meter_value_PV - LAG(meter_value_PV) OVER (PARTITION BY id ORDER BY timestamp_client)) / NULLIF(timestamp_client - LAG(timestamp_client) \n  OVER (PARTITION BY id ORDER BY timestamp_client), 0) AS \"PV\" \nFROM sml_v1 \nWHERE\n  id = \"$id\"  \n  AND\n  $__unixEpochFilter(timestamp_client)\nORDER BY from_unixtime(timestamp_client)\n",
+          "rawSql": "SELECT time, PV FROM (\n  SELECT\n    timestamp_client AS time,\n    (meter_value_PV - LAG(meter_value_PV) OVER w) / NULLIF(timestamp_client - LAG(timestamp_client) OVER w, 0) AS PV\n  FROM sml_v1\n  WHERE\n    id = \"$id\"\n    AND\n    $__unixEpochFilter(timestamp_client)\n    -- skip rows without a myStrom value (NULL since 1.4.7, 0 from failed requests before):\n    -- the delta to the last valid row gives the average power over the gap\n    AND meter_value_PV IS NOT NULL AND meter_value_PV <> 0\n  WINDOW w AS (PARTITION BY id ORDER BY timestamp_client)\n) x\nORDER BY time",
           "refId": "PV",
           "select": [
             [
@@ -1407,7 +1407,7 @@
           "hide": true,
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT \n  timestamp_client as 'time', \n  ((meter_value - LAG(meter_value) OVER (PARTITION BY id ORDER BY timestamp_client)) *360 / NULLIF(timestamp_client - LAG(timestamp_client) \n  OVER (PARTITION BY id ORDER BY timestamp_client), 0)) + ((meter_value_PV - LAG(meter_value_PV) OVER (PARTITION BY id ORDER BY timestamp_client)) / NULLIF(timestamp_client - LAG(timestamp_client) \n  OVER (PARTITION BY id ORDER BY timestamp_client), 0)) AS \"Load\" \nFROM sml_v1 \nWHERE\n  id = \"$id\"  \n  AND\n  $__unixEpochFilter(timestamp_client)\nORDER BY from_unixtime(timestamp_client)\n",
+          "rawSql": "SELECT time, `Load` AS \"Load\" FROM (\n  SELECT\n    timestamp_client AS time,\n    ((meter_value - LAG(meter_value) OVER w) * 360 + (meter_value_PV - LAG(meter_value_PV) OVER w))\n      / NULLIF(timestamp_client - LAG(timestamp_client) OVER w, 0) AS `Load`\n  FROM sml_v1\n  WHERE\n    id = \"$id\"\n    AND\n    $__unixEpochFilter(timestamp_client)\n    -- skip rows without a myStrom value (NULL since 1.4.7, 0 from failed requests before):\n    -- the delta to the last valid row gives the average power over the gap\n    AND meter_value_PV IS NOT NULL AND meter_value_PV <> 0\n  WINDOW w AS (PARTITION BY id ORDER BY timestamp_client)\n) x\nORDER BY time",
           "refId": "Load",
           "select": [
             [

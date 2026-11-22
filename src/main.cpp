@@ -380,14 +380,14 @@ void setup()
   DLOG("Temp sensors found: ");
   DLOGLN(Temp_sensors.getDeviceCount());
   // Blocking first conversion (~750 ms) so telegrams parsed right after boot
-  // carry a real temperature instead of the initial 0. Without a prior
+  // carry a real temperature instead of METER_VALUE_NONE. Without a prior
   // requestTemperatures() the sensor would also return its 85 degC power-on value.
   if (temperature_object.isChecked())
   {
     Temp_sensors.requestTemperatures();
     float raw_temp = Temp_sensors.getTempCByIndex(0) * 100;
-    if (raw_temp > -10000) // filter out -127°C sensor error (-12700 in raw units)
-      current_temperature = (int)raw_temp;
+    // -127 degC (-12700 in raw units) = sensor error / not connected -> no value
+    current_temperature = raw_temp > -10000 ? (int)raw_temp : METER_VALUE_NONE;
     // Seed LastMeterValue too: the parser carries the previous temperature over
     // into each new reading and only overwrites it after the first-telegram
     // diagnostics, while the boot snapshot (loop(), other core) may already

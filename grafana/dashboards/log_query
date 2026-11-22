@@ -120,6 +120,9 @@ SELECT
   WHEN status_code = 5000 THEN 'myStrom: connection failed'
   WHEN status_code = 5001 THEN 'myStrom: connect() failed'
   WHEN status_code = 5002 THEN 'myStrom: deserializeJson() failed'
+  WHEN status_code = 5003 THEN 'myStrom: no response (timeout)'
+  WHEN status_code = 5004 THEN 'myStrom: HTTP status not 200 OK'
+  WHEN status_code = 5005 THEN 'myStrom: end of response headers not found'
 
   WHEN status_code = 7000 THEN 'WiFi reconnect: no acknowledged backend call for 30 min (or 2 intervals)'
   WHEN status_code = 7001 THEN 'Restarting WiFi'

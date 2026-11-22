@@ -71,8 +71,8 @@ void Webserver_HandleSysInfo()
     s += String("<tr><td") + W    + ">" + String(Time_getEpochTime() - LastMeterValue.timestamp) + "s ago</td>"
        + "<td" + W    + ">" + String(LastMeterValue.meter_value_180) + "</td>"
        + "<td" + w280  + ">" + String(LastMeterValue.meter_value_280) + "</td>"
-       + "<td" + wTemp + ">" + String(LastMeterValue.temperature / 100.0) + "\xc2\xb0""C</td>"
-       + "<td" + wSol  + ">" + String(LastMeterValue.solar) + "</td></tr>";
+       + "<td" + wTemp + ">" + (LastMeterValue.temperature != METER_VALUE_NONE ? String(LastMeterValue.temperature / 100.0) + "\xc2\xb0""C" : String("-")) + "</td>"
+       + "<td" + wSol  + ">" + (LastMeterValue.solar != METER_VALUE_NONE ? String(LastMeterValue.solar) : String("-")) + "</td></tr>";
   }
   s += R"rawliteral(</table></div>
 <div class="btns" style="margin-top:.6rem;">
@@ -589,7 +589,7 @@ footer a:hover{color:#1a3799;}
            "<small>Leistung " + String(myStrom_power()) + " W, letzte Abfrage vor " + String(myStrom_ago_min()) + " min.</small></div></div>";
     else
       s += "<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>myStrom nicht erreichbar</strong>"
-           "<small>Letzte Abfrage vor " + String(myStrom_ago_min()) + " min fehlgeschlagen. Neuer Versuch nach 5 min.</small></div></div>";
+           "<small>Letzte Abfrage vor " + String(myStrom_ago_min()) + " min fehlgeschlagen. Neuer Versuch nach 1 bis 5 min.</small></div></div>";
     s += "</div>";
   }
 
@@ -662,7 +662,7 @@ function _live(d){
   if(me&&d.mystrom_state!==undefined){var mh;
     if(d.mystrom_state===0)mh="<div class='sc-top'><div class='dot do'></div><div class='st'><strong>myStrom noch nicht abgefragt</strong><small>Erste Abfrage beim n&#228;chsten Speichern eines Messwerts.</small></div></div>";
     else if(d.mystrom_state===1)mh="<div class='sc-top'><div class='dot dg'></div><div class='st'><strong>Mit myStrom verbunden</strong><small>Leistung "+d.mystrom_power+" W, letzte Abfrage vor "+d.mystrom_ago_min+" min.</small></div></div>";
-    else mh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>myStrom nicht erreichbar</strong><small>Letzte Abfrage vor "+d.mystrom_ago_min+" min fehlgeschlagen. Neuer Versuch nach 5 min.</small></div></div>";
+    else mh="<div class='sc-top'><div class='dot dr'></div><div class='st'><strong>myStrom nicht erreichbar</strong><small>Letzte Abfrage vor "+d.mystrom_ago_min+" min fehlgeschlagen. Neuer Versuch nach 1 bis 5 min.</small></div></div>";
     me.innerHTML=mh;}
   if(d.wifi_connected&&document.getElementById('wifi-card'))location.reload();
 }

@@ -340,8 +340,8 @@ void Webserver_ShowMeterValues()
     String row = "<tr><td>" + String(m) + "</td><td>" + String(count++) + "</td>";
     row += "<td>" + String(Time_formatTimestamp(ts)) + "</td><td>" + String(ts) + "</td>";
     row += "<td>" + String(m180) + "</td>";
-    if (config_temperature_enabled) row += "<td>" + String(temp)  + "</td>";
-    if (config_solar_enabled)       row += "<td>" + String((int32_t)solar) + "</td>";
+    if (config_temperature_enabled) row += "<td>" + (temp != METER_VALUE_NONE ? String(temp) : String("-")) + "</td>";
+    if (config_solar_enabled)       row += "<td>" + ((int32_t)solar != METER_VALUE_NONE ? String((int32_t)solar) : String("-")) + "</td>";
     if (config_obis280_enabled)     row += "<td>" + String(m280)  + "</td>";
     row += "</tr>";
     server.sendContent(row);
@@ -495,8 +495,9 @@ void Webserver_ShowLastMeterValue()
   // it may differ (or the device may not be time-synced yet, still at 1970).
   long ageS = (long)Time_getEpochTime() - (long)v.timestamp;
   jsonDoc["age_s"]           = (v.timestamp > 0 && ageS > 0) ? ageS : 0;
-  jsonDoc["temperature"]     = v.temperature;
-  jsonDoc["solar"]           = v.solar;
+  // null = no value read (METER_VALUE_NONE)
+  if (v.temperature != METER_VALUE_NONE) jsonDoc["temperature"] = v.temperature; else jsonDoc["temperature"] = nullptr;
+  if (v.solar       != METER_VALUE_NONE) jsonDoc["solar"]       = v.solar;       else jsonDoc["solar"]       = nullptr;
   jsonDoc["meter_value_280"] = v.meter_value_280;
   jsonDoc["power_import"]    = v.power_import;
   jsonDoc["power_export"]    = v.power_export;

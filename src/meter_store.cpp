@@ -243,7 +243,7 @@ void handle_MeterValue_store()
   {
     Log_AddWithoutTransmit(1017);
     // Start of this attempt, not millis(): a slow myStrom request inside
-    // MeterValue_store() (up to the 3 s timeout) must not shift the TAF14 cycle.
+    // MeterValue_store() (up to the 5 s timeout) must not shift the TAF14 cycle.
     last_taf14_meter_value      = last_meter_value_store;
     last_meter_value_successful = last_meter_value_store;
     MeterValue_trigger_override     = false;

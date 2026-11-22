@@ -194,6 +194,9 @@ String Log_StatusCodeToString(int statusCode)
   case 5000: return "myStrom_get_Meter_value Connection failed";
   case 5001: return "Failed to connect to myStrom";
   case 5002: return "myStrom_get_Meter_value deserializeJson() failed";
+  case 5003: return "myStrom: no response (timeout)";
+  case 5004: return "myStrom: HTTP status not 200 OK";
+  case 5005: return "myStrom: end of response headers not found";
   case 7000: return "WiFi reconnect: no acknowledged backend call for 30 min (or 2 backend intervals)";
   case 7001: return "Restarting Wifi";
   case 7002: return "WiFi-Setup: connection attempt failed";

@@ -13,6 +13,12 @@
 #define TELEGRAM_TIMEOUT_MS 30                    // timeout for telegram in ms
 uint8_t telegram_receive_buffer[TELEGRAM_LENGTH]; // buffer for serial data
 size_t telegram_receive_bufferIndex = 0;          // position in serial data buffer
+// After an overflow (3001) the bytes up to the next pause are dropped: the
+// buffer was reset mid-telegram, so they are only a fragment and would just
+// fail to parse (3006). Typically several telegrams piled up in the UART buffer
+// while telegramTask did not run (e.g. during a backend TLS call) and were then
+// read without the pause that ends a telegram.
+static bool telegram_discard = false;
 unsigned long lastByteTime = 0;                   // timestamp of last received byte
 
 unsigned long last_remote_meter_value = 0;
@@ -351,8 +357,9 @@ int32_t MeterValue_get_from_remote()
   resetMeterValue(newVal);
   newVal.meter_value_180 = doc["meter_value_180"];
   newVal.timestamp       = doc["timestamp"];
-  newVal.temperature     = doc["temperature"];
-  newVal.solar           = doc["solar"];
+  // null (no value read on the other device) -> METER_VALUE_NONE, not 0
+  newVal.temperature     = doc["temperature"] | METER_VALUE_NONE;
+  newVal.solar           = doc["solar"] | METER_VALUE_NONE;
   newVal.meter_value_280 = doc["meter_value_280"];
   MeterValue_setLast(newVal);
   client.stop();
@@ -380,15 +387,19 @@ void handle_Telegram_receive()
   {
     uint8_t incomingByte = mySerial.read();
     lastByteTime = millis();
+    if (telegram_discard) continue;
     if (telegram_receive_bufferIndex < TELEGRAM_LENGTH)
       telegram_receive_buffer[telegram_receive_bufferIndex++] = incomingByte;
     else
     {
       Log_Add(3001);
       Telegram_ResetReceiveBuffer();
-      continue;
+      telegram_discard = true;
     }
   }
+
+  // Pause after the dropped bytes: the next byte starts a new telegram
+  if (telegram_discard && millis() - lastByteTime > TELEGRAM_TIMEOUT_MS) telegram_discard = false;
 
   if (telegram_receive_bufferIndex > 0 && (millis() - lastByteTime > TELEGRAM_TIMEOUT_MS))
   {

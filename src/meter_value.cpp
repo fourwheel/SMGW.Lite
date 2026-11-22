@@ -210,7 +210,7 @@ void resetMeterValue(MeterValue &val)
   int32_t  saved_solar = val.solar;
   int32_t  saved_temp  = val.temperature;
   val = MeterValue{};
-  if (mystrom_PV_object.isChecked()) val.solar = saved_solar;
+  if (mystrom_PV_object.isChecked()) val.solar = saved_solar; // otherwise METER_VALUE_NONE
   val.temperature = saved_temp;
 }
 
