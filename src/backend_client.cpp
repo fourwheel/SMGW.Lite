@@ -227,7 +227,7 @@ void Webclient_send_log_to_backend()
 // Sends the entire packed ring-buffer to the PHP backend in a single POST.
 //
 // Wire format declaration:
-//   The URL parameter "fields=ts,m180[,temp][,solar][,m280]" tells the backend
+//   The URL parameter "fields=ts,m180[,temp][,solar01][,m280]" tells the backend
 //   exactly which fields are present in each binary entry and in what order.
 //   This replaces the old separate PV_included / 280_included flags and is
 //   self-describing — adding a new field in the future only requires appending
@@ -297,7 +297,7 @@ void Webclient_send_meter_values_to_backend()
   header += "&uptime=" + String(millis() / 60000);
   header += "&time=" + String(Time_getFormattedTime());
   // Self-describing field manifest — the backend uses this to parse the binary payload.
-  // Format: fields=ts,m180[,temp][,solar][,m280]
+  // Format: fields=ts,m180[,temp][,solar01][,m280]
   header += "&" + MeterValue_BuildFieldsParam();
   header += "&heap=" + String(ESP.getFreeHeap());
   header += "&transmittedValues=" + String(MeterValue_Num());

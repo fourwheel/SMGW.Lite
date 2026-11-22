@@ -52,11 +52,9 @@ bool MeterValue_store(bool override)
 {
   if (ESP.getFreeHeap() < 1000) { Log_Add(1015); DLOGLN("Not enough free heap to store another value"); return false; }
 
-  if (mystrom_PV_object.isChecked()) myStrom_get_Meter_value();
-
-  // Snapshot LastMeterValue once, after the blocking myStrom call, and use only
-  // the snapshot below. Copied under the lock, so it never mixes two telegrams
-  // (telegramTask may replace LastMeterValue on the other core meanwhile).
+  // Snapshot LastMeterValue once and use only the snapshot below. Copied under
+  // the lock, so it never mixes two telegrams (telegramTask may replace
+  // LastMeterValue on the other core meanwhile).
   MeterValue snap = MeterValue_getLast();
 
   // Without a 1.8.0 value the trigger stays set and the store is retried on
@@ -81,6 +79,17 @@ bool MeterValue_store(bool override)
   // runs after it. Refuse it; the trigger stays set and the next telegram
   // (seconds later) carries a valid timestamp.
   if (!Time_isPlausible(snap.timestamp)) { Log_Add(1027); return false; }
+
+  // myStrom only now: it is a blocking network call, and a store refused above
+  // is retried on every pass. Before the unchanged check below, which compares
+  // solar too. Only solar and temperature come from myStrom.
+  if (mystrom_PV_object.isChecked())
+  {
+    myStrom_get_Meter_value();
+    MeterValue fresh = MeterValue_getLast();
+    snap.solar       = fresh.solar;
+    snap.temperature = fresh.temperature;
+  }
 
   // Skip storing if the value has not changed since the last successful store.
   if (MeterValue_unchangedSincePrev(snap))
@@ -226,15 +235,17 @@ void handle_MeterValue_store()
   else if (MeterValue_trigger_non_override == true)
   {
     retVal = MeterValue_store(false);
-    if (retVal == true) { last_taf14_meter_value = millis(); last_store_was_override = false; }
+    if (retVal == true) { last_taf14_meter_value = last_meter_value_store; last_store_was_override = false; }
   }
   xSemaphoreGive(Sema_MeterBuffer);
 
   if (retVal == true)
   {
     Log_AddWithoutTransmit(1017);
-    last_taf14_meter_value      = millis();
-    last_meter_value_successful = millis();
+    // Start of this attempt, not millis(): a slow myStrom request inside
+    // MeterValue_store() (up to the 5 s timeout) must not shift the TAF14 cycle.
+    last_taf14_meter_value      = last_meter_value_store;
+    last_meter_value_successful = last_meter_value_store;
     MeterValue_trigger_override     = false;
     MeterValue_trigger_non_override = false;
   }
