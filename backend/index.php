@@ -260,6 +260,15 @@ update_client_endpoint($id, $wireframe_str, $fw_version);
 // ---------------------------------------------------------------------------
 $prev = ["timestamp" => 0, "meter" => 0, "meter_solar" => null, "obis280" => null];
 
+// Time at which the meter value last changed (first row with the current
+// value). The power plausibility check below uses it instead of the last row:
+// a meter without PIN only shows whole kWh, and with rows every minute (e.g.
+// because of a changing myStrom value) one kWh step against the row one minute
+// earlier would look like 60 kW. Looked up within the last 200 rows; if the
+// value did not change in that span, the oldest of them is used (the computed
+// power is then lower, which the check only bounds from above).
+$prev_change_ts = 0;
+
 // Use a prepared statement to prevent SQL injection on the $id field.
 // The original code built the query with string concatenation, which allowed
 // an attacker with a valid token to manipulate the query via the ID parameter.
@@ -268,7 +277,7 @@ $stmt = mysqli_prepare($_link,
      FROM `sml_v1`
      WHERE `id` = ?
      ORDER BY `timestamp_client` DESC
-     LIMIT 1"
+     LIMIT 200"
 );
 mysqli_stmt_bind_param($stmt, "s", $id);
 mysqli_stmt_execute($stmt);
@@ -278,6 +287,10 @@ if ($row = mysqli_fetch_array($result)) {
     $prev["meter_solar"] = $row['meter_value_PV'] !== null ? (float)$row['meter_value_PV'] : null;
     $prev["obis280"]     = $row['obis280'] !== null ? (int)$row['obis280'] : null;
     $prev["timestamp"]   = $row['timestamp_client'];
+    $prev_change_ts      = $row['timestamp_client'];
+    while (($row = mysqli_fetch_array($result)) && $row['meter_value'] == $prev["meter"]) {
+        $prev_change_ts = $row['timestamp_client'];
+    }
 }
 mysqli_stmt_close($stmt);
 
@@ -367,10 +380,10 @@ try {
         }
 
         if ($rejection === null) {
-            // Compute average power between consecutive readings.
-            // meter values are in 0.1 Wh units; timestamps are Unix seconds.
-            $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;           // Wh
-            $delta_time   = ($item["timestamp"] - $prev["timestamp"]) / 3600.0; // hours
+            // Average power since the meter reached its previous value (see
+            // $prev_change_ts). meter values are in 0.1 Wh units; timestamps are Unix seconds.
+            $delta_energy = ($item["meter"] - $prev["meter"]) / 10.0;          // Wh
+            $delta_time   = ($item["timestamp"] - $prev_change_ts) / 3600.0;   // hours
             $power        = ($delta_time > 0) ? ($delta_energy / $delta_time) : 0;
 
             if ($prev["meter"] > $item["meter"]) {
@@ -407,6 +420,7 @@ try {
 
         // Advance the "previous" pointer so the next entry is validated against
         // this one, not the one loaded from the database
+        if ($item["meter"] != $prev["meter"]) $prev_change_ts = $item["timestamp"];
         $prev["timestamp"]   = $item["timestamp"];
         $prev["meter"]       = $item["meter"];
         $prev["meter_solar"] = $item["meter_solar"] ?? null;

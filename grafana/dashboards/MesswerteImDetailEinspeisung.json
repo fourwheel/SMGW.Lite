@@ -1,0 +1,1929 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "description": "zum Ende des gewählten Zeitraum",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 5,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "watth"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 51,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (timestamp_client) AS \"time_sec\",\n  MAX(meter_value)/10 AS \"Bezug\"\nFROM sml_v1\nWHERE\n  id = \"$id\"\n  AND\n  $__unixEpochFilter(timestamp_client)\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": "Zählerstand Bezug",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mixed",
+        "uid": "-- Mixed --"
+      },
+      "description": "Day-Ahead Börsenpreis [Quelle: energy-charts.info]\nCO2-Emissionswerte [Quelle: GreenGridCompass] mit ca. 6h Verzug",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CO2 g/kWh"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "massg"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepAfter"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Börsenstrompreis [ct/kWh]"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ct"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepAfter"
+              }
+            ]
+          },
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Balkon PV"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": true,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 20,
+        "x": 4,
+        "y": 0
+      },
+      "id": 45,
+      "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(meter_value AS SIGNED) AS v,\n         LAG(CAST(meter_value AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND meter_value IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Bezug\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts",
+          "refId": "Bezug",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(obis280 AS SIGNED) AS v,\n         LAG(CAST(obis280 AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND obis280 IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, -(v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Einspeisung\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts",
+          "refId": "Einspeisung",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \r\n  ts_utc as time, \r\n  value as \"CO2 g/kWh\"\r\nFROM `hz-v1`.co2_intensity_hourly \r\nWHERE \r\n  zone = \"DE_LU\" \r\n  AND $__timeFilter(ts_utc)",
+          "refId": "co2",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\r\n  (unix_timestamp) AS \"time_sec\",\r\n  price_eur_mwh/10 as \"Börsenstrompreis [ct/kWh]\"\r\nFROM power_prices\r\nWHERE\r\n  unix_timestamp between $__unixEpochFrom() AND $__unixEpochTo()\r\n  ORDER by unix_timestamp ASC",
+          "refId": "price",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT time, PV AS \"Balkon PV\" FROM (\n  SELECT\n    timestamp_client AS time,\n    (meter_value_PV - LAG(meter_value_PV) OVER w) / NULLIF(timestamp_client - LAG(timestamp_client) OVER w, 0) AS PV\n  FROM sml_v1\n  WHERE\n    id = \"$id\"\n    AND\n    $__unixEpochFilter(timestamp_client)\n    -- skip rows without a myStrom value (NULL since 1.4.7, 0 from failed requests before):\n    -- the delta to the last valid row gives the average power over the gap\n    AND meter_value_PV IS NOT NULL AND meter_value_PV <> 0\n  WINDOW w AS (PARTITION BY id ORDER BY timestamp_client)\n) x\nORDER BY time\n",
+          "refId": "Submeter",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "expression": "$Submeter+$Bezug+$Einspeisung",
+          "refId": "Verbrauch",
+          "type": "math"
+        }
+      ],
+      "title": "Leistung, CO2-Emission und Börsenstrompreis",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "description": "zum Ende des gewählten Zeitraum",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 5,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "watth"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 4
+      },
+      "id": 63,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  (timestamp_client) AS \"time_sec\",\n  MAX(obis280)/10 AS \"Einspeisung\"\nFROM sml_v1\nWHERE\n  id = \"$id\"\n  AND\n  $__unixEpochFilter(timestamp_client)\n",
+          "refId": "B",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": "Zählerstand Einspeisung",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "description": "im gewählten Zeitraum",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "watt"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      },
+      "id": 47,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "hide": true,
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(meter_value AS SIGNED) AS v,\n         LAG(CAST(meter_value AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND meter_value IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT MIN(p) AS Minimum, MAX(p) AS Maximum\nFROM (\n  SELECT (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS p\n  FROM c\n  WHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\n) AS sub",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "hide": true,
+          "rawQuery": true,
+          "rawSql": "SELECT power_back as \"Letzter Wert\" FROM sml_v1 WHERE id = \"$id\" ORDER BY timestamp_client DESC LIMIT 1",
+          "refId": "B",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(meter_value AS SIGNED) AS v,\n         LAG(CAST(meter_value AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND meter_value IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Grid\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts DESC\nLIMIT 1",
+          "refId": "C",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Letzte gemessene Bezugsleistung",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "description": "im gewählten Zeitraum",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "watt"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 14
+      },
+      "id": 64,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz_v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(obis280 AS SIGNED) AS v,\n         LAG(CAST(obis280 AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND obis280 IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Grid\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts DESC\nLIMIT 1",
+          "refId": "C",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Letzte gemessene Einspeiseleistung",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "kwatth"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 14
+      },
+      "id": 53,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH verbrauch AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    meter_value / 10 AS wh,\r\n    LAG(meter_value / 10) OVER (ORDER BY timestamp_client) AS wh_prev,\r\n    LAG(timestamp_client)  OVER (ORDER BY timestamp_client) AS ts_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM verbrauch\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\nco2_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    c.value\r\n  ) AS co2_gramm\r\n  FROM deltas d\r\n  JOIN co2_intensity_hourly c\r\n    ON c.zone = 'DE_LU'\r\n    AND c.emission_type = 'Operational'\r\n    AND c.forecast_type = 'Actual'\r\n    AND c.ts_utc = DATE_FORMAT(FROM_UNIXTIME(d.ts), '%Y-%m-%d %H:00:00')\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS kosten_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  gesamt_kwh.total_kwh                                        AS \"Verbrauch (kWh)\"\r\nFROM gesamt_kwh, co2_weighted, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Verbrauch",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "massg"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 14
+      },
+      "id": 54,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH verbrauch AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    meter_value / 10 AS wh,\r\n    LAG(meter_value / 10) OVER (ORDER BY timestamp_client) AS wh_prev,\r\n    LAG(timestamp_client)  OVER (ORDER BY timestamp_client) AS ts_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM verbrauch\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\nco2_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    c.value\r\n  ) AS co2_gramm\r\n  FROM deltas d\r\n  JOIN co2_intensity_hourly c\r\n    ON c.zone = 'DE_LU'\r\n    AND c.emission_type = 'Operational'\r\n    AND c.forecast_type = 'Actual'\r\n    AND c.ts_utc = DATE_FORMAT(FROM_UNIXTIME(d.ts), '%Y-%m-%d %H:00:00')\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS kosten_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n\r\n  co2_weighted.co2_gramm                                      AS \"CO2 gesamt (g)\"\r\nFROM gesamt_kwh, co2_weighted, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "CO2 gesamt",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "g/kWh"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 14
+      },
+      "id": 55,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH verbrauch AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    meter_value / 10 AS wh,\r\n    LAG(meter_value / 10) OVER (ORDER BY timestamp_client) AS wh_prev,\r\n    LAG(timestamp_client)  OVER (ORDER BY timestamp_client) AS ts_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM verbrauch\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\nco2_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    c.value\r\n  ) AS co2_gramm\r\n  FROM deltas d\r\n  JOIN co2_intensity_hourly c\r\n    ON c.zone = 'DE_LU'\r\n    AND c.emission_type = 'Operational'\r\n    AND c.forecast_type = 'Actual'\r\n    AND c.ts_utc = DATE_FORMAT(FROM_UNIXTIME(d.ts), '%Y-%m-%d %H:00:00')\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS kosten_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  co2_weighted.co2_gramm / gesamt_kwh.total_kwh              AS \"CO2 pro kWh (g/kWh)\"\r\nFROM gesamt_kwh, co2_weighted, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "CO2 pro kWh",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyEUR"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 14
+      },
+      "id": 56,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH verbrauch AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    meter_value / 10 AS wh,\r\n    LAG(meter_value / 10) OVER (ORDER BY timestamp_client) AS wh_prev,\r\n    LAG(timestamp_client)  OVER (ORDER BY timestamp_client) AS ts_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM verbrauch\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\nco2_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    c.value\r\n  ) AS co2_gramm\r\n  FROM deltas d\r\n  JOIN co2_intensity_hourly c\r\n    ON c.zone = 'DE_LU'\r\n    AND c.emission_type = 'Operational'\r\n    AND c.forecast_type = 'Actual'\r\n    AND c.ts_utc = DATE_FORMAT(FROM_UNIXTIME(d.ts), '%Y-%m-%d %H:00:00')\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS kosten_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  preis_weighted.kosten_eur                                   AS \"Kosten gesamt (€)\"\r\nFROM gesamt_kwh, co2_weighted, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Kosten gesamt",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ct/kWh"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 14
+      },
+      "id": 57,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH verbrauch AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    meter_value / 10 AS wh,\r\n    LAG(meter_value / 10) OVER (ORDER BY timestamp_client) AS wh_prev,\r\n    LAG(timestamp_client)  OVER (ORDER BY timestamp_client) AS ts_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM verbrauch\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\nco2_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    c.value\r\n  ) AS co2_gramm\r\n  FROM deltas d\r\n  JOIN co2_intensity_hourly c\r\n    ON c.zone = 'DE_LU'\r\n    AND c.emission_type = 'Operational'\r\n    AND c.forecast_type = 'Actual'\r\n    AND c.ts_utc = DATE_FORMAT(FROM_UNIXTIME(d.ts), '%Y-%m-%d %H:00:00')\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS kosten_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  preis_weighted.kosten_eur / gesamt_kwh.total_kwh * 100     AS \"Preis pro kWh (ct/kWh)\"\r\nFROM gesamt_kwh, co2_weighted, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Kosten pro kWh",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "kwatth"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 18
+      },
+      "id": 60,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH einspeisung AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    obis280 / 10 AS wh,\r\n    LAG(obis280 / 10) OVER (ORDER BY timestamp_client) AS wh_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM einspeisung\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS erloes_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  gesamt_kwh.total_kwh AS \"Einspeisung (kWh)\"\r\nFROM gesamt_kwh, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Einspeisung gesamt",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyEUR"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 18
+      },
+      "id": 61,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH einspeisung AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    obis280 / 10 AS wh,\r\n    LAG(obis280 / 10) OVER (ORDER BY timestamp_client) AS wh_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM einspeisung\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS erloes_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  preis_weighted.erloes_eur AS \"Erlös (€)\"\r\nFROM gesamt_kwh, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Erlös Day-Ahead",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ct/kWh"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 18
+      },
+      "id": 62,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "dataset": "hz-v1",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH einspeisung AS (\r\n  SELECT\r\n    timestamp_client AS ts,\r\n    obis280 / 10 AS wh,\r\n    LAG(obis280 / 10) OVER (ORDER BY timestamp_client) AS wh_prev\r\n  FROM sml_v1\r\n  WHERE id = \"$id\"\r\n    AND timestamp_client BETWEEN $__unixEpochFrom() AND $__unixEpochTo()\r\n),\r\ndeltas AS (\r\n  SELECT\r\n    ts,\r\n    (wh - wh_prev) AS delta_wh\r\n  FROM einspeisung\r\n  WHERE wh_prev IS NOT NULL\r\n    AND (wh - wh_prev) >= 0\r\n),\r\ngesamt_kwh AS (\r\n  SELECT SUM(delta_wh) / 1000 AS total_kwh FROM deltas\r\n),\r\npreis_weighted AS (\r\n  SELECT SUM(\r\n    d.delta_wh / 1000 *\r\n    (p.price_eur_mwh / 1000)\r\n  ) AS erloes_eur\r\n  FROM deltas d\r\n  JOIN power_prices p\r\n    ON p.bidding_zone = 'DE-LU'\r\n    AND p.unix_timestamp = (\r\n      FLOOR(d.ts / 900) * 900\r\n    )\r\n)\r\nSELECT\r\n  preis_weighted.erloes_eur / gesamt_kwh.total_kwh * 100 AS \"Erlös pro kWh (ct/kWh)\"\r\nFROM gesamt_kwh, preis_weighted;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "Erlös pro kWh",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "description": "Wäre das ganze Jahr wie so wie der ausgewählte Zeitraum, wäre dies der Jahresverbrauch",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#299c46",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "watth"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 20
+      },
+      "id": 48,
+      "maxDataPoints": 100,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT \n\n\n  (\n    (\n      (3600 / 10 * (\n        (SELECT meter_value FROM sml_v1 WHERE id = \"$id\" AND timestamp_client <= $__unixEpochTo() ORDER BY timestamp_client DESC LIMIT 1) - \n        (SELECT meter_value FROM sml_v1 WHERE id = \"$id\" AND timestamp_client >= $__unixEpochFrom() ORDER BY timestamp_client ASC LIMIT 1)\n      )) \n      / \n      (\n        (SELECT timestamp_client FROM sml_v1 WHERE id = \"$id\" AND timestamp_client <= $__unixEpochTo() ORDER BY timestamp_client DESC LIMIT 1) - \n        (SELECT timestamp_client FROM sml_v1 WHERE id = \"$id\" AND timestamp_client >= $__unixEpochFrom() ORDER BY timestamp_client ASC LIMIT 1)\n      )\n    ) * 8760\n  ) AS Jahresenergie_kWh\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": "Berechnete Jahresenergie",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "${DS_MYSQL}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "log": 10,
+              "type": "log"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "watt"
+        }
+      },
+      "gridPos": {
+        "h": 15,
+        "w": 20,
+        "x": 4,
+        "y": 22
+      },
+      "id": 52,
+      "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "13.2.4",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(meter_value AS SIGNED) AS v,\n         LAG(CAST(meter_value AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND meter_value IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Bezug\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts",
+          "refId": "Leistung",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "alias": "",
+          "datasource": {
+            "type": "mysql",
+            "uid": "${DS_MYSQL}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "-- Power from one change of the counter to the next: a meter without PIN only\n-- shows whole kWh, so between two consecutive rows the power would be 0 W or a\n-- spike (1 kWh in one minute = 60 kW). The average between two steps is shown\n-- instead (stepBefore: from the previous step to this one). With PIN the\n-- counter changes almost every row, so nothing changes there.\n-- One day before the time range is read so the first interval is complete.\nWITH r AS (\n  SELECT timestamp_client AS ts, CAST(obis280 AS SIGNED) AS v,\n         LAG(CAST(obis280 AS SIGNED)) OVER (ORDER BY timestamp_client) AS v_prev\n  FROM sml_v1\n  WHERE id = \"$id\" AND obis280 IS NOT NULL\n    AND timestamp_client BETWEEN $__unixEpochFrom() - 86400 AND $__unixEpochTo()\n),\nc AS (\n  SELECT ts, v, LAG(ts) OVER (ORDER BY ts) AS ts_prev, LAG(v) OVER (ORDER BY ts) AS v_cprev\n  FROM r\n  WHERE v_prev IS NULL OR v <> v_prev\n)\nSELECT ts AS time, (v - v_cprev) * 360 / NULLIF(ts - ts_prev, 0) AS \"Einspeisung\"\nFROM c\nWHERE ts_prev IS NOT NULL AND ts >= $__unixEpochFrom()\nORDER BY ts",
+          "refId": "Obis280",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": "Leistung (logarithmisch)",
+      "type": "timeseries"
+    }
+  ],
+  "preload": false,
+  "refresh": "10s",
+  "schemaVersion": 42,
+  "templating": {
+    "list": [
+      {
+        "allowCustomValue": true,
+        "current": {
+          "text": "N41",
+          "value": "N41"
+        },
+        "datasource": {
+          "type": "mysql",
+          "uid": "${DS_MYSQL}"
+        },
+        "definition": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Messstelle",
+        "multi": false,
+        "name": "id",
+        "options": [],
+        "query": {
+          "editorMode": "code",
+          "format": "table",
+          "query": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+          "rawQuery": true,
+          "rawSql": "SELECT device_id FROM clients WHERE FIND_IN_SET('${__user.login}', grafana_ids) ORDER BY id;",
+          "refId": "SQLVariableQueryEditor-VariableQuery",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        },
+        "refresh": 1,
+        "regex": "",
+        "regexApplyTo": "value",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now/d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "Europe/Berlin",
+  "title": "Messwerte im Detail mit Einspeisung",
+  "uid": "lam9fmz"
+}

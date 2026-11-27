@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Backend:** `index.php` rejected entries of meters without PIN as `power_out_of_range` when the counter stepped by 1 kWh one minute after the previous entry (60 kW), together with their myStrom and temperature values. Such meters only show whole kWh; with a myStrom value the entries are not identical and are stored every minute. The power check now computes the average power since the meter value last changed (looked up within the last 200 rows) instead of since the last entry. With PIN the counter changes almost every entry, so nothing changes there.
+- **Grafana:** the power panels of "Messwerte im Detail" and "Messwerte im Detail mit Einspeisung" (power, min/max, last power, load, feed-in) showed 0 W and spikes of up to 60 kW for meters without PIN. They now compute the power from one change of the counter to the next, i.e. the average between two kWh steps. Mixed series (first without, then with PIN) need no special handling. Without PIN the curve ends at the last kWh step. "Messwerte im Detail mit Einspeisung" is now in the repository too.
+
 ## [1.4.7] - 2026-11-22
 
 ### Added
