@@ -182,11 +182,13 @@ for ($i = 0; $i < $dataCount; $i++) {
         : ($parsed['solar'] ?? null);
     $obis280     = $parsed['m280']  ?? null;
 
-    // TA0 sends raw kWh integers (scaler ignored by firmware SML parser).
+    // TA0, TE0 and TA1 send(t) raw kWh integers (scaler ignored by firmware SML parser).
     // Multiply by 10000 to convert kWh → 0.1 Wh, matching the DB unit.
-    if (($id === 'TA0' && $meter < 25000)  ||
-    ($id === 'TE0' && $meter < 5000)  ||
-    ($id === 'TA1' && $meter < 4500) )
+    // Below 1,000,000 a value can only be raw kWh: in 0.1 Wh it would mean a
+    // meter below 100 kWh. (The limits used to be just above the meter
+    // readings, e.g. 25000 for TA0; once TA0 passed 25,000 kWh on 2026-11-14
+    // its raw values were stored as is and rejected as meter_rollback.)
+    if (in_array($id, ['TA0', 'TE0', 'TA1'], true) && $meter < 1000000)
         {
             $meter *= 10000;
             if ($obis280 !== null) $obis280 *= 10000;
